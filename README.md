@@ -1,6 +1,6 @@
 # MRSuite
 
-The MRSuite project is an open-source, modular framework that brings together tools for data handling, signal processing, machine learning, and reproducible reporting in a modular and extensible ecosystem.
+The MRSuite project is an open-source, modular framework for magnetic resonance spectroscopy (MRS) that brings together tools for data handling, signal processing, machine learning, and reproducible reporting in a modular and extensible ecosystem.
 
 
 ## Project Status

@@ -10,16 +10,18 @@ MRSuite is currently in active development. Core architecture and modular interf
 
 ## Overview
 
-MRSuite is designed to support the full MRS workflow, from raw data preprocessing to advanced model-based analysis. It emphasizes:
+MRSuite is designed to support the full MRS workflow, from raw data processing to advanced analysis. It is built around the following core principles:
 - **Modularity**: Each processing and analysis step is encapsulated in reusable, interchangeable modules.
-- **Flexibility**: Easily integrate custom algorithms, models, and workflows also from external coding languages.
-- **Scalability**: Efficiently handle large datasets and complex analyses.
-- **Extensibility**: Easily add new modules and functionalities, by following the established module interface.
-- **Reproducibility**: Standardized interfaces and reporting tools ensure consistent, transparent documentation.
-- **Benchmarking**: Tools for evaluating various aspects of performance across datasets and methods.
+- **Flexibility**: Custom algorithms, models, and external-language tools can be easily integrated.
+- **Scalability**: Capable of handling large datasets and computationally intensive workflows.
+- **Extensibility**: New modules and features can be added by following a consistent interface.
+- **Reproducibility**: Standardized interfaces and reporting tools ensure transparent, consistent documentation.
+- **Benchmarking**: Built-in tools allow for systematic evaluation across datasets and methods.
 - **Community-Driven**: Open-source development encourages contributions and collaboration.
 
+
 ## Key Components
+
 ### Processing Pipeline
 A modular pipeline for preprocessing MRS data, including:
 - **Data Import**: Load data from various formats.

@@ -44,19 +44,20 @@ class Pipeline():
     #**********************#
     #   run the pipeline   #
     #**********************#
-    def run(self, data):
+    def run(self, data, water=None):
         """
         Run the pipeline on the provided data.
 
         Parameters:
             data: Input data to be processed by the pipeline.
+            water: Optional water reference data, if required by the modules.
 
         Returns:
             Processed data after passing through all modules.
         """
         for module in self.modules:
             if hasattr(module, 'forward'):
-                data = module.forward(data)
+                data = module.forward(data, water=water)
             else:
                 raise AttributeError(f"Module {module.__class__.__name__} does not have a "
                                      f"'forward' method.")

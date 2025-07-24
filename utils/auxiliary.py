@@ -20,7 +20,7 @@ import pandas as pd
 #****************************************************#
 #   load ISMRM2016 fitting challenge concentration   #
 #****************************************************#
-def load_ISMRM2016_challenge_concentrations(path2conc):
+def load_ISMRM2016_challenge_concs(path2conc):
     """
     Load the ground truth concentrations of the ISMRM 2016 fitting challenge,
     specifically a list of concentrations from an EXCEL file

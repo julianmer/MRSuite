@@ -42,17 +42,34 @@ class Transform():
         pass
 
 
-    #**********************#
-    #   forward method    #
-    #**********************#
-    def forward(self, data):
+    #*************************#
+    #   make class callable   #
+    #*************************#
+    def __call__(self, data, water=None):
         """
-        Apply the transformation to the provided data.
+        Make the Transform class callable.
 
         Parameters:
             data: Input data to be transformed.
 
         Returns:
             Transformed data.
+        """
+        return self.forward(data, water=water)
+
+
+    #**********************#
+    #   forward method    #
+    #**********************#
+    def forward(self, data, water=None):
+        """
+        Apply the transformation to the provided data.
+
+        Parameters:
+            data: Input data to be transformed.
+            water: Optional water reference data, if required by the transformation.
+
+        Returns:
+            Transformed data (and optionally water reference data).
         """
         raise NotImplementedError("The forward method must be implemented in subclasses.")

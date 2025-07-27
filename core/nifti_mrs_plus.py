@@ -68,14 +68,35 @@ class NIfTI_MRS_Plus():
         # validate all elements are NIfTI_MRS instances
         if not all(isinstance(n, nifti_mrs.NIFTI_MRS) for n in nifti_list):
             raise TypeError("All elements must be instances of NIFTI_MRS.")
-
         return cls(nifti_list)
+
+
+    #*************************#
+    #   get shape of tensor   #
+    #*************************#
+    @property
+    def shape(self):
+        """
+        Return shape of the batched tensor.
+        """
+        return (len(self.nifti_list),) + self.nifti_list[0].shape
+
+
+    #********************#
+    #   dimension tags   #
+    #********************#
+    @property
+    def dim_tags(self):
+        """
+        Return dimension tags from the first subject.
+        """
+        return self.nifti_list[0].dim_tags
 
 
     #***********************#
     #   tensor conversion   #
     #***********************#
-    def to_tensor(self):
+    def numpy(self):
         """
         Return batched tensor of shape [B, ...] where B = number of subjects.
         """
@@ -87,7 +108,7 @@ class NIfTI_MRS_Plus():
     #*********************#
     #   list conversion   #
     #*********************#
-    def to_list(self):
+    def list(self):
         """
         Return list of NIFTI_MRS objects, applying updated header if needed.
         """
@@ -95,26 +116,6 @@ class NIfTI_MRS_Plus():
             for nifti in self.nifti_list:
                 nifti.hdr_ext = deepcopy(self._updated_hdr_ext)
         return self.nifti_list
-
-
-    #*************************#
-    #   get shape of tensor   #
-    #*************************#
-    def shape(self):
-        """
-        Return shape of the batched tensor.
-        """
-        return (len(self.nifti_list),) + self.nifti_list[0].shape
-
-
-    #********************#
-    #   dimension tags   #
-    #********************#
-    def get_dim_tags(self):
-        """
-        Return dimension tags from the first subject.
-        """
-        return self.nifti_list[0].dim_tags
 
 
     #**********************#

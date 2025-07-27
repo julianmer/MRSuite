@@ -57,8 +57,8 @@ class Pipeline():
         """
         for module in self.modules:
             if hasattr(module, 'forward'):
-                data = module.forward(data, water=water)
+                data, water = module.forward(data, water=water)
             else:
                 raise AttributeError(f"Module {module.__class__.__name__} does not have a "
                                      f"'forward' method.")
-        return data
+        return data, water

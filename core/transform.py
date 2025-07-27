@@ -58,9 +58,9 @@ class Transform():
         return self.forward(data, water=water)
 
 
-    #**********************#
-    #   forward method    #
-    #**********************#
+    #********************#
+    #   forward method   #
+    #********************#
     def forward(self, data, water=None):
         """
         Apply the transformation to the provided data.

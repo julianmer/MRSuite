@@ -104,3 +104,4 @@ if __name__ == "__main__":
     processed_data, processed_water = pipeline.run(data, water)
 
     print(processed_data.dim_tags)
+    print(processed_data[0])

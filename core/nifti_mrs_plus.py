@@ -52,6 +52,23 @@ class NIfTI_MRS_Plus():
 
 
     #*************************#
+    #   make class callable   #
+    #*************************#
+    def __call__(self, *args, **kwargs):
+        """
+        Make the NIfTI_MRS_Plus class callable, allowing it to be used as a function.
+
+        Parameters:
+            *args: Positional arguments for the NIfTI_MRS_Plus object.
+            **kwargs: Keyword arguments for the NIfTI_MRS_Plus object.
+
+        Returns:
+            NIfTI_MRS_Plus: An instance of the class.
+        """
+        return self.from_nifti_list(*args, **kwargs)
+
+
+    #*************************#
     #   list initialization   #
     #*************************#
     @classmethod
@@ -129,3 +146,45 @@ class NIfTI_MRS_Plus():
         for nifti in self.nifti_list:
             nifti.hdr_ext = deepcopy(ref_hdr)
         self._updated_hdr_ext = ref_hdr
+
+
+    #***********************#
+    #   iteration support   #
+    #***********************#
+    def __iter__(self):
+        """
+        Allow iteration over the nifti_list directly from the NIfTI_MRS_Plus object.
+
+        Returns:
+            Iterator over the NIFTI_MRS objects in the nifti_list.
+        """
+        return iter(self.nifti_list)
+
+
+    #*************************#
+    #   indexing and length   #
+    #*************************#
+    def __getitem__(self, index):
+        """
+        Allow indexing into the nifti_list directly from the NIfTI_MRS_Plus object.
+
+        Parameters:
+            index (int): Index of the NIFTI_MRS object to retrieve.
+
+        Returns:
+            NIFTI_MRS: The NIFTI_MRS object at the specified index.
+        """
+        return self.nifti_list[index]
+
+
+    #*************************#
+    #   indexing and length   #
+    #*************************#
+    def __len__(self):
+        """
+        Return the number of NIFTI_MRS elements in the batch.
+
+        Returns:
+            int: The number of NIFTI_MRS objects in the nifti_list.
+        """
+        return len(self.nifti_list)

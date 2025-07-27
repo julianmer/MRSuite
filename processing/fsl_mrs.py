@@ -22,7 +22,7 @@ from fsl_mrs.utils.mrs_io import read_FID
 
 from nifti_mrs.nifti_mrs import NIFTI_MRS
 
-# ownn
+# own
 from core.nifti_mrs_plus import NIfTI_MRS_Plus
 from core.transform import Transform
 
@@ -276,5 +276,8 @@ class FSL_CoilCombine(FSL_Transform):
 
         Parameters:
             water_list (list): List of NIFTI_MRS objects representing water references.
+
+        Returns:
+            None: The method modifies the internal state of the class to store the averaged references.
         """
         self._reference = [self._maybe_average(water_list[i]) for i in range(len(water_list))]

@@ -22,6 +22,8 @@ from fsl_mrs.utils.mrs_io import read_FID
 
 from nifti_mrs.nifti_mrs import NIFTI_MRS
 
+from typing import List, Optional
+
 # own
 from core.nifti_mrs_plus import NIfTI_MRS_Plus
 from core.transform import Transform
@@ -39,10 +41,8 @@ from core.transform import Transform
 #**************************************************************************************************#
 class FSL_Transform(Transform):
 
-    #****************************#
-    #   general initialization   #
-    #****************************#
-    def __init__(self, verbose=False, conjugate=False, apply_to_water=True):
+    def __init__(self, verbose: bool = False, conjugate: bool = False,
+                 apply_to_water: bool = True) -> None:
         """
         Initialize the FSL_Transform with optional parameters.
 
@@ -56,11 +56,7 @@ class FSL_Transform(Transform):
         self.conjugate = conjugate
         self.apply_to_water = apply_to_water
 
-
-    #****************************************#
-    #   forward method on single NIfTI_MRS   #
-    #****************************************#
-    def forward_single(self, nifti_obj, idx):
+    def forward_single(self, nifti_obj: NIFTI_MRS, idx: int) -> NIFTI_MRS:
         """
         Apply the transformation to a single NIfTI_MRS object.
 
@@ -73,11 +69,7 @@ class FSL_Transform(Transform):
         """
         raise NotImplementedError("Subclasses must implement forward_single.")
 
-
-    #*****************************************#
-    #   process a list of NIfTI_MRS objects   #
-    #*****************************************#
-    def process_list(self, items, name="data"):
+    def process_list(self, items: List[NIFTI_MRS], name: str = "data") -> List[NIFTI_MRS]:
         """
         Process a list of NIfTI_MRS objects, applying conjugation if specified.
 
@@ -92,11 +84,8 @@ class FSL_Transform(Transform):
         items = self._maybe_conjugate(items, name)
         return [self.forward_single(x, idx=i) for i, x in enumerate(items)]
 
-
-    #********************#
-    #   forward method   #
-    #********************#
-    def forward(self, data, water=None):
+    def forward(self, data: NIfTI_MRS_Plus, water: Optional[NIfTI_MRS_Plus] = None) \
+            -> (NIfTI_MRS_Plus, Optional[NIfTI_MRS_Plus]):
         """
         Apply the transformation to the provided data and optional water reference.
 
@@ -114,11 +103,7 @@ class FSL_Transform(Transform):
         if water_out is not None: water_out = NIfTI_MRS_Plus.from_nifti_list(water_out)
         return data_out, water_out
 
-
-    #*********************#
-    #   utility methods   #
-    #*********************#
-    def _vprint(self, msg):
+    def _vprint(self, msg: str):
         """
         Print a message if verbose mode is enabled.
 
@@ -128,7 +113,7 @@ class FSL_Transform(Transform):
         if self.verbose:
             print(f"[FSL_Transform]: {msg}")
 
-    def _maybe_listify(self, obj, name="data"):
+    def _maybe_listify(self, obj: NIfTI_MRS_Plus, name: str = "data") -> List[NIFTI_MRS]:
         """
         Ensure the input is a list of NIFTI_MRS objects or has a .list() method.
         If the input is None, return an empty list.
@@ -153,7 +138,7 @@ class FSL_Transform(Transform):
             raise TypeError(f"All elements in {name} must be instances of NIFTI_MRS.")
         return obj
 
-    def _maybe_conjugate(self, items, name="data"):
+    def _maybe_conjugate(self, items: List[NIFTI_MRS], name: str = "data") -> List[NIFTI_MRS]:
         """
         Apply conjugation to the items if specified.
 
@@ -181,10 +166,8 @@ class FSL_Transform(Transform):
 #**************************************************************************************************#
 class FSL_CoilCombine(FSL_Transform):
 
-    #****************************#
-    #   general initialization   #
-    #****************************#
-    def __init__(self, verbose=False, conjugate=False, apply_to_water=True, use_reference=True):
+    def __init__(self, verbose: bool = False, conjugate: bool = False,
+                 apply_to_water: bool = True, use_reference: bool = True) -> None:
         """
         Initialize the FSL_CoilCombine with optional parameters.
 
@@ -198,11 +181,7 @@ class FSL_CoilCombine(FSL_Transform):
         self.use_reference = use_reference
         self._reference = None
 
-
-    #****************************************#
-    #   forward method on single NIfTI_MRS   #
-    #****************************************#
-    def forward_single(self, nifti_obj, idx):
+    def forward_single(self, nifti_obj: NIFTI_MRS, idx: int) -> NIFTI_MRS:
         """
         Apply coil combination to a single NIfTI_MRS object.
 
@@ -221,15 +200,10 @@ class FSL_CoilCombine(FSL_Transform):
                                                                   if self._reference[idx] else ""))
         return nifti_mrs_proc.coilcombine(nifti_obj, reference=self._reference[idx] if self.use_reference else None)
 
-
-    #********************#
-    #   forward method   #
-    #********************#
-    def forward(self, data, water=None):
+    def forward(self, data: NIfTI_MRS_Plus, water: Optional[NIfTI_MRS_Plus] = None) \
+            -> (NIfTI_MRS_Plus, Optional[NIfTI_MRS_Plus]):
         """
         Apply coil combination to the provided data and optional water reference.
-        This method processes the data and water reference, applying coil combination
-        and optionally using a water reference for improved results.
 
         Parameters:
             data (list or NIFTI_MRS_Plus): Input data to be transformed.
@@ -249,11 +223,7 @@ class FSL_CoilCombine(FSL_Transform):
         if water_out is not None: water_out = NIfTI_MRS_Plus.from_nifti_list(water_out)
         return data_out, water_out
 
-
-    #*********************#
-    #   utility methods   #
-    #*********************#
-    def _maybe_average(self, nifti_obj):
+    def _maybe_average(self, nifti_obj: NIFTI_MRS) -> NIFTI_MRS:
         """
         Average over the dynamic or edit dimensions in the NIfTI_MRS object if they exist.
 
@@ -269,7 +239,7 @@ class FSL_CoilCombine(FSL_Transform):
                 nifti_obj = nifti_mrs_proc.average(nifti_obj, dim)
         return nifti_obj
 
-    def _prepare_reference(self, water_list):
+    def _prepare_reference(self, water_list: List[NIFTI_MRS]) -> None:
         """
         Prepare the water reference for coil combination by averaging over dynamic or edit dimensions.
         This method processes the water_list to create a reference for coil combination.

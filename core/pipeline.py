@@ -15,7 +15,11 @@
 #*************#
 #   imports   #
 #*************#
+from typing import List, Optional
 
+# own
+from core.nifti_mrs_plus import NIfTI_MRS_Plus
+from core.transform import Transform
 
 
 #**************************************************************************************************#
@@ -26,12 +30,9 @@
 # handles chaining of transformations.                                                             #
 #                                                                                                  #
 #**************************************************************************************************#
-class Pipeline():
+class Pipeline:
 
-    #****************************#
-    #   general initialization   #
-    #****************************#
-    def __init__(self, modules=None):
+    def __init__(self, modules: Optional[List[Transform]] = None) -> None:
         """
         Initialize the Pipeline with a list of modules.
 
@@ -40,11 +41,8 @@ class Pipeline():
         """
         self.modules = modules if modules is not None else []
 
-
-    #**********************#
-    #   run the pipeline   #
-    #**********************#
-    def run(self, data, water=None):
+    def run(self, data: NIfTI_MRS_Plus, water: Optional[NIfTI_MRS_Plus] = None) \
+            -> (NIfTI_MRS_Plus, Optional[NIfTI_MRS_Plus]):
         """
         Run the pipeline on the provided data.
 

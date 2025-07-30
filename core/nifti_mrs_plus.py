@@ -15,11 +15,14 @@
 #*************#
 #   imports   #
 #*************#
-from copy import deepcopy
 import numpy as np
+
+from copy import deepcopy
 
 from nifti_mrs import nifti_mrs
 from nifti_mrs.utils import modify_hdr_ext
+
+from typing import List, Iterator, Optional, Union
 
 
 
@@ -32,49 +35,37 @@ from nifti_mrs.utils import modify_hdr_ext
 # processing of MRS data.                                                                          #
 #                                                                                                  #
 #**************************************************************************************************#
-class NIfTI_MRS_Plus():
+class NIfTI_MRS_Plus:
 
-    #****************************#
-    #   general initialization   #
-    #****************************#
-    def __init__(self, *args, **kwargs):
-        """
-        Initialize the NIfTI_MRS_Plus object with data and header.
+    def __init__(self, nifti_list: List[nifti_mrs.NIFTI_MRS],
+                 *args: object, **kwargs: object) -> None:
+        """ Initialize the NIfTI_MRS_Plus object with data and header.
 
         Parameters:
+            nifti_listList (list): List of NIFTI_MRS objects to be combined.
             *args: Positional arguments for the NIfTI_MRS_Plus object.
             **kwargs: Keyword arguments for the NIfTI_MRS_Plus object.
         """
-        self.nifti_list = args[0] if args else []
+        self.nifti_list: List[nifti_mrs.NIFTI_MRS] = nifti_list
 
-        self._batched_data = None
-        self._updated_hdr_ext = None
+        self._batched_data: Optional[np.ndarray] = None
+        self._updated_hdr_ext: Optional[object] = None
 
-
-    #*************************#
-    #   make class callable   #
-    #*************************#
-    def __call__(self, *args, **kwargs):
-        """
-        Make the NIfTI_MRS_Plus class callable, allowing it to be used as a function.
-
-        Parameters:
-            *args: Positional arguments for the NIfTI_MRS_Plus object.
-            **kwargs: Keyword arguments for the NIfTI_MRS_Plus object.
-
-        Returns:
-            NIfTI_MRS_Plus: An instance of the class.
-        """
+    def __call__(self, *args: object, **kwargs: object) -> "NIfTI_MRS_Plus":
+        """ Make the NIfTI_MRS_Plus class callable. """
         return self.from_nifti_list(*args, **kwargs)
 
+    def __getitem__(self, index: int) -> nifti_mrs.NIFTI_MRS:
+        """ Allow indexing into the nifti_list directly from the NIfTI_MRS_Plus object. """
+        return self.nifti_list[index]
 
-    #*************************#
-    #   list initialization   #
-    #*************************#
+    def __len__(self) -> int:
+        """ Return the number of NIFTI_MRS elements in the batch. """
+        return len(self.nifti_list)
+
     @classmethod
-    def from_nifti_list(cls, nifti_list):
-        """
-        Create an instance of NIfTI_MRS_Plus from a list of NIfTI_MRS objects.
+    def from_nifti_list(cls, nifti_list: List[nifti_mrs.NIFTI_MRS]) -> "NIfTI_MRS_Plus":
+        """ Create an instance of NIfTI_MRS_Plus from a list of NIfTI_MRS objects.
 
         Parameters:
             nifti_list (list): List of NIfTI_MRS objects to be combined.
@@ -87,104 +78,39 @@ class NIfTI_MRS_Plus():
             raise TypeError("All elements must be instances of NIFTI_MRS.")
         return cls(nifti_list)
 
+    def sync_headers(self, source_idx: int = 0) -> None:
+        """Sync headers from one subject to all others.
 
-    #*************************#
-    #   get shape of tensor   #
-    #*************************#
-    @property
-    def shape(self):
-        """
-        Return shape of the batched tensor.
-        """
-        return (len(self.nifti_list),) + self.nifti_list[0].shape
+        Updates all headers to match the header of the subject at 'source_idx'.
 
-
-    #********************#
-    #   dimension tags   #
-    #********************#
-    @property
-    def dim_tags(self):
+        Parameters:
+            source_idx (int): Index of the reference subject.
         """
-        Return dimension tags from the first subject.
-        """
-        return self.nifti_list[0].dim_tags
-
-
-    #***********************#
-    #   tensor conversion   #
-    #***********************#
-    def numpy(self):
-        """
-        Return batched tensor of shape [B, ...] where B = number of subjects.
-        """
-        if self._batched_data is None:
-            self._batched_data = np.stack([n[:].conj() for n in self.nifti_list], axis=0)
-        return self._batched_data
-
-
-    #*********************#
-    #   list conversion   #
-    #*********************#
-    def list(self):
-        """
-        Return list of NIFTI_MRS objects, applying updated header if needed.
-        """
-        if self._updated_hdr_ext is not None:
-            for nifti in self.nifti_list:
-                nifti.hdr_ext = deepcopy(self._updated_hdr_ext)
-        return self.nifti_list
-
-
-    #**********************#
-    #   header utilities   #
-    #**********************#
-    def sync_headers(self, source_idx=0):
-        """
-        Manually sync headers from one subject to all others.
-        """
+        # TODO: check usage of this method...
         ref_hdr = deepcopy(self.nifti_list[source_idx].hdr_ext)
         for nifti in self.nifti_list:
             nifti.hdr_ext = deepcopy(ref_hdr)
         self._updated_hdr_ext = ref_hdr
 
+    def numpy(self) -> np.ndarray:
+        """ Return batched tensor of shape [B, ...] where B = number of subjects. """
+        if self._batched_data is None:
+            self._batched_data = np.stack([n[:].conj() for n in self.nifti_list], axis=0)
+        return self._batched_data
 
-    #***********************#
-    #   iteration support   #
-    #***********************#
-    def __iter__(self):
-        """
-        Allow iteration over the nifti_list directly from the NIfTI_MRS_Plus object.
+    def list(self) -> List[nifti_mrs.NIFTI_MRS]:
+        """ Return list of NIFTI_MRS objects, applying updated header if needed. """
+        if self._updated_hdr_ext is not None:
+            for nifti in self.nifti_list:
+                nifti.hdr_ext = deepcopy(self._updated_hdr_ext)
+        return self.nifti_list
 
-        Returns:
-            Iterator over the NIFTI_MRS objects in the nifti_list.
-        """
-        return iter(self.nifti_list)
+    @property
+    def shape(self) -> tuple[int, ...]:
+        """ Return shape of the batched tensor. """
+        return (len(self.nifti_list),) + self.nifti_list[0].shape
 
-
-    #*************************#
-    #   indexing and length   #
-    #*************************#
-    def __getitem__(self, index):
-        """
-        Allow indexing into the nifti_list directly from the NIfTI_MRS_Plus object.
-
-        Parameters:
-            index (int): Index of the NIFTI_MRS object to retrieve.
-
-        Returns:
-            NIFTI_MRS: The NIFTI_MRS object at the specified index.
-        """
-        return self.nifti_list[index]
-
-
-    #*************************#
-    #   indexing and length   #
-    #*************************#
-    def __len__(self):
-        """
-        Return the number of NIFTI_MRS elements in the batch.
-
-        Returns:
-            int: The number of NIFTI_MRS objects in the nifti_list.
-        """
-        return len(self.nifti_list)
+    @property
+    def dim_tags(self) -> object:
+        """ Return dimension tags from the first subject. """
+        return self.nifti_list[0].dim_tags

@@ -14,7 +14,10 @@
 #*************#
 #   imports   #
 #*************#
+from typing import Optional
 
+# own
+from core.nifti_mrs_plus import NIfTI_MRS_Plus
 
 
 #**************************************************************************************************#
@@ -26,12 +29,9 @@
 #  method for processing.                                                                          #
 #                                                                                                  #
 #**************************************************************************************************#
-class Transform():
+class Transform:
 
-    #****************************#
-    #   general initialization   #
-    #****************************#
-    def __init__(self, *args, **kwargs):
+    def __init__(self,  *args: object, **kwargs: object) -> None:
         """
         Initialize the Transform with optional arguments.
 
@@ -41,27 +41,13 @@ class Transform():
         """
         pass
 
-
-    #*************************#
-    #   make class callable   #
-    #*************************#
-    def __call__(self, data, water=None):
-        """
-        Make the Transform class callable.
-
-        Parameters:
-            data: Input data to be transformed.
-
-        Returns:
-            Transformed data.
-        """
+    def __call__(self, data: NIfTI_MRS_Plus,
+                 water: Optional[NIfTI_MRS_Plus] = None) -> NIfTI_MRS_Plus:
+        """ Make the Transform class callable. """
         return self.forward(data, water=water)
 
-
-    #********************#
-    #   forward method   #
-    #********************#
-    def forward(self, data, water=None):
+    def forward(self, data: NIfTI_MRS_Plus, water: Optional[NIfTI_MRS_Plus] = None) \
+            -> (NIfTI_MRS_Plus, Optional[NIfTI_MRS_Plus]):
         """
         Apply the transformation to the provided data.
 

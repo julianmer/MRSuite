@@ -43,7 +43,9 @@ class Transform:
 
     def __call__(self, data: NIfTI_MRS_Plus,
                  water: Optional[NIfTI_MRS_Plus] = None) -> NIfTI_MRS_Plus:
-        """ Make the Transform class callable. """
+        """
+        Make the Transform class callable.
+        """
         return self.forward(data, water=water)
 
     def forward(self, data: NIfTI_MRS_Plus, water: Optional[NIfTI_MRS_Plus] = None) \

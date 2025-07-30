@@ -38,7 +38,8 @@ class NIfTI_MRS_Plus:
 
     def __init__(self, nifti_list: List[nifti_mrs.NIFTI_MRS],
                  *args: object, **kwargs: object) -> None:
-        """ Initialize the NIfTI_MRS_Plus object with data and header.
+        """
+        Initialize the NIfTI_MRS_Plus object with data and header.
 
         Parameters:
             nifti_listList (list): List of NIFTI_MRS objects to be combined.
@@ -51,20 +52,27 @@ class NIfTI_MRS_Plus:
         self._updated_hdr_ext: Optional[object] = None
 
     def __call__(self, *args: object, **kwargs: object) -> "NIfTI_MRS_Plus":
-        """ Make the NIfTI_MRS_Plus class callable. """
+        """
+        Make the NIfTI_MRS_Plus class callable.
+        """
         return self.from_nifti_list(*args, **kwargs)
 
     def __getitem__(self, index: int) -> nifti_mrs.NIFTI_MRS:
-        """ Allow indexing into the nifti_list directly from the NIfTI_MRS_Plus object. """
+        """
+        Allow indexing into the nifti_list directly from the NIfTI_MRS_Plus object.
+        """
         return self.nifti_list[index]
 
     def __len__(self) -> int:
-        """ Return the number of NIFTI_MRS elements in the batch. """
+        """
+        Return the number of NIFTI_MRS elements in the batch.
+        """
         return len(self.nifti_list)
 
     @classmethod
     def from_nifti_list(cls, nifti_list: List[nifti_mrs.NIFTI_MRS]) -> "NIfTI_MRS_Plus":
-        """ Create an instance of NIfTI_MRS_Plus from a list of NIfTI_MRS objects.
+        """
+        Create an instance of NIfTI_MRS_Plus from a list of NIfTI_MRS objects.
 
         Parameters:
             nifti_list (list): List of NIfTI_MRS objects to be combined.
@@ -78,7 +86,8 @@ class NIfTI_MRS_Plus:
         return cls(nifti_list)
 
     def sync_headers(self, source_idx: int = 0) -> None:
-        """Sync headers from one subject to all others.
+        """
+        Sync headers from one subject to all others.
 
         Updates all headers to match the header of the subject at 'source_idx'.
 
@@ -92,13 +101,17 @@ class NIfTI_MRS_Plus:
         self._updated_hdr_ext = ref_hdr
 
     def numpy(self) -> np.ndarray:
-        """ Return batched tensor of shape [B, ...] where B = number of subjects. """
+        """
+        Return batched tensor of shape [B, ...] where B = number of subjects.
+        """
         if self._batched_data is None:
             self._batched_data = np.stack([n[:].conj() for n in self.nifti_list], axis=0)
         return self._batched_data
 
     def list(self) -> List[nifti_mrs.NIFTI_MRS]:
-        """ Return list of NIFTI_MRS objects, applying updated header if needed. """
+        """
+        Return list of NIFTI_MRS objects, applying updated header if needed.
+        """
         if self._updated_hdr_ext is not None:
             for nifti in self.nifti_list:
                 nifti.hdr_ext = deepcopy(self._updated_hdr_ext)
@@ -106,10 +119,14 @@ class NIfTI_MRS_Plus:
 
     @property
     def shape(self) -> tuple[int, ...]:
-        """ Return shape of the batched tensor. """
+        """
+        Return shape of the batched tensor.
+        """
         return (len(self.nifti_list),) + self.nifti_list[0].shape
 
     @property
     def dim_tags(self) -> object:
-        """ Return dimension tags from the first subject. """
+        """
+        Return dimension tags from the first subject.
+        """
         return self.nifti_list[0].dim_tags

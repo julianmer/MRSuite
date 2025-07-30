@@ -29,7 +29,6 @@ from core.nifti_mrs_plus import NIfTI_MRS_Plus
 from core.transform import Transform
 
 
-
 #**************************************************************************************************#
 #                                       Class FSL_Transform                                        #
 #**************************************************************************************************#
@@ -156,7 +155,6 @@ class FSL_Transform(Transform):
         return items
 
 
-
 #**************************************************************************************************#
 #                                       Class FSL_CoilCombine                                      #
 #**************************************************************************************************#
@@ -198,7 +196,8 @@ class FSL_CoilCombine(FSL_Transform):
 
         self._vprint(f"[item {idx}] Applying coil combination" + (" with reference"
                                                                   if self._reference[idx] else ""))
-        return nifti_mrs_proc.coilcombine(nifti_obj, reference=self._reference[idx] if self.use_reference else None)
+        return nifti_mrs_proc.coilcombine(
+            nifti_obj, reference=self._reference[idx] if self.use_reference else None)
 
     def forward(self, data: NIfTI_MRS_Plus, water: Optional[NIfTI_MRS_Plus] = None) \
             -> (NIfTI_MRS_Plus, Optional[NIfTI_MRS_Plus]):
@@ -241,13 +240,13 @@ class FSL_CoilCombine(FSL_Transform):
 
     def _prepare_reference(self, water_list: List[NIFTI_MRS]) -> None:
         """
-        Prepare the water reference for coil combination by averaging over dynamic or edit dimensions.
-        This method processes the water_list to create a reference for coil combination.
+        Prepare the reference for coil combination by averaging over dynamic or edit dimensions.
 
         Parameters:
             water_list (list): List of NIFTI_MRS objects representing water references.
 
         Returns:
-            None: The method modifies the internal state of the class to store the averaged references.
+            None: The method modifies the internal state of the class to store the
+                  averaged references.
         """
         self._reference = [self._maybe_average(water_list[i]) for i in range(len(water_list))]

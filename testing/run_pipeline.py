@@ -169,13 +169,16 @@ def main():
         raise ValueError("Unsupported dataset. Choose 'ismrm' or 'openneuro'.")
 
     pipeline = Pipeline(modules=[
-        FSL_CoilCombine()
+        FSL_CoilCombine(),
+        FSL_Align(),
+        FSL_Average(),
     ])
 
     processed_data, processed_water = pipeline.run(data, water)
 
     print("Processing complete.")
     print(processed_data.dim_tags)
+    print(processed_water.shape)
     print(processed_data[0].header)
     print(processed_data[0].hdr_ext)
 
@@ -190,5 +193,7 @@ if __name__ == "__main__":
     # Example usage(s):
     # python -m testing.run_pipeline --dataset ismrm --test_size 10
     # python -m testing.run_pipeline --dataset openneuro --test_size 10 --selection herculespress
+
+    # TODO: Check functionality of FSL_CoilCombine with already combined data.
 
     main()

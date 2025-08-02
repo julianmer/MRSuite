@@ -8,6 +8,10 @@
 #                                                                                                  #
 # Purpose: Defines the interface and transformation methods for FSL-MRS processing and analysis.   #
 #                                                                                                  #
+# Mention: Clarke WT, Stagg CJ, Jbabdi S. FSL-MRS: An end-to-end spectroscopy analysis package.    #
+#          Magnetic Resonance in Medicine 2021;85:2950–2964                                        #
+#          doi: https://doi.org/10.1002/mrm.28630.                                                 #
+#                                                                                                  #
 ####################################################################################################
 
 
@@ -250,3 +254,81 @@ class FSL_CoilCombine(FSL_Transform):
                   averaged references.
         """
         self._reference = [self._maybe_average(water_list[i]) for i in range(len(water_list))]
+
+
+#**************************************************************************************************#
+#                                         Class FSL_Average                                        #
+#**************************************************************************************************#
+#                                                                                                  #
+#  This class extends the FSL_Transform to provide averaging method for FSL-MRS data.              #
+#                                                                                                  #
+#**************************************************************************************************#
+class FSL_Average(FSL_Transform):
+
+    def __init__(self, verbose: bool = False, conjugate: bool = False,
+                 apply_to_water: bool = True, dim: str = 'DIM_DYN') -> None:
+        """
+        Initialize the FSL_Average with optional parameters.
+
+        Parameters:
+            verbose (bool): If True, print verbose messages during processing.
+            conjugate (bool): If True, apply conjugation to the data.
+            apply_to_water (bool): If True, apply the transformation to water reference as well.
+            dim (str): Dimension to average over, default is 'DIM_DYN'.
+        """
+        super().__init__(verbose=verbose, conjugate=conjugate, apply_to_water=apply_to_water)
+        self.dim = dim
+
+    def forward_single(self, nifti_obj: NIFTI_MRS, idx: int) -> NIFTI_MRS:
+        """
+        Apply averaging to a single NIfTI_MRS object.
+
+        Parameters:
+            nifti_obj (NIFTI_MRS): The NIFTI_MRS object to be transformed.
+            idx (int): Index of the item in the list for logging purposes.
+
+        Returns:
+            NIFTI_MRS: The averaged NIFTI_MRS object.
+        """
+        self._vprint(f"[item {idx}] Averaging over all dimensions")
+        return nifti_mrs_proc.average(nifti_obj, self.dim)
+
+
+#**************************************************************************************************#
+#                                         Class FSL_Align                                          #
+#**************************************************************************************************#
+#                                                                                                  #
+#  This class extends the FSL_Transform to align phase and frequency where there are multiple      #
+#  transients. Can be run across a dimension (specified by a tag), or all spectra stored in        #
+#  higher dimensions.                                                                              #
+#                                                                                                  #
+#**************************************************************************************************#
+class FSL_Align(FSL_Transform):
+
+    def __init__(self, verbose: bool = False, conjugate: bool = False,
+                 apply_to_water: bool = True, dim: str = 'DIM_DYN') -> None:
+        """
+        Initialize the FSL_Align with optional parameters.
+
+        Parameters:
+            verbose (bool): If True, print verbose messages during processing.
+            conjugate (bool): If True, apply conjugation to the data.
+            apply_to_water (bool): If True, apply the transformation to water reference as well.
+            dim (str): Dimension to align over or 'all', default is 'DIM_DYN'.
+        """
+        self.dim = dim
+        super().__init__(verbose=verbose, conjugate=conjugate, apply_to_water=apply_to_water)
+
+    def forward_single(self, nifti_obj: NIFTI_MRS, idx: int) -> NIFTI_MRS:
+        """
+        Align phase and frequency for a single NIfTI_MRS object.
+
+        Parameters:
+            nifti_obj (NIFTI_MRS): The NIFTI_MRS object to be transformed.
+            idx (int): Index of the item in the list for logging purposes.
+
+        Returns:
+            NIFTI_MRS: The aligned NIFTI_MRS object.
+        """
+        self._vprint(f"[item {idx}] Aligning phase and frequency")
+        return nifti_mrs_proc.align(nifti_obj, dim=self.dim)

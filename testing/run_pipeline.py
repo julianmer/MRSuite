@@ -2,9 +2,9 @@
 #                                         run_pipeline.py                                          #
 ####################################################################################################
 #                                                                                                  #
-# Authors:  J. P. Merkofer (j.p.merkofer@tue.nl)                                                   #
+# Authors: J. P. Merkofer (j.p.merkofer@tue.nl)                                                    #
 #                                                                                                  #
-# Created:  20/07/25                                                                               #
+# Created: 2025-07-25                                                                              #
 #                                                                                                  #
 # Purpose: Testing the pipline functionality. The script loads data, initializes the pipeline      #
 #          with desired modules, and runs the pipeline on the data.                                #
@@ -18,12 +18,13 @@
 import argparse
 import os
 
+# third-party
 from fsl_mrs.utils import mrs_io
 
 # own
 from core.nifti_mrs_plus import NIfTI_MRS_Plus
 from core.pipeline import Pipeline
-from processing.fsl_mrs import *
+from processing import fidA, fsl_mrs
 from utils.auxiliary import load_ISMRM2016_challenge_concs
 
 
@@ -34,7 +35,7 @@ def load_ISMRM2016_challenge_data(config: dict) -> (NIfTI_MRS_Plus, NIfTI_MRS_Pl
     """
     Load MRS data from the ISMRM 2016 fitting challenge.
 
-    Parameters:
+    Args:
         config (dict): Configuration dictionary containing paths and selection criteria.
 
     Returns:
@@ -66,7 +67,7 @@ def load_openneuro_data(config = dict) -> (NIfTI_MRS_Plus, NIfTI_MRS_Plus, None)
     """
     Load MRS data from the OpenNeuro dataset ds005371.
 
-    Parameters:
+    Args:
         config (dict): Configuration dictionary containing paths and selection criteria.
 
     Returns:
@@ -169,9 +170,11 @@ def main():
         raise ValueError("Unsupported dataset. Choose 'ismrm' or 'openneuro'.")
 
     pipeline = Pipeline(modules=[
-        FSL_CoilCombine(),
-        FSL_Align(),
-        FSL_Average(),
+        fsl_mrs.FSL_CoilCombine(verbose=True),
+        fsl_mrs.FSL_Align(verbose=True),
+        fsl_mrs.FSL_Average(verbose=True),
+        # fidA.FIDA_EddyCorrect(),
+
     ])
 
     processed_data, processed_water = pipeline.run(data, water)

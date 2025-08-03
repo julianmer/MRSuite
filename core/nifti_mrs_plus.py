@@ -2,9 +2,9 @@
 #                                        nifti_mrs_plus.py                                         #
 ####################################################################################################
 #                                                                                                  #
-# Authors:  J. P. Merkofer (j.p.merkofer@tue.nl)                                                   #
+# Authors: J. P. Merkofer (j.p.merkofer@tue.nl)                                                    #
 #                                                                                                  #
-# Created:  20/07/25                                                                               #
+# Created: 2025-07-25                                                                              #
 #                                                                                                  #
 # Purpose: Handles batch aware NIfTI_MRS data, extending the NIfTI_MRS class to support a          #
 #          batch/subjects dimension.                                                               #
@@ -15,14 +15,13 @@
 #*************#
 #   imports   #
 #*************#
+from copy import deepcopy
+from typing import List, Optional
+
+# third-party
 import numpy as np
 
-from copy import deepcopy
-
 from nifti_mrs import nifti_mrs
-from nifti_mrs.utils import modify_hdr_ext
-
-from typing import List, Iterator, Optional, Union
 
 
 #**************************************************************************************************#
@@ -35,14 +34,28 @@ from typing import List, Iterator, Optional, Union
 #                                                                                                  #
 #**************************************************************************************************#
 class NIfTI_MRS_Plus:
+    """
+    Handles batch-aware NIfTI_MRS data.
+
+    This class wraps multiple 'nifti_mrs.NIFTI_MRS' objects into a batched representation.
+    It provides access to the full batched tensor, header synchronization, and intuitive indexing.
+
+    Attributes:
+        nifti_list (List[nifti_mrs.NIFTI_MRS]): List of individual subject MRS objects.
+        _batched_data (Optional[np.ndarray]): Cached batched data.
+        _updated_hdr_ext (Optional[object]): Cached shared header extension.
+
+    Raises:
+        TypeError: If any element in the list is not a NIFTI_MRS instance.
+    """
 
     def __init__(self, nifti_list: List[nifti_mrs.NIFTI_MRS],
                  *args: object, **kwargs: object) -> None:
         """
         Initialize the NIfTI_MRS_Plus object with data and header.
 
-        Parameters:
-            nifti_listList (list): List of NIFTI_MRS objects to be combined.
+        Args:
+            nifti_list (List[NIFTI_MRS]): List of NIFTI_MRS objects to be combined.
             *args: Positional arguments for the NIfTI_MRS_Plus object.
             **kwargs: Keyword arguments for the NIfTI_MRS_Plus object.
         """
@@ -74,7 +87,7 @@ class NIfTI_MRS_Plus:
         """
         Create an instance of NIfTI_MRS_Plus from a list of NIfTI_MRS objects.
 
-        Parameters:
+        Args:
             nifti_list (list): List of NIfTI_MRS objects to be combined.
 
         Returns:
@@ -85,20 +98,19 @@ class NIfTI_MRS_Plus:
             raise TypeError("All elements must be instances of NIFTI_MRS.")
         return cls(nifti_list)
 
-    def sync_headers(self, source_idx: int = 0) -> None:
+    @property
+    def shape(self) -> tuple[int, ...]:
         """
-        Sync headers from one subject to all others.
-
-        Updates all headers to match the header of the subject at 'source_idx'.
-
-        Parameters:
-            source_idx (int): Index of the reference subject.
+        Return shape of the batched tensor.
         """
-        # TODO: check usage of this method...
-        ref_hdr = deepcopy(self.nifti_list[source_idx].hdr_ext)
-        for nifti in self.nifti_list:
-            nifti.hdr_ext = deepcopy(ref_hdr)
-        self._updated_hdr_ext = ref_hdr
+        return (len(self.nifti_list),) + self.nifti_list[0].shape
+
+    @property
+    def dim_tags(self) -> object:
+        """
+        Return dimension tags from the first subject.
+        """
+        return self.nifti_list[0].dim_tags
 
     def numpy(self) -> np.ndarray:
         """
@@ -117,16 +129,17 @@ class NIfTI_MRS_Plus:
                 nifti.hdr_ext = deepcopy(self._updated_hdr_ext)
         return self.nifti_list
 
-    @property
-    def shape(self) -> tuple[int, ...]:
+    def sync_headers(self, source_idx: int = 0) -> None:
         """
-        Return shape of the batched tensor.
-        """
-        return (len(self.nifti_list),) + self.nifti_list[0].shape
+        Sync headers from one subject to all others.
 
-    @property
-    def dim_tags(self) -> object:
+        Updates all headers to match the header of the subject at 'source_idx'.
+
+        Args:
+            source_idx (int): Index of the reference subject.
         """
-        Return dimension tags from the first subject.
-        """
-        return self.nifti_list[0].dim_tags
+        # TODO: check usage of this method...
+        ref_hdr = deepcopy(self.nifti_list[source_idx].hdr_ext)
+        for nifti in self.nifti_list:
+            nifti.hdr_ext = deepcopy(ref_hdr)
+        self._updated_hdr_ext = ref_hdr

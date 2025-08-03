@@ -4,7 +4,7 @@
 #                                                                                                  #
 # Authors: J. P. Merkofer (j.p.merkofer@tue.nl)                                                    #
 #                                                                                                  #
-# Created: 22/07/25                                                                                #
+# Created: 2025-07-25                                                                              #
 #                                                                                                  #
 # Purpose: Some helpful functions are defined here.                                                #
 #                                                                                                  #
@@ -25,7 +25,7 @@ def load_ISMRM2016_challenge_concs(path2conc: str) -> dict:
     Load the ground truth concentrations of the ISMRM 2016 fitting challenge,
     specifically a list of concentrations from an EXCEL file
 
-    Parameters:
+    Args:
         path2conc (str): Path to the EXCEL file containing the concentrations.
 
     Returns:

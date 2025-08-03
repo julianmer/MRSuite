@@ -2,9 +2,9 @@
 #                                           pipeline.py                                            #
 ####################################################################################################
 #                                                                                                  #
-# Authors:  J. P. Merkofer (j.p.merkofer@tue.nl)                                                   #
+# Authors: J. P. Merkofer (j.p.merkofer@tue.nl)                                                    #
 #                                                                                                  #
-# Created:  20/07/25                                                                               #
+# Created: 2025-07-25                                                                              #
 #                                                                                                  #
 # Purpose: Manages the execution of a sequence of transformations on NIfTI_MRS+ objects,           #
 #          allowing for batch processing and analysis of MRS data in a streamlined manner.         #
@@ -31,12 +31,24 @@ from core.transform import Transform
 #                                                                                                  #
 #**************************************************************************************************#
 class Pipeline:
+    """
+    A class to manage a sequence of transformations (modules) applied to NIfTI_MRS_Plus data.
+
+    This class allows for the execution of multiple transformations in a defined order, enabling
+    complex processing pipelines for MRS data.
+
+    Attributes:
+        modules (List[Transform]): A list of transformation modules to be executed in sequence.
+
+    Raises:
+        AttributeError: If a module does not have a 'forward' method.
+    """
 
     def __init__(self, modules: Optional[List[Transform]] = None) -> None:
         """
         Initialize the Pipeline with a list of modules.
 
-        Parameters:
+        Args:
             modules (list): List of modules to be executed in the pipeline.
         """
         self.modules = modules if modules is not None else []
@@ -46,7 +58,7 @@ class Pipeline:
         """
         Run the pipeline on the provided data.
 
-        Parameters:
+        Args:
             data: Input data to be processed by the pipeline.
             water: Optional water reference data, if required by the modules.
 

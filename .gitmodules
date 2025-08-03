@@ -1,3 +1,6 @@
 [submodule "data/openneuro_ds005371"]
 	path = data/openneuro_ds005371
 	url = https://github.com/OpenNeuroDatasets/ds005371.git
+[submodule "dependencies/fidA"]
+	path = dependencies/fidA
+	url = https://github.com/CIC-methods/FID-A.git

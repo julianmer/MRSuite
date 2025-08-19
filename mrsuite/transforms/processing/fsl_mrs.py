@@ -71,16 +71,19 @@ class FSL_Transform(Transform):
         self.apply_to_water = apply_to_water
         self.kwargs = kwargs
 
-    def forward_single(self, nifti_obj: NIFTI_MRS, idx: int) -> NIFTI_MRS:
+    def forward_single(self, data: NIFTI_MRS, water: Optional[NIFTI_MRS] = None, idx: int = 0) \
+            -> Tuple[NIFTI_MRS, Optional[NIFTI_MRS]]:
         """
         Apply the transformation to a single NIfTI_MRS object.
 
         Args:
-            nifti_obj (NIFTI_MRS): The NIFTI_MRS object to be transformed.
+            data (NIFTI_MRS): The NIFTI_MRS object to be transformed.
+            water (Optional[NIFTI_MRS]): Optional water reference data to be transformed.
             idx (int): Index of the item in the list for logging purposes.
 
         Returns:
-            NIFTI_MRS: The transformed NIFTI_MRS object.
+            Tuple[NIFTI_MRS, Optional[NIFTI_MRS]]:
+            The transformed NIFTI_MRS object and optional water reference (if applicable).
         """
         raise NotImplementedError("Subclasses must implement forward_single.")
 
@@ -93,11 +96,11 @@ class FSL_Transform(Transform):
             name (str): Name of the items for logging purposes.
 
         Returns:
-            list: List of transformed NIFTI_MRS objects.
+            list: List of processed NIFTI_MRS objects.
         """
         items = self._maybe_listify(items, name)
         items = self._maybe_conjugate(items, name)
-        return [self.forward_single(x, idx=i) for i, x in enumerate(items)]
+        return items
 
     def forward(self, data: NIfTI_MRS_Plus, water: Optional[NIfTI_MRS_Plus] = None) \
             -> Tuple[NIfTI_MRS_Plus, Optional[NIfTI_MRS_Plus]]:
@@ -111,11 +114,22 @@ class FSL_Transform(Transform):
         Returns:
             tuple: Transformed data and water reference (if applicable).
         """
-        data_out = self.process_list(data, name="data")
+        data_list = self.process_list(data, name="data")
+        water_list = self.process_list(water, name="water")
+
+        data_out, water_out = [], []
+        for i, (d, w) in enumerate(zip(data_list, water_list)):
+            if not isinstance(d, NIFTI_MRS):
+                raise TypeError(f"Item {i} in data must be an instance of NIFTI_MRS.")
+            if water is not None and w is not None and not isinstance(w, NIFTI_MRS):
+                raise TypeError(f"Item {i} in water must be an instance of NIFTI_MRS.")
+
+            d, w = self.forward_single(d, w, idx=i)
+            data_out.append(d)
+            water_out.append(w)
+
         data_out = NIfTI_MRS_Plus.from_nifti_list(data_out)
-        if self.apply_to_water:
-            water_out = self.process_list(water, name="water") if water is not None else None
-            water_out = NIfTI_MRS_Plus.from_nifti_list(water_out) if water_out is not None else None
+        water_out = NIfTI_MRS_Plus.from_nifti_list(water_out)
         return data_out, water_out
 
     def _maybe_listify(self, obj: NIfTI_MRS_Plus, name: str = "data") -> List[NIFTI_MRS]:
@@ -201,53 +215,42 @@ class FSL_CoilCombine(FSL_Transform):
         super().__init__(verbose=verbose, conjugate=conjugate, apply_to_water=apply_to_water,
                          **kwargs)
         self.use_reference = use_reference
-        self._reference = None
 
-    def forward_single(self, nifti_obj: NIFTI_MRS, idx: int) -> NIFTI_MRS:
+    def forward_single(self, data: NIFTI_MRS, water: Optional[NIFTI_MRS] = None, idx: int = 0) \
+            -> Tuple[NIFTI_MRS, Optional[NIFTI_MRS]]:
         """
         Apply coil combination to a single NIfTI_MRS object.
 
         Args:
-            nifti_obj (NIFTI_MRS): The NIFTI_MRS object to be transformed.
+            data (NIFTI_MRS): The NIFTI_MRS object to be transformed.
+            water (Optional[NIFTI_MRS]): Optional water reference data to be transformed.
             idx (int): Index of the item in the list for logging purposes.
 
         Returns:
-            NIFTI_MRS: The transformed NIFTI_MRS object after coil combination.
+            Tuple[NIFTI_MRS, Optional[NIFTI_MRS]]:
+            The transformed NIFTI_MRS object after coil combination and optional water
+            reference (if applicable).
         """
-        if 'DIM_COIL' not in nifti_obj.dim_tags:
+        if 'DIM_COIL' not in data.dim_tags:
             self._vprint(f"[item {idx}] No DIM_COIL found — skipping coil combine.")
-            return nifti_obj
+            return data, water
 
+        ref = self._maybe_average(water, idx) if self.use_reference and water is not None else None
         self._vprint(f"[item {idx}] Applying coil combination" + (" with reference"
-                                                                  if self._reference[idx] else ""))
-        return nifti_mrs_proc.coilcombine(
-            data=nifti_obj,
-            reference=self._reference[idx] if self.use_reference else None,
+                                                                  if self.use_reference else ""))
+        data = nifti_mrs_proc.coilcombine(
+            data=data,
+            reference=ref if self.use_reference else None,
             **self.kwargs
         )
-
-    def forward(self, data: NIfTI_MRS_Plus, water: Optional[NIfTI_MRS_Plus] = None) \
-            -> Tuple[NIfTI_MRS_Plus, Optional[NIfTI_MRS_Plus]]:
-        """
-        Apply coil combination to the provided data and optional water reference.
-
-        Args:
-            data (list or NIFTI_MRS_Plus): Input data to be transformed.
-            water (list or NIFTI_MRS_Plus, optional): Optional water reference data.
-
-        Returns:
-            tuple: Transformed data and water reference (if applicable).
-        """
-        water_list = self._maybe_listify(water, name="water") if self.apply_to_water else []
-        if self.use_reference and water_list:
-            self._prepare_reference(water_list)
-
-        data_out = self.process_list(data, name="data")
-        data_out = NIfTI_MRS_Plus.from_nifti_list(data_out)
-        if self.apply_to_water:
-            water_out = self.process_list(water, name="water") if water is not None else None
-            water_out = NIfTI_MRS_Plus.from_nifti_list(water_out) if water_out is not None else None
-        return data_out, water_out
+        if self.apply_to_water and water is not None:
+            self._vprint(f"[item {idx}] Applying coil combination to water reference")
+            water = nifti_mrs_proc.coilcombine(
+                data=water,
+                reference=ref if self.use_reference else None,
+                **self.kwargs
+            )
+        return data, water
 
     def _maybe_average(self, nifti_obj: NIFTI_MRS, idx: int) -> NIFTI_MRS:
         """
@@ -265,19 +268,6 @@ class FSL_CoilCombine(FSL_Transform):
                 self._vprint(f"[Item {idx}] Averaging over {dim} in reference")
                 nifti_obj = nifti_mrs_proc.average(data=nifti_obj, dim=dim, **self.kwargs)
         return nifti_obj
-
-    def _prepare_reference(self, water_list: List[NIFTI_MRS]) -> None:
-        """
-        Prepare the reference for coil combination by averaging over dynamic or edit dimensions.
-
-        Args:
-            water_list (list): List of NIFTI_MRS objects representing water references.
-
-        Returns:
-            None: The method modifies the internal state of the class to store the
-                  averaged references.
-        """
-        self._reference = [self._maybe_average(water_list[i], i) for i in range(len(water_list))]
 
 
 #**************************************************************************************************#
@@ -319,19 +309,31 @@ class FSL_Average(FSL_Transform):
                          **kwargs)
         self.dim = dim
 
-    def forward_single(self, nifti_obj: NIFTI_MRS, idx: int) -> NIFTI_MRS:
+    def forward_single(self, data: NIFTI_MRS, water: Optional[NIFTI_MRS] = None, idx: int = 0) \
+            -> Tuple[NIFTI_MRS, Optional[NIFTI_MRS]]:
         """
         Apply averaging to a single NIfTI_MRS object.
 
         Args:
-            nifti_obj (NIFTI_MRS): The NIFTI_MRS object to be transformed.
+            data (NIFTI_MRS): The NIFTI_MRS object to be transformed.
+            water (Optional[NIFTI_MRS]): Optional water reference data to be transformed.
             idx (int): Index of the item in the list for logging purposes.
 
         Returns:
-            NIFTI_MRS: The averaged NIFTI_MRS object.
+            Tuple[NIFTI_MRS, Optional[NIFTI_MRS]]:
+            The transformed NIFTI_MRS object after averaging and optional water
+            reference (if applicable).
         """
+        if self.dim not in data.dim_tags:
+            self._vprint(f"[item {idx}] No {self.dim} found — skipping averaging.")
+            return data, water
+
         self._vprint(f"[item {idx}] Averaging over all dimensions")
-        return nifti_mrs_proc.average(data=nifti_obj, dim=self.dim, **self.kwargs)
+        data = nifti_mrs_proc.average(data=data, dim=self.dim, **self.kwargs)
+        if self.apply_to_water and water is not None:
+            self._vprint(f"[item {idx}] Averaging water reference over all dimensions")
+            water = nifti_mrs_proc.average(data=water, dim=self.dim, **self.kwargs)
+        return data, water
 
 
 #**************************************************************************************************#
@@ -378,16 +380,28 @@ class FSL_Align(FSL_Transform):
         self.dim = dim
 
 
-    def forward_single(self, nifti_obj: NIFTI_MRS, idx: int) -> NIFTI_MRS:
+    def forward_single(self, data: NIFTI_MRS, water: Optional[NIFTI_MRS] = None, idx: int = 0) \
+            -> Tuple[NIFTI_MRS, Optional[NIFTI_MRS]]:
         """
         Align phase and frequency for a single NIfTI_MRS object.
 
         Args:
-            nifti_obj (NIFTI_MRS): The NIFTI_MRS object to be transformed.
+            data (NIFTI_MRS): The NIFTI_MRS object to be transformed.
+            water (Optional[NIFTI_MRS]): Optional water reference data to be transformed.
             idx (int): Index of the item in the list for logging purposes.
 
         Returns:
-            NIFTI_MRS: The aligned NIFTI_MRS object.
+            Tuple[NIFTI_MRS, Optional[NIFTI_MRS]]:
+            The transformed NIFTI_MRS object after alignment and optional water
+            reference (if applicable).
         """
+        if self.dim not in data.dim_tags:
+            self._vprint(f"[item {idx}] No {self.dim} found — skipping alignment.")
+            return data, water
+
         self._vprint(f"[item {idx}] Aligning phase and frequency")
-        return nifti_mrs_proc.align(data=nifti_obj, dim=self.dim, **self.kwargs)
+        data = nifti_mrs_proc.align(data=data, dim=self.dim, **self.kwargs)
+        if self.apply_to_water and water is not None:
+            self._vprint(f"[item {idx}] Aligning water reference phase and frequency")
+            water = nifti_mrs_proc.align(data=water, dim=self.dim, **self.kwargs)
+        return data, water

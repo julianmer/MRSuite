@@ -17,6 +17,7 @@
 #*************#
 import argparse
 import os
+from typing import Tuple
 
 # third-party
 from fsl_mrs.utils import mrs_io
@@ -30,7 +31,7 @@ from mrsuite.transforms.processing import fid_a, fsl_mrs
 #*************************************************#
 #   load fitting challenge data from ISMRM 2016   #
 #*************************************************#
-def load_ISMRM2016_challenge_data(config: dict) -> (NIfTI_MRS_Plus, NIfTI_MRS_Plus, list):
+def load_ISMRM2016_challenge_data(config: dict) -> Tuple[NIfTI_MRS_Plus, NIfTI_MRS_Plus, list]:
     """
     Load MRS data from the ISMRM 2016 fitting challenge.
 
@@ -75,7 +76,7 @@ def load_ISMRM2016_challenge_data(config: dict) -> (NIfTI_MRS_Plus, NIfTI_MRS_Pl
 #***********************************************#
 #   load data from OpenNeuro dataset ds005371   #
 #***********************************************#
-def load_openneuro_data(config = dict) -> (NIfTI_MRS_Plus, NIfTI_MRS_Plus, None):
+def load_openneuro_data(config = dict) -> Tuple[NIfTI_MRS_Plus, NIfTI_MRS_Plus, None]:
     """
     Load MRS data from the OpenNeuro dataset ds005371.
 
@@ -183,8 +184,9 @@ def main():
 
     pipeline = Pipeline(modules=[
         fsl_mrs.FSL_CoilCombine(verbose=True),
-        fsl_mrs.FSL_Align(verbose=True),
-        fsl_mrs.FSL_Average(verbose=True),
+        # fsl_mrs.FSL_Align(verbose=True),
+        # fsl_mrs.FSL_Average(verbose=True),
+        fid_a.FIDA_AlignAverages_fd(verbose=True),
         # fid_a.FIDA_EddyCorrect(),
 
     ])
@@ -193,6 +195,7 @@ def main():
 
     print("Processing complete.")
     print(processed_data.dim_tags)
+    print(processed_data.shape)
     print(processed_water.shape)
     print(processed_data[0].header)
     print(processed_data[0].hdr_ext)
@@ -206,8 +209,8 @@ if __name__ == "__main__":
     # This script can be run directly from the command line.
     # It will parse command line arguments to determine the dataset and test size.
     # Example usage(s):
-    # python -m tests.run_pipeline --dataset ismrm --test_size 10
-    # python -m tests.run_pipeline --dataset openneuro --test_size 10 --selection herculespress
+    # python -m examples.run_pipeline --dataset ismrm --test_size 10
+    # python -m examples.run_pipeline --dataset openneuro --test_size 10 --selection herculespress
 
     # TODO: Fix ISMRM 2016 challenge data tests.
     # TODO: Check functionality of FSL_CoilCombine with already combined data.

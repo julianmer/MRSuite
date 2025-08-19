@@ -21,7 +21,7 @@ from typing import List, Optional
 # third-party
 import numpy as np
 
-from nifti_mrs import nifti_mrs
+from nifti_mrs.nifti_mrs import NIFTI_MRS
 
 
 #**************************************************************************************************#
@@ -37,11 +37,11 @@ class NIfTI_MRS_Plus:
     """
     Handles batch-aware NIfTI_MRS data.
 
-    This class wraps multiple 'nifti_mrs.NIFTI_MRS' objects into a batched representation.
+    This class wraps multiple 'NIFTI_MRS' objects into a batched representation.
     It provides access to the full batched tensor, header synchronization, and intuitive indexing.
 
     Attributes:
-        nifti_list (List[nifti_mrs.NIFTI_MRS]): List of individual subject MRS objects.
+        nifti_list (List[NIFTI_MRS]): List of individual subject MRS objects.
         _batched_data (Optional[np.ndarray]): Cached batched data.
         _updated_hdr_ext (Optional[object]): Cached shared header extension.
 
@@ -49,7 +49,7 @@ class NIfTI_MRS_Plus:
         TypeError: If any element in the list is not a NIFTI_MRS instance.
     """
 
-    def __init__(self, nifti_list: List[nifti_mrs.NIFTI_MRS],
+    def __init__(self, nifti_list: List[NIFTI_MRS],
                  *args: object, **kwargs: object) -> None:
         """
         Initialize the NIfTI_MRS_Plus object with data and header.
@@ -59,7 +59,7 @@ class NIfTI_MRS_Plus:
             *args: Positional arguments for the NIfTI_MRS_Plus object.
             **kwargs: Keyword arguments for the NIfTI_MRS_Plus object.
         """
-        self.nifti_list: List[nifti_mrs.NIFTI_MRS] = nifti_list
+        self.nifti_list: List[NIFTI_MRS] = nifti_list
 
         self._batched_data: Optional[np.ndarray] = None
         self._updated_hdr_ext: Optional[object] = None
@@ -70,7 +70,7 @@ class NIfTI_MRS_Plus:
         """
         return self.from_nifti_list(*args, **kwargs)
 
-    def __getitem__(self, index: int) -> nifti_mrs.NIFTI_MRS:
+    def __getitem__(self, index: int) -> NIFTI_MRS:
         """
         Allow indexing into the nifti_list directly from the NIfTI_MRS_Plus object.
         """
@@ -83,7 +83,7 @@ class NIfTI_MRS_Plus:
         return len(self.nifti_list)
 
     @classmethod
-    def from_nifti_list(cls, nifti_list: List[nifti_mrs.NIFTI_MRS]) -> "NIfTI_MRS_Plus":
+    def from_nifti_list(cls, nifti_list: List[NIFTI_MRS]) -> "NIfTI_MRS_Plus":
         """
         Create an instance of NIfTI_MRS_Plus from a list of NIfTI_MRS objects.
 
@@ -93,8 +93,11 @@ class NIfTI_MRS_Plus:
         Returns:
             NIfTI_MRS_Plus: An instance containing the combined data.
         """
+        # validate input is a list
+        if not isinstance(nifti_list, list):
+            raise TypeError("Input must be a list of NIFTI_MRS instances.")
         # validate all elements are NIfTI_MRS instances
-        if not all(isinstance(n, nifti_mrs.NIFTI_MRS) for n in nifti_list):
+        elif not all(isinstance(n, NIFTI_MRS) for n in nifti_list):
             raise TypeError("All elements must be instances of NIFTI_MRS.")
         return cls(nifti_list)
 
@@ -120,7 +123,7 @@ class NIfTI_MRS_Plus:
             self._batched_data = np.stack([n[:].conj() for n in self.nifti_list], axis=0)
         return self._batched_data
 
-    def list(self) -> List[nifti_mrs.NIFTI_MRS]:
+    def list(self) -> List[NIFTI_MRS]:
         """
         Return list of NIFTI_MRS objects, applying updated header if needed.
         """

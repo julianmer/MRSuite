@@ -15,7 +15,7 @@
 #*************#
 #   imports   #
 #*************#
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 # own
 from mrsuite.core.nifti_mrs_plus import NIfTI_MRS_Plus
@@ -54,7 +54,7 @@ class Pipeline:
         self.modules = modules if modules is not None else []
 
     def run(self, data: NIfTI_MRS_Plus, water: Optional[NIfTI_MRS_Plus] = None) \
-            -> (NIfTI_MRS_Plus, Optional[NIfTI_MRS_Plus]):
+            -> Tuple[NIfTI_MRS_Plus, Optional[NIfTI_MRS_Plus]]:
         """
         Run the pipeline on the provided data.
 

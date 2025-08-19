@@ -56,8 +56,8 @@ class Transform:
         self.verbose = verbose
         self._vprint = self._vprint if verbose else lambda msg: None
 
-    def __call__(self, data: NIfTI_MRS_Plus,
-                 water: Optional[NIfTI_MRS_Plus] = None) -> NIfTI_MRS_Plus:
+    def __call__(self, data: NIfTI_MRS_Plus, water: Optional[NIfTI_MRS_Plus] = None) \
+            -> Tuple[NIfTI_MRS_Plus, Optional[NIfTI_MRS_Plus]]:
         """
         Make the Transform class callable.
         """

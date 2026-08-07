@@ -74,6 +74,31 @@ class FIDA_Transform(Transform):
         # add all FID-A (sub)folders recursively
         self.octave.eval("addpath(genpath('./externals/fid-a'))")
 
+    @staticmethod
+    def _n_averages(data: dict) -> int:
+        """
+        Number of averages held by a FID-A struct.
+
+        FID-A marks an absent dimension with 0 rather than a size-1 axis, so a struct
+        may carry no averages dimension at all. Several FID-A routines index
+        ``in.sz(in.dims.averages)`` without checking, which Octave rejects on a zero
+        subscript, so callers need this before handing data over.
+
+        Args:
+            data (dict): MRS data in FID-A struct format.
+
+        Returns:
+            int: The number of averages, or 0 if the struct has no averages dimension.
+        """
+        try:
+            avg_dim = int(np.asarray(data['dims']['averages']).ravel()[0])
+        except (KeyError, TypeError, IndexError):
+            return 0
+        if avg_dim < 1:
+            return 0
+        sz = np.atleast_1d(np.asarray(data['sz'])).ravel()
+        return int(sz[avg_dim - 1]) if avg_dim <= sz.size else 0
+
     def forward_single(self, data: dict, water: Optional[dict] = None, idx: int = 0) \
             -> Tuple[dict, Optional[dict]]:
         """
@@ -210,14 +235,23 @@ class FIDA_Transform(Transform):
             dims['x'] = 0
             dims['y'] = 0
             dims['z'] = 0
+
+            # np.squeeze drops every singleton axis, not only x, y and z. A non-spatial
+            # dimension of length one — a single coil, a single average — goes with them,
+            # so simply subtracting 3 would leave dims pointing at axes the array no
+            # longer has and the permutation below would raise. Renumber against the axes
+            # that actually survive and zero the ones that do not; that also matches the
+            # FID-A convention, where an absent dimension is 0 rather than a size-1 axis.
+            survivors = {old: new + 1 for new, old in
+                         enumerate(i for i in range(fids.ndim) if fids.shape[i] > 1)}
             fids = np.squeeze(fids)
 
-            # subtract 3 from nonzero dims (since x, y, z collapsed)
             sqzDims = []
             for key, val in dims.items():
                 if val != 0:
-                    dims[key] = val - 3  # still MATLAB-style
-                    sqzDims.append(key)
+                    dims[key] = survivors.get(val - 1, 0)  # MATLAB-style; 0 means absent
+                    if dims[key] != 0:
+                        sqzDims.append(key)
 
             # helper to permute with MATLAB-style dims
             def permute_fids(order):
@@ -370,7 +404,7 @@ class FIDA_AlignAverages_fd(FIDA_Transform):
     """
 
     def __init__(self, verbose: bool = False, minppm: float = 0.2, maxppm: float = 4.0,
-                 tmax: float = 4.0, med: str = 'n') -> None:
+                 tmax: float = 0.2, med: str = 'n') -> None:
         """
         Initialize the FIDA_AlignAverages_fd transformation.
 
@@ -407,6 +441,17 @@ class FIDA_AlignAverages_fd(FIDA_Transform):
         if self.med == 'r' and water is None:
             raise ValueError("FIDA_AlignAverages_fd requires a water reference for 'r' mode.")
 
+        # There is nothing to align in data that holds a single average, and FID-A does
+        # not guard against it: op_alignAverages_fd indexes in.sz(in.dims.averages), so
+        # an absent averages dimension becomes in.sz(0) and Octave raises on the
+        # zero subscript. Already averaged data (e.g. the jMRUI challenge spectra)
+        # arrives exactly like this.
+        n_avg = self._n_averages(data)
+        if n_avg < 2:
+            self._vprint(f"[item {idx}] {n_avg or 'No'} average(s) — nothing to align, "
+                         f"skipping.")
+            return data, water
+
         data, _, _ = self.octave.feval("op_alignAverages_fd", data, self.minppm, self.maxppm,
                                        self.tmax, self.med, water)
 
@@ -427,7 +472,7 @@ class FIDA_AlignAverages_fd(FIDA_Transform):
 #**************************************************************************************************#
 class FIDA_EddyCorrect(FIDA_Transform):
     """
-    FID-A dddy current correction transformation.
+    FID-A eddy current correction transformation.
 
     This class applies eddy current correction to MRS data using FID-A's op_ecc function.
     It requires a water reference for the correction process.

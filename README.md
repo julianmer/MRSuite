@@ -1,7 +1,17 @@
-# MRSuite
+<div align="center">
+  <img src="https://raw.githubusercontent.com/julianmer/MRSuite/main/assets/logo/logo.png" alt="MRSuite Logo" width="120" style="margin-bottom: -5px;"/>
+  <h1 style="margin-top: 5px; margin-bottom: 5px;">MRSuite</h1>
+  <p style="margin-top: 0px;"><em>MRS Processing, Analysis, AI Model Integration, and Benchmarking</em></p>
+
+  [![Python](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/)
+  [![Status](https://img.shields.io/badge/status-alpha-orange.svg)](#project-status)
+</div>
+
+---
 
 The MRSuite project is an open-source, modular framework for magnetic resonance spectroscopy (MRS) that brings together tools for data handling, signal processing, machine learning, and reproducible reporting in a modular and extensible ecosystem.
 
+---
 
 ## Project Status
 > **Alpha Stage**  

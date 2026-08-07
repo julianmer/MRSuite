@@ -1,0 +1,102 @@
+# Secrets (never commit)
+.wandb_key
+*.env
+.env
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Environments
+.venv/
+venv/
+env/
+ENV/
+
+# Jupyter
+.ipynb_checkpoints/
+profile_default/
+ipython_config.py
+
+# Type checkers / linters
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.ruff_cache/
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+desktop.ini
+
+# Experiment tracking and run outputs
+wandb/
+runs/
+outputs/
+results/
+lightning_logs/
+mlruns/
+*.ckpt
+*.pth
+
+# Blender render scratch — written before export, not the delivered logo
+assets/logo/render-*.png
+*.blend1
+
+# Data: only the submodules belong on GitHub. Everything else under data/ is fetched or
+# generated locally and is too large / not ours to redistribute.
+data/*
+!data/openneuro_ds005371
+!data/2016_fitting_challenge
+# the ground truth is the one piece the above repo does not carry (336 KB)
+!data/2016_fitting_challenge_gts
+
+# Superseded work kept locally for reference only
+legacy/

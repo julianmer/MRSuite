@@ -17,6 +17,7 @@
 #*************#
 import argparse
 import os
+import re
 from typing import Tuple
 
 # third-party
@@ -56,15 +57,31 @@ def load_ISMRM2016_challenge_data(config: dict) -> Tuple[NIfTI_MRS_Plus, NIfTI_M
         truth['Mac'] = truth.pop('MMBL')  # rename key MMBL to Mac
         return dict(sorted(truth.items()))
 
-    files = os.listdir(config['path2concs'])[:config['test_size']]
+    def listing(path, suffix=None):
+        """Sorted, suffix-filtered listing of a data directory.
+
+        The challenge repository keeps water-suppressed and unsuppressed spectra in one
+        folder (`dataset1_WS.txt` alongside `dataset1_nWS.txt`), so the two sets have to
+        be separated by suffix. Sorting is by the dataset number rather than by name:
+        spectra, water references and ground truth are paired positionally, and both
+        `os.listdir` order and plain lexicographic order would misalign them
+        (`dataset10` sorts before `dataset2`).
+        """
+        names = [f for f in os.listdir(path) if not f.startswith('.')]
+        if suffix:
+            names = [f for f in names if f.endswith(suffix)]
+        return sorted(names, key=lambda f: (int(re.search(r'\d+', f).group())
+                                            if re.search(r'\d+', f) else 0, f))
+
+    files = listing(config['path2concs'])[:config['test_size']]
     concs = [load_ISMRM2016_challenge_concs(os.path.join(config['path2concs'], f)) for f in files]
 
-    files = os.listdir(config['path2data'])[:config['test_size']]
+    files = listing(config['path2data'], config.get('data_suffix'))[:config['test_size']]
     data_list = [mrs_io.read_FID(os.path.join(config['path2data'], f)) for f in files]
     data = NIfTI_MRS_Plus(data_list)
 
     if config['path2water']:
-        files = os.listdir(config['path2water'])[:config['test_size']]
+        files = listing(config['path2water'], config.get('water_suffix'))[:config['test_size']]
         water_list = [mrs_io.read_FID(os.path.join(config['path2water'], f)) for f in files]
         water = NIfTI_MRS_Plus(water_list)
     else:
@@ -146,12 +163,16 @@ def parse_args() -> dict:
     }
 
     if args.dataset == 'ismrm':
-        path = 'data/ISMRM2016_fitting_challenge/'
+        # spectra and basis come from the challenge submodule; only the ground truth
+        # is kept in-repo, as that repository does not carry it
+        challenge = os.path.join(project_root, 'data', '2016_fitting_challenge')
         config.update({
-            'path2basis': os.path.join(project_root, path, 'press3T_30ms.BASIS'),
-            'path2concs': os.path.join(project_root, path, 'ground_truth'),
-            'path2data': os.path.join(project_root, path, 'datasets_JMRUI_WS'),
-            'path2water': os.path.join(project_root, path, 'datasets_JMRUI_nWS')
+            'path2basis': os.path.join(challenge, 'basisset_LCModel', 'press3T_30ms.BASIS'),
+            'path2concs': os.path.join(project_root, 'data', '2016_fitting_challenge_gts'),
+            'path2data': os.path.join(challenge, 'datasets_JMRUI'),
+            'path2water': os.path.join(challenge, 'datasets_JMRUI'),
+            'data_suffix': '_WS.txt',
+            'water_suffix': '_nWS.txt',
         })
     elif args.dataset == 'openneuro':
         config.update({
@@ -211,8 +232,5 @@ if __name__ == "__main__":
     # Example usage(s):
     # python -m examples.run_pipeline --dataset ismrm --test_size 10
     # python -m examples.run_pipeline --dataset openneuro --test_size 10 --selection herculespress
-
-    # TODO: Fix ISMRM 2016 challenge data tests.
-    # TODO: Check functionality of FSL_CoilCombine with already combined data.
 
     main()

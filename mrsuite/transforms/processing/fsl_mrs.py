@@ -235,6 +235,16 @@ class FSL_CoilCombine(FSL_Transform):
             self._vprint(f"[item {idx}] No DIM_COIL found — skipping coil combine.")
             return data, water
 
+        # A coil dimension of length one carries nothing to combine, and fsl_mrs cannot
+        # remove it: NIFTI_MRS.copy() slices with self[:], which drops the trailing
+        # singleton, so remove_dim then indexes an axis that no longer exists. Already
+        # combined data (e.g. the jMRUI challenge spectra) arrives in exactly this shape.
+        n_coils = data.shape[data.dim_position('DIM_COIL')]
+        if n_coils < 2:
+            self._vprint(f"[item {idx}] DIM_COIL has length {n_coils} — already combined, "
+                         f"skipping coil combine.")
+            return data, water
+
         ref = self._maybe_average(water, idx) if self.use_reference and water is not None else None
         self._vprint(f"[item {idx}] Applying coil combination" + (" with reference"
                                                                   if self.use_reference else ""))

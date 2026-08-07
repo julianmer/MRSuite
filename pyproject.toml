@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mrsuite"
+version = "0.1.0a0"
+description = "MRS Processing, Analysis, AI Model Integration, and Benchmarking"
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [{ name = "Julian P. Merkofer", email = "j.p.merkofer@tue.nl" }]
+keywords = ["MRS", "magnetic resonance spectroscopy", "NIfTI-MRS", "fitting"]
+
+# Private for now. PyPI rejects any distribution carrying a "Private ::" classifier,
+# so this makes an accidental `twine upload` fail instead of publishing. Remove this
+# line (and nothing else) when the project is ready to go public.
+classifiers = [
+    "Private :: Do Not Upload",
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Medical Science Apps.",
+]
+
+dependencies = [
+    "numpy",
+    "pandas",
+    "openpyxl",       # pandas needs it to read the challenge ground-truth .xlsx files
+    "nifti-mrs",
+    "fsl_mrs",
+    "oct2py",         # bridges to the FID-A Octave sources in externals/fid-a
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.urls]
+Repository = "https://github.com/julianmer/MRSuite"
+
+[tool.setuptools.packages.find]
+include = ["mrsuite*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

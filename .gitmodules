@@ -4,3 +4,6 @@
 [submodule "externals/fid-a"]
 	path = externals/fid-a
 	url = https://github.com/CIC-methods/FID-A.git
+[submodule "data/2016_fitting_challenge"]
+	path = data/2016_fitting_challenge
+	url = https://github.com/wtclarke/mrs_fitting_challenge

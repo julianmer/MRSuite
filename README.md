@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="https://raw.githubusercontent.com/julianmer/MRSuite/main/assets/logo/logo.png" alt="MRSuite Logo" width="120" style="margin-bottom: -5px;"/>
+  <img src="assets/logo/logo.png" alt="MRSuite Logo" width="120" style="margin-bottom: -5px;"/>
   <h1 style="margin-top: 5px; margin-bottom: 5px;">MRSuite</h1>
   <p style="margin-top: 0px;"><em>MRS Processing, Analysis, AI Model Integration, and Benchmarking</em></p>
 

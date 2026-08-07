@@ -26,7 +26,7 @@ from fsl_mrs.utils.preproc import nifti_mrs_proc
 from nifti_mrs.nifti_mrs import NIFTI_MRS
 
 # own
-from mrsuite.core.nifti_mrs_plus import NIfTI_MRS_Plus
+from nifti_mrs_plus import NIfTI_MRS_Plus
 from mrsuite.core.transform import Transform
 
 
@@ -128,8 +128,8 @@ class FSL_Transform(Transform):
             data_out.append(d)
             water_out.append(w)
 
-        data_out = NIfTI_MRS_Plus.from_nifti_list(data_out)
-        water_out = NIfTI_MRS_Plus.from_nifti_list(water_out)
+        data_out = NIfTI_MRS_Plus(data_out)
+        water_out = NIfTI_MRS_Plus(water_out)
         return data_out, water_out
 
     def _maybe_listify(self, obj: NIfTI_MRS_Plus, name: str = "data") -> List[NIFTI_MRS]:

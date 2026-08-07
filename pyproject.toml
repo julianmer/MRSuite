@@ -27,6 +27,7 @@ dependencies = [
     "pandas",
     "openpyxl",       # pandas needs it to read the challenge ground-truth .xlsx files
     "nifti-mrs",
+    "nifti-mrs-plus>=0.1.0",   # the shared batched NIfTI-MRS wrapper
     "fsl_mrs",
     "oct2py",         # bridges to the FID-A Octave sources in externals/fid-a
 ]

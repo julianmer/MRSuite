@@ -18,7 +18,7 @@
 from typing import List, Optional, Tuple
 
 # own
-from mrsuite.core.nifti_mrs_plus import NIfTI_MRS_Plus
+from nifti_mrs_plus import NIfTI_MRS_Plus
 from mrsuite.core.transform import Transform
 
 

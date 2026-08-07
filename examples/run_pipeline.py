@@ -24,7 +24,7 @@ from typing import Tuple
 from fsl_mrs.utils import mrs_io
 
 # own
-from mrsuite.core.nifti_mrs_plus import NIfTI_MRS_Plus
+from nifti_mrs_plus import NIfTI_MRS_Plus
 from mrsuite.core.pipeline import Pipeline
 from mrsuite.transforms.processing import fid_a, fsl_mrs
 

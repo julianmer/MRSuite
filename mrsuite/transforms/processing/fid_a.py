@@ -22,6 +22,7 @@
 #*************#
 import os
 
+import warnings
 from typing import List, Optional, Tuple
 
 # third-party
@@ -31,7 +32,7 @@ from nifti_mrs.nifti_mrs import NIFTI_MRS
 from oct2py import Oct2Py
 
 # own
-from mrsuite.core.nifti_mrs_plus import NIfTI_MRS_Plus
+from nifti_mrs_plus import NIfTI_MRS_Plus
 from mrsuite.core.transform import Transform
 
 
@@ -140,12 +141,20 @@ class FIDA_Transform(Transform):
             if tw is not None:
                 out_water.append(tw)
 
-        # convert back to NIfTI_MRS_Plus
-        # TODO: account for dim pos etc.
-        # TODO: adjust headers etc.
-        data._batched_data = out_data
-        if water is not None:
-            water._batched_data = out_water
+        # TODO: write the FID-A -> NIfTI-MRS back-conversion (fida2nifti), accounting
+        #       for dim positions and headers, then install the results properly.
+        #
+        # Until that exists the Octave results cannot be returned. This previously read
+        # `data._batched_data = out_data`, which looked like it stored them but did not:
+        # `_batched_data` was a cache that `list()` never consulted, and `out_data` holds
+        # FID-A structs rather than NIFTI_MRS objects. The transform was therefore a
+        # silent no-op. Warn instead of failing quietly, so a pipeline that relies on a
+        # FID-A step cannot mistake "ran without error" for "was applied".
+        warnings.warn(
+            f"{type(self).__name__}: FID-A results are computed but not written back — "
+            f"no FID-A to NIfTI-MRS conversion is implemented yet, so the data is "
+            f"returned unchanged.",
+            RuntimeWarning, stacklevel=2)
         return data, water
 
     def nifti2fida(self, data: NIFTI_MRS) -> dict:

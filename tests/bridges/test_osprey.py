@@ -22,6 +22,7 @@ import pytest
 
 from mrsuite.bridges.fid_a import FIDACodec
 from mrsuite.bridges.osprey import OSPREY_ROOT, OspreyCodec
+from mrsuite.core.result import FitResult
 
 from tests.conftest import needs_octave
 
@@ -192,3 +193,50 @@ def test_a_fit_runs_end_to_end(spectrum):
     ranked = [n for n, _ in sorted(zip(names, ampl), key=lambda p: -p[1])]
     assert ranked[0] == "NAA", f"NAA should dominate, got {ranked[:4]}"
     assert set(ranked[:6]) & {"Cr", "PCr", "Glu", "mI"}, f"unphysiological: {ranked[:6]}"
+
+
+#***************#
+#   to result   #
+#***************#
+@needs_octave
+@pytest.mark.skipif(not BASIS.exists(), reason="osprey submodule not checked out")
+def test_a_fit_becomes_a_uniform_result(spectrum):
+    """What lets Osprey be compared against FSL-MRS and LCModel at all: without this
+    its output is a MATLAB struct that nothing downstream can read."""
+    from mrsuite.bridges import osprey
+
+    out = osprey.fit(spectrum, osprey.bridge.basis(str(BASIS)))
+
+    assert isinstance(out, FitResult) and out.method == "osprey:Osprey"
+    tcr = out.conc("internal")
+    assert 1.0 < tcr["NAA"] < 2.0, f"NAA/tCr = {tcr['NAA']}, physiologically ~1.5"
+    assert out.qc["fwhm"] > 0
+
+
+#*****************#
+#   referencing   #
+#*****************#
+def test_concentrations_are_referenced_to_total_creatine():
+    """Osprey leaves referencing to its quantify stage, so the adapter does what
+    OspreyQuantify does: divide by Cr + PCr."""
+    from mrsuite.bridges.osprey import to_result
+
+    out = to_result({"ampl": [[6.0], [3.0], [1.0]]},
+                    {"name": ["NAA", "Cr", "PCr"]})
+
+    assert out.conc("raw")["NAA"] == 6.0
+    assert out.conc("internal")["NAA"] == pytest.approx(6.0 / 4.0)
+
+
+#*****************#
+#   no creatine   #
+#*****************#
+def test_without_creatine_only_raw_is_reported():
+    """A fit that collapsed tCr to zero cannot be referenced, and saying so beats
+    dividing by it - that is what turned three challenge datasets into 1e15."""
+    from mrsuite.bridges.osprey import to_result
+
+    out = to_result({"ampl": [[6.0]]}, {"name": ["NAA"]})
+
+    assert "raw" in out.concentrations
+    assert "internal" not in out.concentrations

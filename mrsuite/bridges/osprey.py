@@ -16,7 +16,6 @@
 #*************#
 #   imports   #
 #*************#
-import tempfile
 import warnings
 from pathlib import Path
 from typing import Any, List, Optional
@@ -27,7 +26,8 @@ from nifti_mrs.nifti_mrs import NIFTI_MRS
 
 from mrsuite import __version__
 from mrsuite.bridges.fid_a import FIDABridge, FIDACodec
-from mrsuite.octave import build_lbfgsb
+from mrsuite.core.result import FitResult
+from mrsuite.octave import build_lbfgsb, scratch
 
 OSPREY_ROOT = Path(__file__).resolve().parents[2] / "externals" / "osprey"
 
@@ -201,7 +201,7 @@ class OspreyBridge(FIDABridge):
         """
         if self._octave is None:
             try:
-                build_lbfgsb(self._root)
+                build_lbfgsb(self._root, runtime=self._runtime)
             except (FileNotFoundError, RuntimeError) as exc:
                 warnings.warn(f"Osprey's L-BFGS-B-C solver was not built ({exc}); "
                               f"fit_runFit will fail, other functions are unaffected.",
@@ -283,7 +283,7 @@ class OspreyBridge(FIDABridge):
         Returns:
             The basis set container, ready for ``fit_runFit``.
         """
-        folder = tempfile.mkdtemp(prefix="mrsuite_basis_")
+        folder = scratch("mrsuite_basis_")
         self.octave.eval(f"""
             __raw = io_readlcmraw_basis('{path}');
             __mets = fieldnames(__raw);
@@ -296,7 +296,93 @@ class OspreyBridge(FIDABridge):
         return self.octave.pull("__basis")
 
 
+#***************#
+#   to result   #
+#***************#
+def to_result(params: dict, res_basis: dict, crlb: Any = None,
+              method: str = "osprey:Osprey") -> FitResult:
+    """
+    Map an Osprey fit onto MRSuite's uniform result.
+
+    Osprey reports amplitudes on the basis set's own scale and leaves referencing to
+    its quantify stage, so the creatine-referenced concentrations are formed here the
+    way OspreyQuantify does: divided by Cr + PCr.
+
+    Args:
+        params (dict): ``fitParams`` from ``fit_runFit``.
+        res_basis (dict): The resampled basis set it returned alongside, which carries
+            the metabolite names in fit order.
+        crlb: Cramer-Rao lower bounds from ``fit_Osprey_CRLB``, when they were computed.
+        method (str): Recorded on the result.
+
+    Returns:
+        FitResult: Raw and creatine-referenced concentrations, CRLBs when available, and
+        the linewidth and residual Osprey reports as QC.
+    """
+    names = [str(n) for n in np.asarray(res_basis["name"]).ravel()]
+    ampl = np.asarray(params["ampl"], dtype=float).ravel()
+    raw = dict(zip(names, (float(a) for a in ampl)))
+
+    concentrations = {"raw": raw}
+    tcr = raw.get("Cr", 0.0) + raw.get("PCr", 0.0)
+    if tcr:
+        concentrations["internal"] = {k: v / tcr for k, v in raw.items()}
+
+    uncertainties = {}
+    if crlb is not None:
+        values = np.asarray(crlb, dtype=float).ravel()
+        if values.size == len(names):
+            uncertainties["percentage"] = dict(zip(names, (float(c) for c in values)))
+
+    qc = {}
+    for key, name in (("refFWHM", "fwhm"), ("Res", "residual")):
+        if key in params:
+            qc[name] = float(np.asarray(params[key]).ravel()[0])
+
+    return FitResult(method=method, metabolites=names, concentrations=concentrations,
+                     uncertainties=uncertainties, qc=qc,
+                     raw={"fitParams": params, "resBasisSet": res_basis})
+
+
 bridge = OspreyBridge()
+
+
+#*********#
+#   fit   #
+#*********#
+def fit(data: Any, basis: Any, fit_opts: Optional[dict] = None,
+        crlb: bool = False) -> Any:
+    """
+    Fit with Osprey, as MRSuite's uniform result.
+
+    Args:
+        data: NIfTI-MRS or NIfTI-MRS+. A batch is fitted spectrum by spectrum.
+        basis: A basis container, from ``bridge.basis`` or ``bridge.basis_from_lcmodel``.
+        fit_opts (Optional[dict]): Overrides for ``bridge.fit_options()``.
+        crlb (bool): Also run fit_Osprey_CRLB. Off by default, and left that way: the
+            fit does not produce bounds, because Osprey computes them in its quantify
+            stage against data the fit has already zero-filled and re-splined, so the
+            routine does not stand alone. An Osprey result therefore carries
+            concentrations and QC but no uncertainties - enough to compare values
+            against another method, not enough to weight that comparison.
+
+    Returns:
+        A FitResult, or one per spectrum for a batch.
+    """
+    opts = bridge.fit_options(**(fit_opts or {}))
+    items = data.list() if hasattr(data, "list") else [data]
+
+    out = []
+    for one in items:
+        params, res_basis = bridge.fit_runFit(one, basis, "Osprey", opts, nout=2)
+        bounds = None
+        if crlb:
+            _, _, bounds = bridge.fit_Osprey_CRLB(
+                one, basis, opts["bLineKnotSpace"], opts["range"], params,
+                float(np.asarray(params["refShift"]).ravel()[0]), nout=3)
+        out.append(to_result(params, res_basis, bounds))
+
+    return out if hasattr(data, "list") else out[0]
 
 
 #*************#

@@ -17,7 +17,72 @@
 #*************#
 #   imports   #
 #*************#
-from typing import Any, Callable, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+
+
+#*******************#
+#   holds results   #
+#*******************#
+def _holds_results(data: Any) -> bool:
+    """Whether measurements can be filed on this object.
+
+    A NIfTI-MRS+ carries per-spectrum metadata dictionaries; a bare NIfTI-MRS does not.
+    """
+    return hasattr(data, "metadata_common") and hasattr(data, "metadata_individual")
+
+
+#************#
+#   bucket   #
+#************#
+def _bucket(data: Any, index: Optional[int] = None) -> Dict[str, Any]:
+    """The results dictionary for one spectrum, or for the batch.
+
+    Kept in NIfTI-MRS+'s own metadata rather than added to that class: only this
+    pipeline files measurements, so the concept belongs here. It rides along in
+    metadata_individual, which is deep-copied by copy(), so results survive with the
+    data without NIfTI-MRS+ knowing what a result is.
+    """
+    if index is None:
+        return data.metadata_common.setdefault("results", {})
+
+    while len(data.metadata_individual) < len(data):
+        data.metadata_individual.append({})    # empty in volatile mode, short if passed in
+    return data.metadata_individual[index].setdefault("results", {})
+
+
+#*************#
+#   results   #
+#*************#
+def results(data: Any, index: Optional[int] = None) -> Dict[str, Any]:
+    """
+    Everything a pipeline measured on ``data``, by step name.
+
+    Args:
+        data: What a pipeline returned.
+        index (Optional[int]): Which spectrum to read. None reads the batch level.
+
+    Returns:
+        Dict[str, Any]: Results by step name; empty if nothing was measured.
+    """
+    return dict(_bucket(data, index)) if _holds_results(data) else {}
+
+
+#****************#
+#   get result   #
+#****************#
+def get_result(data: Any, name: str, index: Optional[int] = None) -> Any:
+    """
+    One measurement, or None if the pipeline did not record it.
+
+    Args:
+        data: What a pipeline returned.
+        name (str): The step's name.
+        index (Optional[int]): Which spectrum to read. None reads the batch level.
+
+    Returns:
+        The result as the step returned it.
+    """
+    return results(data, index).get(name)
 
 
 #**************************************************************************************************#
@@ -119,14 +184,12 @@ class Pipeline:
         one starts with empty metadata. Without this, the step after a measuring one
         would silently drop what it measured.
         """
-        if after is before or not (hasattr(before, "results") and hasattr(after, "set_result")):
+        if after is before or not (_holds_results(before) and _holds_results(after)):
             return
 
-        for name, value in before.results().items():
-            after.set_result(name, value)
+        _bucket(after).update(_bucket(before))
         for i in range(min(len(before), len(after))):
-            for name, value in before.results(index=i).items():
-                after.set_result(name, value, index=i)
+            _bucket(after, i).update(_bucket(before, i))
 
     #************#
     #   attach   #
@@ -140,14 +203,14 @@ class Pipeline:
         against tuple, not length: the bridges return a list when they batch, and a step
         reporting several different things returns a tuple.
         """
-        if not hasattr(data, "set_result"):
-            return                             # a bare NIfTI-MRS has nowhere to put it
+        if not _holds_results(data):
+            return                             # nowhere to put it, e.g. a bare NIfTI-MRS
 
         if isinstance(result, list) and len(result) == len(data):
             for i, one in enumerate(result):
-                data.set_result(name, one, index=i)
+                _bucket(data, i)[name] = one
         else:
-            data.set_result(name, result)
+            _bucket(data)[name] = result
 
     #*********#
     #   run   #

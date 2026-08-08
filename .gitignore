@@ -98,6 +98,10 @@ data/*
 # the ground truth is the one piece the above repo does not carry (336 KB)
 !data/2016_fitting_challenge_gts
 
+# Native MEX built per runtime from Osprey's bundled C sources: a build artefact of
+# the machine or container it was compiled on, not source.
+mrsuite/octave/mex/
+
 # oct2py scratch. It lives inside the repo so the containerised Octave sees it at the
 # same absolute path as the host, under the one repo bind-mount.
 .octave-tmp/

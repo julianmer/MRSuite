@@ -25,7 +25,7 @@ from fsl_mrs.utils import mrs_io
 
 # own
 from nifti_mrs_plus import NIfTI_MRS_Plus
-from mrsuite.core.pipeline import Pipeline
+from mrsuite.core.pipeline import Pipeline, results
 from mrsuite import fid_a, fsl_mrs
 
 
@@ -222,7 +222,7 @@ def main():
     print(data.dim_tags)
     print(data.shape)
     # anything a step returned that was not spectra: metrics, indices
-    print(sorted(data.results()), sorted(data.results(index=0)))
+    print(sorted(results(data)), sorted(results(data, index=0)))
 
     # analysis comes after, and returns its results rather than hiding them in the data
     # results = fsl_mrs.fit(data, mrs_io.read_basis(config['path2basis']))

@@ -18,8 +18,10 @@
 #   imports   #
 #*************#
 import os
+import platform
 import shutil
 import subprocess
+import tempfile
 from typing import Optional
 
 from oct2py import Oct2Py
@@ -28,8 +30,9 @@ from mrsuite.octave import docker
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
-# "local" uses the octave-cli on PATH, "docker" the container built from the dockerfile
-# prefers local and falls back. Settable per session, or once via the environment.
+# "local" uses the octave-cli on PATH, "docker" the container built from the
+# dockerfile beside this file, and "auto" prefers local and falls back. Settable
+# per session, or once via the environment.
 RUNTIME = os.environ.get("MRSUITE_OCTAVE_RUNTIME", "auto")
 
 
@@ -39,6 +42,20 @@ RUNTIME = os.environ.get("MRSUITE_OCTAVE_RUNTIME", "auto")
 def shim_path() -> str:
     """Directory holding the Octave shims, to prepend to the Octave path."""
     return os.path.join(HERE, "shims")
+
+
+#*************#
+#   scratch   #
+#*************#
+def scratch(prefix: str = "mrsuite_") -> str:
+    """A temporary directory both runtimes can see.
+
+    Under the repo rather than the system one: the container has only the repo
+    bind-mounted, so a /var/folders path exists on the host and nowhere else. Anything
+    Octave has to open by name has to live somewhere both agree on.
+    """
+    docker.TEMP_DIR.mkdir(exist_ok=True)
+    return tempfile.mkdtemp(prefix=prefix, dir=str(docker.TEMP_DIR))
 
 
 #*************#
@@ -119,29 +136,68 @@ def session(root: str, runtime: Optional[str] = None, verbose: bool = False) -> 
     if not verbose:
         oc.eval("warning('off', 'all');")
     oc.eval(f"addpath(genpath('{root}'));")
-    # shims last: addpath prepends, so this leaves them at the front where they can
-    # stand in for the MATLAB-only functions the toolboxes expect
+    # shims and this runtime's MEX last: addpath prepends, so they end up at the front,
+    # where they stand in for the MATLAB-only functions the toolboxes expect and shadow
+    # any MEX built for the other runtime
     oc.eval(f"addpath('{shim_path()}');")
+    mex = mex_path(which)
+    if os.path.isdir(mex):
+        oc.eval(f"addpath('{mex}');")
     return oc
+
+
+#******************#
+#   platform tag   #
+#******************#
+def platform_tag(runtime: Optional[str] = None) -> str:
+    """Name for the machine a MEX will be loaded on, e.g. 'darwin-arm64'.
+
+    A MEX is a native shared library, so the local one and the container's are different
+    binaries under the same filename. Each build is kept under its own tag and only the
+    matching directory goes on the Octave path.
+    """
+    if resolve_runtime(runtime) == "docker":
+        docker.start()
+        out = subprocess.run(["docker", "exec", docker.CONTAINER, "uname", "-sm"],
+                             capture_output=True, text=True, timeout=60).stdout
+        system, machine = (out.strip().split() + ["", ""])[:2]
+    else:
+        system, machine = platform.system(), platform.machine()
+    return f"{system.lower()}-{'arm64' if machine == 'aarch64' else machine}"
+
+
+#*************#
+#   mex dir   #
+#*************#
+def mex_path(runtime: Optional[str] = None) -> str:
+    """Directory holding the MEX files built for this runtime."""
+    return os.path.join(HERE, "mex", platform_tag(runtime))
 
 
 #******************#
 #   build lbfgsb   #
 #******************#
-def build_lbfgsb(osprey_root: str, force: bool = False) -> str:
+def build_lbfgsb(osprey_root: str, runtime: Optional[str] = None,
+                 force: bool = False) -> str:
     """Build Osprey's L-BFGS-B-C wrapper as an Octave MEX.
 
-    Osprey's core fit reaches ``lbfgsb_wrapper``, and the binaries it ships are
-    MATLAB MEX files that Octave cannot load. The C sources are bundled, so the
-    fix is to compile them with ``mkoctfile``.
+    Osprey's core fit reaches ``lbfgsb_wrapper``, and the binaries it ships are MATLAB
+    MEX files that Octave cannot load. The C sources are bundled, so the fix is to
+    compile them with ``mkoctfile``.
+
+    Built inside the container for the docker runtime, since a MEX is native code: the
+    host's would be the wrong architecture. That works because the repo and Osprey are
+    bind-mounted at the same absolute paths, so one command line serves both.
 
     The one non-obvious part is ``-DMATLAB_MEX_FILE``: ``src/lbfgsb.h`` guards
-    ``#include "mex.h"`` behind that macro, and ``mkoctfile --mex`` does not define
-    it, so without it every ``mxArray``/``mexErrMsgTxt`` reference fails to compile.
+    ``#include "mex.h"`` behind that macro, and ``mkoctfile --mex`` does not define it,
+    so without it every ``mxArray``/``mexErrMsgTxt`` reference fails to compile.
 
     Args:
         osprey_root: Path to an Osprey checkout.
-        force: Rebuild even if an Octave MEX is already present.
+        runtime: 'local', 'docker' or 'auto'. Decides where it is compiled and under
+            which platform tag it is kept.
+        force: Rebuild even if a MEX for this runtime is already present.
 
     Returns:
         Path to the built ``lbfgsb_wrapper.mex``.
@@ -150,24 +206,36 @@ def build_lbfgsb(osprey_root: str, force: bool = False) -> str:
         FileNotFoundError: If the sources or ``mkoctfile`` are missing.
         RuntimeError: If compilation fails.
     """
+    which = resolve_runtime(runtime)
     lib = os.path.join(osprey_root, "libraries", "L-BFGS-B-C")
     mat, src = os.path.join(lib, "Matlab"), os.path.join(lib, "src")
-    out = os.path.join(mat, "lbfgsb_wrapper.mex")
 
+    target = mex_path(which)
+    out = os.path.join(target, "lbfgsb_wrapper.mex")
     if os.path.exists(out) and not force:
         return out
     if not os.path.isdir(src):
         raise FileNotFoundError(f"L-BFGS-B-C sources not found under {lib}")
-    if shutil.which("mkoctfile") is None:
-        raise FileNotFoundError("mkoctfile not on PATH — install Octave development files")
+    os.makedirs(target, exist_ok=True)
 
     units = ["lbfgsb", "linesearch", "subalgorithms", "print", "linpack",
              "miniCBLAS", "timer"]
-    cmd = ["mkoctfile", "--mex", "-DMATLAB_MEX_FILE", f"-I{src}", "-UDEBUG",
-           "-o", out, os.path.join(mat, "lbfgsb_wrapper.c")] + \
-          [os.path.join(src, f"{u}.c") for u in units]
+    build = ["mkoctfile", "--mex", "-DMATLAB_MEX_FILE", f"-I{src}", "-UDEBUG",
+             "-o", out, os.path.join(mat, "lbfgsb_wrapper.c")] + \
+            [os.path.join(src, f"{u}.c") for u in units]
 
-    proc = subprocess.run(cmd, capture_output=True, text=True, cwd=mat)
+    if which == "docker":
+        docker.start()
+        cmd = ["docker", "exec", "-w", mat, docker.CONTAINER] + build
+    else:
+        if shutil.which("mkoctfile") is None:
+            raise FileNotFoundError(
+                "mkoctfile not on PATH - install Octave development files, "
+                "or use runtime='docker', which brings its own")
+        cmd = build
+
+    proc = subprocess.run(cmd, capture_output=True, text=True,
+                          cwd=None if which == "docker" else mat, timeout=1800)
     if proc.returncode != 0 or not os.path.exists(out):
-        raise RuntimeError(f"L-BFGS-B-C build failed:\n{proc.stderr[-2000:]}")
+        raise RuntimeError(f"L-BFGS-B-C build failed ({which}):\n{proc.stderr[-2000:]}")
     return out

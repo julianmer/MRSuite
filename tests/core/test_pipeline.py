@@ -22,7 +22,7 @@ import pytest
 
 from nifti_mrs_plus import NIfTI_MRS_Plus
 from mrsuite import fsl_mrs
-from mrsuite.core.pipeline import Pipeline
+from mrsuite.core.pipeline import Pipeline, get_result, results
 
 
 #**********#
@@ -42,7 +42,7 @@ def test_a_step_returning_spectra_advances_the_data(data):
 
     assert isinstance(out, NIfTI_MRS_Plus)
     assert np.allclose(np.asarray(out[0][:]).imag, -np.asarray(data[0][:]).imag)
-    assert out.results() == {}, "processing attaches nothing"
+    assert results(out) == {}, "processing attaches nothing"
 
 
 #****************#
@@ -68,7 +68,7 @@ def test_extra_return_values_are_kept_not_discarded(data):
     out = Pipeline([lambda d: (fsl_mrs.conjugate(d), (0, 3, 7))]).run(data)
 
     assert isinstance(out, NIfTI_MRS_Plus)
-    assert out.get_result("step0") == (0, 3, 7)
+    assert get_result(out, "step0") == (0, 3, 7)
 
 
 #**************#
@@ -78,9 +78,9 @@ def test_a_list_as_long_as_the_batch_is_filed_per_spectrum(data):
     """How the bridges return a batched non-MRS output: one entry per spectrum."""
     out = Pipeline([lambda d: (d, [{"snr": 10.0}, {"snr": 20.0}])]).run(data)
 
-    assert out.get_result("step0", index=0) == {"snr": 10.0}
-    assert out.get_result("step0", index=1) == {"snr": 20.0}
-    assert out.get_result("step0") is None, "not also filed at batch level"
+    assert get_result(out, "step0", index=0) == {"snr": 10.0}
+    assert get_result(out, "step0", index=1) == {"snr": 20.0}
+    assert get_result(out, "step0") is None, "not also filed at batch level"
 
 
 #*************#
@@ -91,8 +91,8 @@ def test_a_tuple_of_the_same_length_is_not_split(data):
     batch must not be mistaken for one result per spectrum."""
     out = Pipeline([lambda d: (d, (1.5, 0.2))]).run(data)
 
-    assert out.get_result("step0") == (1.5, 0.2)
-    assert out.get_result("step0", index=0) is None
+    assert get_result(out, "step0") == (1.5, 0.2)
+    assert get_result(out, "step0", index=0) is None
 
 
 #***********#
@@ -107,7 +107,7 @@ def test_results_survive_a_later_processing_step(data):
     out = Pipeline([lambda d: (d, {"snr": 12.3}), fsl_mrs.conjugate]).run(data)
 
     assert out is not data, "conjugate should have produced a new object"
-    assert out.get_result("step0") == {"snr": 12.3}
+    assert get_result(out, "step0") == {"snr": 12.3}
 
 
 #***********#
@@ -136,7 +136,7 @@ def test_a_named_function_is_filed_under_its_name(data):
 
     out = Pipeline([snr]).run(data)
 
-    assert out.get_result("snr") == 12.3
+    assert get_result(out, "snr") == 12.3
 
 
 #****************#
@@ -183,9 +183,9 @@ def test_processing_and_measurement_leave_on_one_object(data):
     out = Pipeline([fsl_mrs.conjugate, snr,
                     lambda d: (fsl_mrs.conjugate(d), 0.87)]).run(data)
 
-    assert sorted(out.results()) == ["snr", "step2"]
-    assert out.get_result("snr") == 12.3
-    assert out.get_result("step2") == 0.87
+    assert sorted(results(out, )) == ["snr", "step2"]
+    assert get_result(out, "snr") == 12.3
+    assert get_result(out, "step2") == 0.87
     assert np.allclose(np.asarray(out[0][:]), original)
 
 

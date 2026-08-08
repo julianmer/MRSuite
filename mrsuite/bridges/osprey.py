@@ -16,6 +16,7 @@
 #*************#
 #   imports   #
 #*************#
+import warnings
 from pathlib import Path
 from typing import Any, List, Optional
 
@@ -23,7 +24,9 @@ import numpy as np
 
 from nifti_mrs.nifti_mrs import NIFTI_MRS
 
+from mrsuite import __version__
 from mrsuite.bridges.fid_a import FIDABridge, FIDACodec
+from mrsuite.octave import build_lbfgsb
 
 OSPREY_ROOT = Path(__file__).resolve().parents[2] / "externals" / "osprey"
 
@@ -44,17 +47,21 @@ class OspreyCodec(FIDACodec):
     ==============  ==========================  ==============================
     ..              upstream FID-A              Osprey's copy
     ==============  ==========================  ==============================
+    ``fids``        conjugated on load          not conjugated
     ``specs``       ``fftshift(ifft(fids))``    ``fftshift(fft(fids))``
     ``ppm``         ``-f/(Bo*42.577) + 4.65``   ``f/(Bo*42.577) + centerFreq``
     ``te``/``tr``   seconds                     milliseconds
     ==============  ==========================  ==============================
 
-    Each is self-consistent - an ifft with a descending axis describes the same spectrum
-    as an fft with an ascending one - but a struct built for one is not valid for the
-    other, and the failure is a mirrored or shifted spectrum rather than an error.
+    Each is self-consistent - a conjugated FID with an ifft and a descending axis
+    describes the same spectrum as a plain one with an fft and an ascending axis - but a
+    struct built for one is not valid for the other, and the failure is a mirrored
+    spectrum rather than an error. Checked against the data rather than against either
+    loader: only this combination puts the largest peak of the challenge spectrum at
+    2.04 ppm, where NAA is.
 
-    Only the derived fields differ; the FIDs themselves are identical, which is why
-    converting back needs nothing special and is inherited unchanged.
+    (Both loaders read ``conj(nii.img)``, so the divergence is in the NIfTI readers
+    they use, not in the line that looks responsible.)
     """
 
     # what Osprey's io_loadspec_niimrs uses, against FSL-MRS's 4.65
@@ -78,7 +85,8 @@ class OspreyCodec(FIDACodec):
         centre = self.CENTRE_PPM if centre_ppm is None else centre_ppm
         out = super().nifti2fida(data, centre_ppm=centre)
 
-        fids = np.asarray(out["fids"])
+        fids = np.conj(np.asarray(out["fids"]))       # undo the upstream conjugation
+        out["fids"] = fids
         out["specs"] = np.fft.fftshift(np.fft.fft(fids, axis=0), axes=0)
 
         # ascending, and rebuilt rather than negated so it matches Osprey's own formula
@@ -93,7 +101,41 @@ class OspreyCodec(FIDACodec):
         # fit_Osprey copies dataToFit.names onto the resampled basis set. Osprey's own
         # processing stage sets it; a tuple so oct2py sends a cell array, not a matrix.
         out.setdefault("names", ("A",))
+
+        # Osprey's loader records which of its acquisition types this is, and its fit
+        # branches on them. Unedited is the only one a plain single-voxel spectrum can be.
+        out["flags"].update(isUnEdited=1, isMEGA=0, isHERMES=0, isHERCULES=0,
+                            isMRSI=0, isPRIAM=0)
+
+        # Every Osprey processing step records provenance through
+        # op_add_analysis_provenance, which reads hdr_ext.ProcessingSoftwareVersion and
+        # raises in both its try and its catch when the field is absent. It is a
+        # standard NIfTI-MRS field and MRSuite is the software in question, so fill it.
+        nii = out["nii_mrs"]
+        hdr_ext = nii["hdr_ext"]
+        hdr_ext = hdr_ext.to_dict() if hasattr(hdr_ext, "to_dict") else dict(hdr_ext)
+        hdr_ext.setdefault("ProcessingSoftwareVersion", f"MRSuite {__version__}")
+        nii["hdr_ext"] = hdr_ext
         return out
+
+    #****************#
+    #   fida2nifti   #
+    #****************#
+    def fida2nifti(self, fida: dict) -> NIFTI_MRS:
+        """
+        Convert an Osprey struct back to NIfTI-MRS.
+
+        Args:
+            fida (dict): A struct in Osprey's dialect.
+
+        Returns:
+            NIFTI_MRS: The spectra.
+        """
+        # the inherited conversion undoes an upstream-style conjugation that this
+        # dialect never applied, so put it back before handing over
+        fida = dict(fida)
+        fida["fids"] = np.conj(np.asarray(fida["fids"]))
+        return super().fida2nifti(fida)
 
 
 #**************************************************************************************************#
@@ -130,6 +172,26 @@ class OspreyBridge(FIDABridge):
         super().__init__(fida_root=str(osprey_root or OSPREY_ROOT), verbose=verbose,
                          runtime=runtime)
 
+    #************#
+    #   octave   #
+    #************#
+    @property
+    def octave(self):
+        """Octave session, with Osprey's bundled solver compiled first.
+
+        The core fit reaches lbfgsb_wrapper, and Osprey ships only MATLAB MEX binaries
+        of it. Best effort: the build needs mkoctfile, and everything outside the fit
+        works without it, so a failure here is reported rather than fatal.
+        """
+        if self._octave is None:
+            try:
+                build_lbfgsb(self._root)
+            except (FileNotFoundError, RuntimeError) as exc:
+                warnings.warn(f"Osprey's L-BFGS-B-C solver was not built ({exc}); "
+                              f"fit_runFit will fail, other functions are unaffected.",
+                              stacklevel=2)
+        return FIDABridge.octave.fget(self)
+
     #***********#
     #   codec   #
     #***********#
@@ -139,6 +201,31 @@ class OspreyBridge(FIDABridge):
         if self._codec is None:
             self._codec = OspreyCodec()
         return self._codec
+
+    #*****************#
+    #   fit options   #
+    #*****************#
+    @staticmethod
+    def fit_options(**overrides) -> dict:
+        """
+        Options for ``fit_runFit``, as Osprey's own initialisation would set them.
+
+        ``fit_runFit`` fills in only range, rangeWater and bLineKnotSpace when no options
+        are passed. The rest normally arrive from a job file by way of osp_fitInitialise,
+        and fit_Osprey reads them without checking, so calling fit_runFit directly fails
+        on the first one missing. GAP is the empty default osp_fitUnEdited passes, which
+        is ``MRSCont.opts.fit.GAP.A``, not the whole GAP struct.
+
+        Args:
+            **overrides: Fields to change, e.g. ``range=[0.5, 4.0]``.
+
+        Returns:
+            dict: Options ready to hand to ``fit_runFit``.
+        """
+        opts = {"range": [0.2, 4.2], "rangeWater": [2.0, 7.4],
+                "bLineKnotSpace": 0.4, "GAP": np.array([])}
+        opts.update(overrides)
+        return opts
 
     #***********#
     #   basis   #

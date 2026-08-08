@@ -7,10 +7,10 @@
 # Created: 2026-08-08                                                                              #
 #                                                                                                  #
 # Purpose: Package entry point. Exposes the toolbox bridges directly (mrsuite.fid_a,               #
-#          mrsuite.fsl_mrs) and stamps the shared NIfTI-MRS+ provenance. Bridges are               #
-#          imported lazily: resolving the FID-A one would start an Octave session, and the         #
-#          FSL-MRS one pulls in the whole FSL-MRS stack, neither of which a caller who only        #
-#          wants the pipeline should pay for.                                                      #
+#          mrsuite.fsl_mrs, mrsuite.osprey) and stamps the shared NIfTI-MRS+ provenance.           #
+#          Bridges are imported lazily: resolving an Octave-backed one would start a               #
+#          session, and the FSL-MRS one pulls in the whole FSL-MRS stack, neither of which         #
+#          a caller who only wants the pipeline should pay for.                                    #
 #                                                                                                  #
 ####################################################################################################
 
@@ -29,7 +29,7 @@ __version__ = "0.1.0a0"
 # processed data records which toolbox touched it.
 nifti_mrs_plus.set_provenance("MRSuite", __version__)
 
-_BRIDGES = {"fid_a", "fsl_mrs"}
+_BRIDGES = {"fid_a", "fsl_mrs", "osprey"}
 
 __all__ = ["__version__", *sorted(_BRIDGES)]
 

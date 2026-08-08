@@ -13,24 +13,6 @@ The MRSuite project is an open-source, modular framework for magnetic resonance 
 
 ---
 
-## Testing
-
-```sh
-pytest                 # everything
-pytest tests/octave    # one area
-```
-
-`tests/` mirrors the package: `tests/bridges` for `mrsuite/bridges`, `tests/octave` for
-`mrsuite/octave`, and so on.
-
-Some suites need an external engine and skip cleanly without it, so the suite is usable
-on a machine that has neither. Octave is used at runtime; MATLAB is only ever a *test*
-dependency, as the reference the Octave shims are measured against.
-
-```sh
-export PATH="/Applications/MATLAB_R2025a.app/bin:$PATH"   # enables the parity checks
-```
-
 ## Project Status
 > **Alpha Stage**  
 MRSuite is currently in active development. Core architecture and modular interfaces are being defined and tested. Contributions and feedback are welcome as we build toward a stable beta release.

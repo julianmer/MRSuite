@@ -16,6 +16,7 @@
 #*************#
 #   imports   #
 #*************#
+import tempfile
 import warnings
 from pathlib import Path
 from typing import Any, List, Optional
@@ -67,6 +68,21 @@ class OspreyCodec(FIDACodec):
     # what Osprey's io_loadspec_niimrs uses, against FSL-MRS's 4.65
     CENTRE_PPM = 4.68
 
+    #**********#
+    #   init   #
+    #**********#
+    def __init__(self, centre_ppm: Optional[float] = None):
+        """
+        Args:
+            centre_ppm (Optional[float]): ppm at the centre of the spectrum, for every
+                conversion this codec makes. It has to agree with the basis set the data
+                will be fitted against, since fit_resampleBasis interpolates one ppm axis
+                onto the other and a mismatch shifts the whole spectrum against the
+                model. Osprey's shipped basis sets say 3, an LCModel .BASIS commonly says
+                4.65, and Osprey's own loader assumes 4.68.
+        """
+        self.centre_ppm = self.CENTRE_PPM if centre_ppm is None else centre_ppm
+
     #****************#
     #   nifti2fida   #
     #****************#
@@ -76,13 +92,12 @@ class OspreyCodec(FIDACodec):
 
         Args:
             data (NIFTI_MRS): Input MRS data.
-            centre_ppm (Optional[float]): ppm at the centre of the spectrum. Defaults to
-                Osprey's own 4.68.
+            centre_ppm (Optional[float]): Overrides the codec's own centre for this call.
 
         Returns:
             dict: The struct, in Osprey's dialect.
         """
-        centre = self.CENTRE_PPM if centre_ppm is None else centre_ppm
+        centre = self.centre_ppm if centre_ppm is None else centre_ppm
         out = super().nifti2fida(data, centre_ppm=centre)
 
         fids = np.conj(np.asarray(out["fids"]))       # undo the upstream conjugation
@@ -168,9 +183,10 @@ class OspreyBridge(FIDABridge):
     #   init   #
     #**********#
     def __init__(self, osprey_root: Optional[str] = None, verbose: bool = False,
-                 runtime: Optional[str] = None):
+                 runtime: Optional[str] = None, centre_ppm: Optional[float] = None):
         super().__init__(fida_root=str(osprey_root or OSPREY_ROOT), verbose=verbose,
                          runtime=runtime)
+        self.centre_ppm = centre_ppm
 
     #************#
     #   octave   #
@@ -199,7 +215,7 @@ class OspreyBridge(FIDABridge):
     def codec(self) -> OspreyCodec:
         """Converter for NIfTI-MRS <-> Osprey's FID-A structs."""
         if self._codec is None:
-            self._codec = OspreyCodec()
+            self._codec = OspreyCodec(centre_ppm=self.centre_ppm)
         return self._codec
 
     #*****************#
@@ -246,6 +262,37 @@ class OspreyBridge(FIDABridge):
         """
         self.octave.eval(f"__b = load('{path}'); "
                          f"__basis = osp_recalculate_basis_specs(__b.BASIS);")
+        return self.octave.pull("__basis")
+
+    #**********************#
+    #   basis from lcmodel #
+    #**********************#
+    def basis_from_lcmodel(self, path: str, add_mm: bool = True) -> Any:
+        """
+        Build a basis set from an LCModel ``.BASIS`` file.
+
+        Osprey's own path in two steps, because neither half does the job alone:
+        io_readlcmraw_basis returns one FID-A struct per metabolite, and fit_makeBasis
+        assembles a container but only from a folder of ``.mat`` files. So the structs
+        are written out and handed straight back.
+
+        Args:
+            path (str): An LCModel ``.BASIS`` file.
+            add_mm (bool): Add Osprey's macromolecule and lipid basis functions.
+
+        Returns:
+            The basis set container, ready for ``fit_runFit``.
+        """
+        folder = tempfile.mkdtemp(prefix="mrsuite_basis_")
+        self.octave.eval(f"""
+            __raw = io_readlcmraw_basis('{path}');
+            __mets = fieldnames(__raw);
+            for __k = 1:numel(__mets)
+                b = __raw.(__mets{{__k}});
+                save('-v7', fullfile('{folder}', [__mets{{__k}} '.mat']), 'b');
+            end
+            __basis = fit_makeBasis('{folder}', {int(add_mm)}, 'unedited');
+        """)
         return self.octave.pull("__basis")
 
 

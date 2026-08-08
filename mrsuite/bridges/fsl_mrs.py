@@ -112,18 +112,17 @@ bridge = FSLMRSBridge()
 def _references(items: List[Any], water: Any) -> List[Any]:
     """Line a water reference up with the spectra it scales.
 
-    One reference serves a whole batch - the usual case, one unsuppressed acquisition
-    per session - and a batch of references is paired off one for one.
+    One per spectrum, which is how they are acquired. A single reference is not spread
+    across a batch: a batch is usually separate acquisitions, and scaling them all by
+    one subject's water would be wrong without being visibly wrong.
     """
     if water is None:
         return [None] * len(items)
 
     refs = water.list() if hasattr(water, "list") else [water]
-    if len(refs) == 1:
-        return refs * len(items)
     if len(refs) != len(items):
         raise ValueError(f"{len(refs)} water references for {len(items)} spectra; "
-                         f"give one for the batch or one each.")
+                         f"give one per spectrum.")
     return refs
 
 

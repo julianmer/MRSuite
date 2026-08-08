@@ -264,9 +264,9 @@ class OspreyBridge(FIDABridge):
                          f"__basis = osp_recalculate_basis_specs(__b.BASIS);")
         return self.octave.pull("__basis")
 
-    #**********************#
-    #   basis from lcmodel #
-    #**********************#
+    #************************#
+    #   basis from lcmodel   #
+    #************************#
     def basis_from_lcmodel(self, path: str, add_mm: bool = True) -> Any:
         """
         Build a basis set from an LCModel ``.BASIS`` file.

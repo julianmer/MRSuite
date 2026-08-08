@@ -275,9 +275,20 @@ def test_water_scaling_adds_the_molar_concentrations(spectrum, basis):
 #**************#
 #   fit refs   #
 #**************#
-def test_one_water_reference_serves_a_whole_batch(spectra, basis, spectrum):
-    """The usual acquisition: one unsuppressed scan for the session."""
-    out = fsl_mrs.fit(spectra, basis, water=spectrum, te=0.030, tr=2.0)
+def test_one_water_reference_is_not_spread_over_a_batch(spectra, basis, spectrum):
+    """A batch is separate acquisitions, so scaling them all by one subject's water
+    would be wrong without looking wrong. Rejected rather than broadcast."""
+    with pytest.raises(ValueError, match="1 water references for 2 spectra"):
+        fsl_mrs.fit(spectra, basis, water=spectrum, te=0.030, tr=2.0)
+
+
+#****************#
+#   fit paired   #
+#****************#
+def test_a_reference_per_spectrum_is_scaled(spectra, basis, spectrum):
+    water = NIfTI_MRS_Plus([spectrum.copy(), spectrum.copy()])
+
+    out = fsl_mrs.fit(spectra, basis, water=water, te=0.030, tr=2.0)
 
     assert len(out) == len(spectra)
     assert all("molarity" in r.concentrations for r in out)

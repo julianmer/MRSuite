@@ -1,0 +1,173 @@
+####################################################################################################
+#                                           __init__.py                                            #
+####################################################################################################
+#                                                                                                  #
+# Authors: J. P. Merkofer (j.p.merkofer@tue.nl)                                                    #
+#                                                                                                  #
+# Created: 2026-08-08                                                                              #
+#                                                                                                  #
+# Purpose: Octave compatibility layer for the MATLAB toolboxes MRSuite calls. Holds the            #
+#          shims for MATLAB-only functions Octave lacks, builds Osprey's bundled                   #
+#          L-BFGS-B-C optimiser as an Octave MEX, and starts sessions against either a             #
+#          local Octave or the container built from the dockerfile beside them.                    #
+#                                                                                                  #
+####################################################################################################
+
+
+#*************#
+#   imports   #
+#*************#
+import os
+import shutil
+import subprocess
+from typing import Optional
+
+from oct2py import Oct2Py
+
+from mrsuite.octave import docker
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+# "local" uses the octave-cli on PATH, "docker" the container built from the dockerfile
+# prefers local and falls back. Settable per session, or once via the environment.
+RUNTIME = os.environ.get("MRSUITE_OCTAVE_RUNTIME", "auto")
+
+
+#***************#
+#   shim path   #
+#***************#
+def shim_path() -> str:
+    """Directory holding the Octave shims, to prepend to the Octave path."""
+    return os.path.join(HERE, "shims")
+
+
+#*************#
+#   runtime   #
+#*************#
+def resolve_runtime(runtime: Optional[str] = None) -> str:
+    """Settle on 'local' or 'docker', raising if the choice cannot be honoured.
+
+    Args:
+        runtime: 'local', 'docker' or 'auto'. Defaults to ``RUNTIME``.
+
+    Returns:
+        The runtime to use.
+
+    Raises:
+        ValueError: If ``runtime`` is not one of the three.
+        RuntimeError: If the requested runtime is unavailable, or neither is.
+    """
+    runtime = runtime or RUNTIME
+    have_local = shutil.which("octave-cli") is not None
+
+    if runtime == "local":
+        if not have_local:
+            raise RuntimeError("no octave-cli on PATH; install Octave or use runtime='docker'")
+        return "local"
+
+    if runtime == "docker":
+        if not docker.available():
+            raise RuntimeError("no Docker daemon reachable; start Docker or use runtime='local'")
+        return "docker"
+
+    if runtime != "auto":
+        raise ValueError(f"unknown runtime '{runtime}'; expected 'local', 'docker' or 'auto'")
+
+    if have_local:
+        return "local"
+    if docker.available():
+        return "docker"
+    raise RuntimeError("no Octave available: install one, or start Docker for the "
+                       "containerised runtime (see mrsuite/octave/dockerfile)")
+
+
+#*************#
+#   session   #
+#*************#
+def session(root: str, runtime: Optional[str] = None, verbose: bool = False) -> Oct2Py:
+    """Start an Octave session with ``root`` and the shims on its path.
+
+    The container is a drop-in for a local interpreter rather than a separate execution
+    model, so the two runtimes differ only in which binary oct2py launches.
+
+    Args:
+        root: Toolbox directory to add recursively.
+        runtime: 'local', 'docker' or 'auto'. Defaults to ``RUNTIME``.
+        verbose: Leave Octave's warnings on.
+
+    Returns:
+        A live session.
+    """
+    which = resolve_runtime(runtime)
+
+    if which == "docker":
+        docker.start()
+        docker.TEMP_DIR.mkdir(exist_ok=True)
+        # oct2py reads OCTAVE_EXECUTABLE when it builds the engine, and nowhere else
+        previous = os.environ.get("OCTAVE_EXECUTABLE")
+        os.environ["OCTAVE_EXECUTABLE"] = docker.executable()
+        try:
+            oc = Oct2Py(temp_dir=str(docker.TEMP_DIR))
+        finally:
+            if previous is None:
+                os.environ.pop("OCTAVE_EXECUTABLE", None)
+            else:
+                os.environ["OCTAVE_EXECUTABLE"] = previous
+    else:
+        oc = Oct2Py()
+
+    if not verbose:
+        oc.eval("warning('off', 'all');")
+    oc.eval(f"addpath(genpath('{root}'));")
+    # shims last: addpath prepends, so this leaves them at the front where they can
+    # stand in for the MATLAB-only functions the toolboxes expect
+    oc.eval(f"addpath('{shim_path()}');")
+    return oc
+
+
+#******************#
+#   build lbfgsb   #
+#******************#
+def build_lbfgsb(osprey_root: str, force: bool = False) -> str:
+    """Build Osprey's L-BFGS-B-C wrapper as an Octave MEX.
+
+    Osprey's core fit reaches ``lbfgsb_wrapper``, and the binaries it ships are
+    MATLAB MEX files that Octave cannot load. The C sources are bundled, so the
+    fix is to compile them with ``mkoctfile``.
+
+    The one non-obvious part is ``-DMATLAB_MEX_FILE``: ``src/lbfgsb.h`` guards
+    ``#include "mex.h"`` behind that macro, and ``mkoctfile --mex`` does not define
+    it, so without it every ``mxArray``/``mexErrMsgTxt`` reference fails to compile.
+
+    Args:
+        osprey_root: Path to an Osprey checkout.
+        force: Rebuild even if an Octave MEX is already present.
+
+    Returns:
+        Path to the built ``lbfgsb_wrapper.mex``.
+
+    Raises:
+        FileNotFoundError: If the sources or ``mkoctfile`` are missing.
+        RuntimeError: If compilation fails.
+    """
+    lib = os.path.join(osprey_root, "libraries", "L-BFGS-B-C")
+    mat, src = os.path.join(lib, "Matlab"), os.path.join(lib, "src")
+    out = os.path.join(mat, "lbfgsb_wrapper.mex")
+
+    if os.path.exists(out) and not force:
+        return out
+    if not os.path.isdir(src):
+        raise FileNotFoundError(f"L-BFGS-B-C sources not found under {lib}")
+    if shutil.which("mkoctfile") is None:
+        raise FileNotFoundError("mkoctfile not on PATH — install Octave development files")
+
+    units = ["lbfgsb", "linesearch", "subalgorithms", "print", "linpack",
+             "miniCBLAS", "timer"]
+    cmd = ["mkoctfile", "--mex", "-DMATLAB_MEX_FILE", f"-I{src}", "-UDEBUG",
+           "-o", out, os.path.join(mat, "lbfgsb_wrapper.c")] + \
+          [os.path.join(src, f"{u}.c") for u in units]
+
+    proc = subprocess.run(cmd, capture_output=True, text=True, cwd=mat)
+    if proc.returncode != 0 or not os.path.exists(out):
+        raise RuntimeError(f"L-BFGS-B-C build failed:\n{proc.stderr[-2000:]}")
+    return out

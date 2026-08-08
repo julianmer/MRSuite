@@ -26,7 +26,7 @@ from fsl_mrs.utils import mrs_io
 # own
 from nifti_mrs_plus import NIfTI_MRS_Plus
 from mrsuite.core.pipeline import Pipeline
-from mrsuite.transforms.processing import fid_a, fsl_mrs
+from mrsuite import fid_a, fsl_mrs
 
 
 #*************************************************#
@@ -203,23 +203,29 @@ def main():
     else:
         raise ValueError("Unsupported dataset. Choose 'ismrm' or 'openneuro'.")
 
-    pipeline = Pipeline(modules=[
-        fsl_mrs.FSL_CoilCombine(verbose=True),
-        # fsl_mrs.FSL_Align(verbose=True),
-        # fsl_mrs.FSL_Average(verbose=True),
-        fid_a.FIDA_AlignAverages_fd(verbose=True),
-        # fid_a.FIDA_EddyCorrect(),
+    # A reference is just data: it goes through a pipeline of its own, and whatever
+    # needs it later closes over the processed one.
+    if water is not None:
+        water = Pipeline([fsl_mrs.step.coilcombine()]).run(water)
 
-    ])
-
-    processed_data, processed_water = pipeline.run(data, water)
+    # Any callable is a step. `bridge.step.f(args)` binds the arguments and takes the
+    # data later; your own function goes in as itself. FID-A and FSL-MRS interleave.
+    data = Pipeline([
+        fsl_mrs.step.coilcombine(),
+        # fsl_mrs.step.align(dim='DIM_DYN'),
+        # fid_a.step.op_rmbadaverages(4, 't'),
+        # fsl_mrs.step.average(dim='DIM_DYN'),
+        # fsl_mrs.step.ecc(water),
+    ]).run(data)
 
     print("Processing complete.")
-    print(processed_data.dim_tags)
-    print(processed_data.shape)
-    print(processed_water.shape)
-    print(processed_data[0].header)
-    print(processed_data[0].hdr_ext)
+    print(data.dim_tags)
+    print(data.shape)
+    # anything a step returned that was not spectra: metrics, indices
+    print(sorted(data.results()), sorted(data.results(index=0)))
+
+    # analysis comes after, and returns its results rather than hiding them in the data
+    # results = fsl_mrs.fit(data, mrs_io.read_basis(config['path2basis']))
 
 
 #***************************#

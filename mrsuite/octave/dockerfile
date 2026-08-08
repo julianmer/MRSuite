@@ -1,0 +1,36 @@
+####################################################################################################
+#                                            dockerfile                                            #
+####################################################################################################
+#                                                                                                  #
+# Authors: J. P. Merkofer (j.p.merkofer@tue.nl)                                                    #
+#                                                                                                  #
+# Created: 2026-08-08                                                                              #
+#                                                                                                  #
+# Purpose: An Octave interpreter for MRSuite, for machines without one installed. The image        #
+#          carries nothing but the runtime: MRSuite, its externals and the data stay on the        #
+#          host and are bind-mounted at their own paths, so a container session and a local        #
+#          session resolve every path identically. Built by mrsuite/octave/docker.py.              #
+#                                                                                                  #
+####################################################################################################
+
+FROM debian:bookworm-slim
+
+# octave-signal and octave-image are Debian's prebuilt forge packages, so no headless
+# `pkg install -forge` compile step. liboctave-dev supplies mkoctfile, which builds
+# Osprey's bundled L-BFGS-B-C solver.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        octave \
+        liboctave-dev \
+        octave-signal \
+        octave-image \
+        build-essential \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# The forge packages are installed but deliberately not loaded: MRSuite's shims cover
+# what the toolboxes need, and leaving them unloaded keeps a container session on the
+# same code path as a local one. Load them explicitly if you want them.
+
+# oct2py drives octave-cli over a pipe, so the container just has to stay alive and let
+# `docker exec` in; the session itself is started per call by the launcher docker.py writes.
+CMD ["sleep", "infinity"]

@@ -7,3 +7,6 @@
 [submodule "data/2016_fitting_challenge"]
 	path = data/2016_fitting_challenge
 	url = https://github.com/wtclarke/mrs_fitting_challenge
+[submodule "externals/osprey"]
+	path = externals/osprey
+	url = https://github.com/schorschinho/osprey.git

@@ -95,6 +95,19 @@ def test_a_batch_gives_one_result_per_spectrum(spectra):
     assert out[0].conc("raw")["NAA"] == pytest.approx(out[1].conc("raw")["NAA"])
 
 
+#*******************#
+#   water scaling   #
+#*******************#
+def test_water_scaled_concentrations_are_filed_as_molarity(spectrum):
+    """With a reference LCModel's column is mM, so it must land where FSL-MRS files
+    water-scaled values: comparing conc('raw') across the two would compare different
+    physical quantities."""
+    out = lcmodel.fit(spectrum, CHALLENGE_BASIS, water=spectrum)
+
+    assert "molarity" in out.concentrations and "raw" not in out.concentrations
+    assert out.conc("molarity")["NAA"] > 0
+
+
 #***********#
 #   water   #
 #***********#

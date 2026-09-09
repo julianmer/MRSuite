@@ -25,7 +25,8 @@ from mrsuite.core.result import FitResult
 #***************#
 #   to result   #
 #***************#
-def to_result(parsed: tuple, method: str = "lcmodel:LCModel") -> FitResult:
+def to_result(parsed: tuple, method: str = "lcmodel:LCModel",
+              scaling: str = "raw") -> FitResult:
     """
     Map one parsed LCModel ``.coord`` onto MRSuite's uniform result.
 
@@ -33,17 +34,21 @@ def to_result(parsed: tuple, method: str = "lcmodel:LCModel") -> FitResult:
         parsed (tuple): What ``coord.read_coord(path, meta=True)`` returned, i.e.
             (metabolites, concentrations, %SD, /Cr+PCr ratios, FWHM, S/N, shift, phase).
         method (str): Recorded on the result.
+        scaling (str): Where the concentration column is filed. LCModel reports one
+            column whose meaning depends on the fit: unreferenced numbers ('raw'), or
+            mM when a water reference enabled its water scaling ('molarity', matching
+            where FSL-MRS files water-scaled values).
 
     Returns:
-        FitResult: With raw and creatine-referenced concentrations, %SD as the
-        uncertainty, and LCModel's own FWHM and S/N as QC.
+        FitResult: With the reported and creatine-referenced concentrations, %SD as
+        the uncertainty, and LCModel's own FWHM and S/N as QC.
     """
     metabs, concs, crlbs, tcr, fwhm, snr, shift, phase = parsed
 
     out = FitResult(
         method=method,
         metabolites=list(metabs),
-        concentrations={"raw": dict(zip(metabs, (float(c) for c in concs))),
+        concentrations={scaling: dict(zip(metabs, (float(c) for c in concs))),
                         "internal": dict(zip(metabs, (float(t) for t in tcr)))},
         uncertainties={"percentage": dict(zip(metabs, (float(c) for c in crlbs)))},
         raw={"shift": shift, "phase": phase, "coord": parsed})
@@ -66,7 +71,9 @@ def fit(data: Any, basis: str, water: Any = None, ppmlim: tuple = (0.5, 4.2),
     Args:
         data: NIfTI-MRS or NIfTI-MRS+. A batch is fitted spectrum by spectrum.
         basis (str): Path to an LCModel ``.basis`` file.
-        water: Unsuppressed reference, enabling LCModel's water scaling. One per spectrum.
+        water: Unsuppressed reference, enabling LCModel's water scaling. One per
+            spectrum. With it the concentrations are mM and filed under 'molarity';
+            without it they are unreferenced and filed under 'raw'.
         ppmlim (tuple): Fit range in ppm.
         **kwargs: Passed to ``PyLCModel``, e.g. ``path2exec``, ``save_path``, ``conj``.
 
@@ -76,6 +83,7 @@ def fit(data: Any, basis: str, water: Any = None, ppmlim: tuple = (0.5, 4.2),
     from lcmodel_wrapper import PyLCModel
 
     engine = PyLCModel(path2basis=basis, ppmlim=ppmlim, **kwargs)
-    out = [to_result(report) for report in engine.report(data, water)]
+    scaling = "raw" if water is None else "molarity"
+    out = [to_result(report, scaling=scaling) for report in engine.report(data, water)]
 
     return out if hasattr(data, "list") else out[0]

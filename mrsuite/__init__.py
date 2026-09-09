@@ -7,7 +7,7 @@
 # Created: 2026-08-08                                                                              #
 #                                                                                                  #
 # Purpose: Package entry point. Exposes the toolbox bridges directly (mrsuite.fid_a,               #
-#          mrsuite.fsl_mrs, mrsuite.osprey, mrsuite.lcmodel) and stamps the shared             #
+#          mrsuite.fsl_mrs, mrsuite.osprey, mrsuite.lcmodel) and stamps the shared                 #
 #          NIfTI-MRS+ provenance.                                                                  #
 #          Bridges are imported lazily: resolving an Octave-backed one would start a               #
 #          session, and the FSL-MRS one pulls in the whole FSL-MRS stack, neither of which         #

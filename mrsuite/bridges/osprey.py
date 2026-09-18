@@ -16,6 +16,8 @@
 #*************#
 #   imports   #
 #*************#
+import os
+import re
 import warnings
 from pathlib import Path
 from typing import Any, List, Optional
@@ -267,7 +269,8 @@ class OspreyBridge(FIDABridge):
     #************************#
     #   basis from lcmodel   #
     #************************#
-    def basis_from_lcmodel(self, path: str, add_mm: bool = True) -> Any:
+    def basis_from_lcmodel(self, path: str, add_mm: bool = True,
+                           centre_ppm: Optional[float] = None) -> Any:
         """
         Build a basis set from an LCModel ``.BASIS`` file.
 
@@ -276,16 +279,34 @@ class OspreyBridge(FIDABridge):
         assembles a container but only from a folder of ``.mat`` files. So the structs
         are written out and handed straight back.
 
+        The file is read from a copy in the scratch folder, which the container sees
+        wherever the original lives. io_readlcmraw_basis takes the ppm at the centre from
+        PPMSEP in the $NMUSED block MakeBasis writes, and without it fit_makeBasis puts
+        the centre at 3 ppm; a file that does not state it (PyLCModel's, for one) gets
+        the block in the copy, at ``centre_ppm``.
+
         Args:
             path (str): An LCModel ``.BASIS`` file.
             add_mm (bool): Add Osprey's macromolecule and lipid basis functions.
+            centre_ppm (Optional[float]): ppm at the centre, for a file without PPMSEP.
+                Defaults to the codec's, so that basis and data share one axis.
 
         Returns:
             The basis set container, ready for ``fit_runFit``.
         """
         folder = scratch("mrsuite_basis_")
+        with open(path) as fh:
+            text = fh.read()
+        if "PPMSEP" not in text:
+            centre = self.codec.centre_ppm if centre_ppm is None else centre_ppm
+            text = re.sub(r"^([ \t]*\$BASIS[ \t\r]*)$",
+                          f" $NMUSED\n PPMSEP = {centre},\n $END\n\\1", text, flags=re.M)
+        source = os.path.join(folder, "source.basis")
+        with open(source, "w") as fh:
+            fh.write(text)
+
         self.octave.eval(f"""
-            __raw = io_readlcmraw_basis('{path}');
+            __raw = io_readlcmraw_basis('{source}');
             __mets = fieldnames(__raw);
             for __k = 1:numel(__mets)
                 b = __raw.(__mets{{__k}});

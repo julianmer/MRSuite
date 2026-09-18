@@ -17,6 +17,10 @@
 #   imports   #
 #*************#
 
+import os
+import re
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -24,7 +28,7 @@ from mrsuite.bridges.fid_a import FIDACodec
 from mrsuite.bridges.osprey import OSPREY_ROOT, OspreyCodec
 from mrsuite.core.result import FitResult
 
-from tests.conftest import needs_octave
+from tests.conftest import CHALLENGE_BASIS, needs_octave
 
 BASIS = (OSPREY_ROOT / "fit" / "basissets" / "3T" / "siemens" / "unedited"
          / "press" / "30" / "basis_siemens_press30.mat")
@@ -166,6 +170,44 @@ def test_loading_a_basis_adds_the_spectra_and_axis():
     basis = bridge.basis(str(BASIS))
     assert "ppm" in basis and "specs" in basis
     assert np.asarray(basis["fids"]).shape[1] == int(basis["nMets"]) + int(basis["nMM"])
+
+
+#*******************#
+#   lcmodel basis   #
+#*******************#
+needs_challenge_basis = pytest.mark.skipif(not os.path.exists(CHALLENGE_BASIS),
+                                           reason="challenge submodule not checked out")
+
+
+def peak_ppm(basis, name, lo=1.8, hi=2.2):
+    """Where a basis function peaks, on the container's own ppm axis."""
+    ppm = np.asarray(basis["ppm"]).ravel()
+    names = [str(n) for n in np.asarray(basis["name"]).ravel()]
+    spec = np.real(np.asarray(basis["specs"])[:, names.index(name)])
+    band = (ppm > lo) & (ppm < hi)
+    return ppm[band][np.argmax(spec[band])]
+
+
+@needs_octave
+@needs_challenge_basis
+def test_a_basis_without_ppmsep_is_read_at_the_given_centre(tmp_path):
+    """MakeBasis states the centre as PPMSEP in a $NMUSED block, and without one
+    fit_makeBasis puts it at 3 ppm, 1.65 ppm away from the data. Written outside the
+    repo on purpose: the container sees only the copy that is read."""
+    from mrsuite.bridges.osprey import bridge
+
+    text = re.sub(r"^[ \t]*\$NMUSED.*?\$END[ \t]*\n", "", Path(CHALLENGE_BASIS).read_text(),
+                  flags=re.S | re.M)
+    assert "PPMSEP" not in text
+    bare = tmp_path / "no_ppmsep.BASIS"
+    bare.write_text(text)
+
+    stated = bridge.basis_from_lcmodel(CHALLENGE_BASIS, add_mm=False)
+    missing = bridge.basis_from_lcmodel(str(bare), add_mm=False, centre_ppm=4.65)
+    for basis in (stated, missing):
+        ppm = np.asarray(basis["ppm"]).ravel()
+        assert abs(ppm[len(ppm) // 2] - 4.65) < 0.01
+        assert abs(peak_ppm(basis, "NAA") - 2.01) < 0.02
 
 
 #*********#

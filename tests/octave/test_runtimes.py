@@ -86,6 +86,20 @@ def test_session_runs_octave(runtime):
 #   shims   #
 #***********#
 @runtimes
+def test_sessions_keep_their_exchange_files_apart(runtime):
+    """oct2py passes every call through writer.mat and reader.mat in its temp folder, so
+    sessions sharing one, as parallel workers would, overwrite each other's data."""
+    a = session(str(docker.REPO), runtime=runtime)
+    b = session(str(docker.REPO), runtime=runtime)
+    try:
+        assert a.temp_dir != b.temp_dir
+        assert int(a.eval("1 + 1", nout=1)) == int(b.eval("1 + 1", nout=1)) == 2
+    finally:
+        a.exit()
+        b.exit()
+
+
+@runtimes
 def test_shims_are_on_the_path(runtime, bridges):
     """The shims are added last so they sit at the front, on either runtime.
 

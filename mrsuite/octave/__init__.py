@@ -17,6 +17,7 @@
 #*************#
 #   imports   #
 #*************#
+import atexit
 import os
 import platform
 import shutil
@@ -123,8 +124,12 @@ def session(root: str, runtime: Optional[str] = None, verbose: bool = False) -> 
         # oct2py reads OCTAVE_EXECUTABLE when it builds the engine, and nowhere else
         previous = os.environ.get("OCTAVE_EXECUTABLE")
         os.environ["OCTAVE_EXECUTABLE"] = docker.executable()
+        # a folder of its own: oct2py passes every call through writer.mat and reader.mat
+        # in it, so sessions sharing one overwrite each other's data
+        exchange = scratch("oct2py_")
+        atexit.register(shutil.rmtree, exchange, True)
         try:
-            oc = Oct2Py(temp_dir=str(docker.TEMP_DIR))
+            oc = Oct2Py(temp_dir=exchange)
         finally:
             if previous is None:
                 os.environ.pop("OCTAVE_EXECUTABLE", None)

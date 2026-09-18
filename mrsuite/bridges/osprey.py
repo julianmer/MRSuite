@@ -284,7 +284,8 @@ class OspreyBridge(FIDABridge):
         PPMSEP in the $NMUSED block MakeBasis writes, and without it fit_makeBasis puts
         the centre at 3 ppm; a file that does not state it (PyLCModel's, for one) gets
         the block in the copy, at ``centre_ppm``. Its flipud(fftshift(conj(.))) also
-        lands an even-length spectrum one bin low, which is shifted back.
+        lands an even-length spectrum one bin low, which is shifted back. fit_makeBasis
+        saves what it builds in Octave's working folder, so it runs in the scratch one.
 
         Args:
             path (str): An LCModel ``.BASIS`` file.
@@ -317,7 +318,13 @@ class OspreyBridge(FIDABridge):
                 end
                 save('-v7', fullfile('{folder}', [__mets{{__k}} '.mat']), 'b');
             end
-            __basis = fit_makeBasis('{folder}', {int(add_mm)}, 'unedited');
+            __here = pwd;
+            cd('{folder}');
+            unwind_protect
+                __basis = fit_makeBasis('{folder}', {int(add_mm)}, 'unedited');
+            unwind_protect_cleanup
+                cd(__here);
+            end_unwind_protect
         """)
         return self.octave.pull("__basis")
 

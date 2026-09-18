@@ -239,6 +239,21 @@ def test_a_basis_is_read_without_a_frequency_shift():
         assert np.linalg.norm(got - scale * want) / np.linalg.norm(got) < 1e-6, name
 
 
+@needs_octave
+@needs_challenge_basis
+def test_reading_a_basis_leaves_no_file_behind():
+    """fit_makeBasis saves the container as BASIS_noMM.mat in Octave's working folder,
+    which is wherever the session started: the caller's folder, or the repo in Docker."""
+    from mrsuite.bridges.osprey import bridge
+    from mrsuite.octave import docker
+
+    places = {Path.cwd(), docker.REPO}
+    before = {p for d in places for p in d.glob("BASIS_*.mat")}
+    bridge.basis_from_lcmodel(CHALLENGE_BASIS, add_mm=False)
+    after = {p for d in places for p in d.glob("BASIS_*.mat")}
+    assert after == before, f"left behind: {sorted(after - before)}"
+
+
 #*********#
 #   fit   #
 #*********#

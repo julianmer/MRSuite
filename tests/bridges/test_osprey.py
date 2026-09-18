@@ -213,6 +213,32 @@ def test_a_fit_becomes_a_uniform_result(spectrum):
     assert out.qc["fwhm"] > 0
 
 
+#***********#
+#   scale   #
+#***********#
+@needs_octave
+@pytest.mark.skipif(not BASIS.exists(), reason="osprey submodule not checked out")
+def test_the_fit_does_not_depend_on_the_data_scale(spectrum):
+    """osp_fitInitialise divides the data by max(real(data)) / max(real(basis)) before
+    fitting, and the soft priors are weighed against the unnormalised residual: without
+    that step a spectrum and the same spectrum times 1024 fit differently.
+
+    A power of two, so the scaled data are the same bits: this spectrum sits on a knife
+    edge, and a factor of 1000 moves the fit through rounding alone (1e-16 relative).
+    """
+    from nifti_mrs.create_nmrs import gen_nifti_mrs
+    from mrsuite.bridges import osprey
+
+    basis = osprey.bridge.basis(str(BASIS))
+    louder = gen_nifti_mrs(np.asarray(spectrum[:]) * 1024.0, spectrum.dwelltime,
+                           spectrum.spectrometer_frequency[0], nucleus=spectrum.nucleus[0])
+    quiet, loud = osprey.fit(spectrum, basis), osprey.fit(louder, basis)
+
+    for name, value in quiet.conc("internal").items():
+        assert loud.conc("internal")[name] == pytest.approx(value, rel=1e-9, abs=1e-12), name
+    assert loud.conc("raw")["NAA"] == pytest.approx(1024 * quiet.conc("raw")["NAA"], rel=1e-9)
+
+
 #*****************#
 #   referencing   #
 #*****************#

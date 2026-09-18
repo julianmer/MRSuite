@@ -300,7 +300,7 @@ class OspreyBridge(FIDABridge):
 #   to result   #
 #***************#
 def to_result(params: dict, res_basis: dict, crlb: Any = None,
-              method: str = "osprey:Osprey") -> FitResult:
+              method: str = "osprey:Osprey", scale: float = 1.0) -> FitResult:
     """
     Map an Osprey fit onto MRSuite's uniform result.
 
@@ -314,13 +314,15 @@ def to_result(params: dict, res_basis: dict, crlb: Any = None,
             the metabolite names in fit order.
         crlb: Cramer-Rao lower bounds from ``fit_Osprey_CRLB``, when they were computed.
         method (str): Recorded on the result.
+        scale (float): What the data were divided by before the fit; the raw amplitudes
+            are multiplied back, so they stay in the units of the data passed in.
 
     Returns:
         FitResult: Raw and creatine-referenced concentrations, CRLBs when available, and
         the linewidth and residual Osprey reports as QC.
     """
     names = [str(n) for n in np.asarray(res_basis["name"]).ravel()]
-    ampl = np.asarray(params["ampl"], dtype=float).ravel()
+    ampl = np.asarray(params["ampl"], dtype=float).ravel() * scale
     raw = dict(zip(names, (float(a) for a in ampl)))
 
     concentrations = {"raw": raw}
@@ -341,7 +343,7 @@ def to_result(params: dict, res_basis: dict, crlb: Any = None,
 
     return FitResult(method=method, metabolites=names, concentrations=concentrations,
                      uncertainties=uncertainties, qc=qc,
-                     raw={"fitParams": params, "resBasisSet": res_basis})
+                     raw={"fitParams": params, "resBasisSet": res_basis, "scale": scale})
 
 
 bridge = OspreyBridge()
@@ -354,6 +356,11 @@ def fit(data: Any, basis: Any, fit_opts: Optional[dict] = None,
         crlb: bool = False) -> Any:
     """
     Fit with Osprey, as MRSuite's uniform result.
+
+    Each spectrum is divided by Osprey's own scale first, max(real(data)) over
+    max(real(basis)), as osp_fitInitialise sets it for osp_fitUnEdited: the soft priors
+    on linewidths and shifts are weighed against the unnormalised residual, so without
+    it the fit, not just its amplitudes, depends on the scale of the data.
 
     Args:
         data: NIfTI-MRS or NIfTI-MRS+. A batch is fitted spectrum by spectrum.
@@ -371,16 +378,22 @@ def fit(data: Any, basis: Any, fit_opts: Optional[dict] = None,
     """
     opts = bridge.fit_options(**(fit_opts or {}))
     items = data.list() if hasattr(data, "list") else [data]
+    basis_max = float(np.max(np.real(np.asarray(basis["specs"]))))
 
     out = []
     for one in items:
-        params, res_basis = bridge.fit_runFit(one, basis, "Osprey", opts, nout=2)
+        struct = bridge.codec.nifti2fida(one)
+        scale = float(np.max(np.real(np.asarray(struct["specs"])))) / basis_max
+        struct["fids"] = np.asarray(struct["fids"]) / scale
+        struct["specs"] = np.asarray(struct["specs"]) / scale
+
+        params, res_basis = bridge.fit_runFit(struct, basis, "Osprey", opts, nout=2)
         bounds = None
         if crlb:
             _, _, bounds = bridge.fit_Osprey_CRLB(
-                one, basis, opts["bLineKnotSpace"], opts["range"], params,
+                struct, basis, opts["bLineKnotSpace"], opts["range"], params,
                 float(np.asarray(params["refShift"]).ravel()[0]), nout=3)
-        out.append(to_result(params, res_basis, bounds))
+        out.append(to_result(params, res_basis, bounds, scale=scale))
 
     return out if hasattr(data, "list") else out[0]
 

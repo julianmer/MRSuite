@@ -210,6 +210,35 @@ def test_a_basis_without_ppmsep_is_read_at_the_given_centre(tmp_path):
         assert abs(peak_ppm(basis, "NAA") - 2.01) < 0.02
 
 
+def basis_blocks(path):
+    """The spectrum every $BASIS block of a .BASIS file holds, by metabolite."""
+    blocks = {}
+    for m in re.finditer(r"\$BASIS\s(.*?)\$END(.*?)(?=\$|\Z)", Path(path).read_text(), re.S):
+        name = re.search(r"METABO\s*=\s*'([^']*)'", m.group(1)).group(1).strip()
+        values = np.array(m.group(2).split(), dtype=float)
+        blocks[name] = values[0::2] + 1j * values[1::2]
+    return blocks
+
+
+@needs_octave
+@needs_challenge_basis
+def test_a_basis_is_read_without_a_frequency_shift():
+    """A .BASIS block is the FFT of the FID in LCModel's orientation, the conjugate of
+    NIfTI-MRS'. io_readlcmraw_basis reorders it with flipud(fftshift(conj(.))), which
+    for an even length lands one bin off: every function 0.98 Hz low here, since
+    fit_makeBasis' op_dccorr changes only the first point."""
+    from mrsuite.bridges.osprey import bridge
+
+    basis = bridge.basis_from_lcmodel(CHALLENGE_BASIS, add_mm=False)
+    names = [str(n) for n in np.asarray(basis["name"]).ravel()]
+    fids = np.asarray(basis["fids"])
+    for name, spec in basis_blocks(CHALLENGE_BASIS).items():
+        want = np.conj(np.fft.ifft(spec))[1:]
+        got = fids[1:, names.index(name)]
+        scale = np.vdot(want, got) / np.vdot(want, want)
+        assert np.linalg.norm(got - scale * want) / np.linalg.norm(got) < 1e-6, name
+
+
 #*********#
 #   fit   #
 #*********#

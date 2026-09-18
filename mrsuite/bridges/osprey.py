@@ -283,7 +283,8 @@ class OspreyBridge(FIDABridge):
         wherever the original lives. io_readlcmraw_basis takes the ppm at the centre from
         PPMSEP in the $NMUSED block MakeBasis writes, and without it fit_makeBasis puts
         the centre at 3 ppm; a file that does not state it (PyLCModel's, for one) gets
-        the block in the copy, at ``centre_ppm``.
+        the block in the copy, at ``centre_ppm``. Its flipud(fftshift(conj(.))) also
+        lands an even-length spectrum one bin low, which is shifted back.
 
         Args:
             path (str): An LCModel ``.BASIS`` file.
@@ -310,6 +311,10 @@ class OspreyBridge(FIDABridge):
             __mets = fieldnames(__raw);
             for __k = 1:numel(__mets)
                 b = __raw.(__mets{{__k}});
+                if mod(numel(b.specs), 2) == 0
+                    b.specs = circshift(b.specs, 1);
+                    b.fids = ifft(ifftshift(b.specs, 1), [], 1);
+                end
                 save('-v7', fullfile('{folder}', [__mets{{__k}} '.mat']), 'b');
             end
             __basis = fit_makeBasis('{folder}', {int(add_mm)}, 'unedited');

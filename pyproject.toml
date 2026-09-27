@@ -34,6 +34,10 @@ dependencies = [
     # loads the MRSI challenge; git main until a release ships MRSIChallengeDataModule
     "augmentrum @ git+https://github.com/julianmer/Augmentrum.git@main",
     "h5py",           # reads the MRSI challenge's basis set out of its .mat files
+    "torch",          # the published models: WAND and the MLPs
+    "huggingface_hub",   # the model zoo: from_pretrained and push_to_hub
+    "safetensors",    # the Hub's format for PyTorch weights
+    "ssqueezepy>=0.6.6",   # WAND's wavelet transform; 0.6.4 calls a SciPy function now removed
 ]
 
 [project.optional-dependencies]

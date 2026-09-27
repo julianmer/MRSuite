@@ -10,3 +10,9 @@
 [submodule "externals/osprey"]
 	path = externals/osprey
 	url = https://github.com/schorschinho/osprey.git
+[submodule "externals/wand-for-mrs"]
+	path = externals/wand-for-mrs
+	url = https://github.com/julianmer/WAND-for-MRS.git
+[submodule "externals/ood-robust-mrs"]
+	path = externals/ood-robust-mrs
+	url = https://github.com/julianmer/OoD-Robust-MRS-Quantification.git

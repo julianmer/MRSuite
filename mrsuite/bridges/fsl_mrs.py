@@ -26,6 +26,7 @@ import numpy as np
 from fsl_mrs.utils.preproc import nifti_mrs_proc
 
 from mrsuite.bridges.base import Bridge
+from mrsuite.core.parallel import over_processes
 from mrsuite.core.provenance import checksum, entry, file_checksum, history
 from mrsuite.core.result import FitResult
 
@@ -140,6 +141,7 @@ def _references(items: List[Any], water: Any) -> List[Any]:
 #*********#
 #   fit   #
 #*********#
+@over_processes
 def fit(data: Any, basis: Any, water: Any = None, ppmlim: tuple = (0.2, 4.2),
         baseline_order: int = 2, method: str = "Newton",
         te: Optional[float] = None, tr: Optional[float] = None, **kwargs) -> Any:
@@ -163,6 +165,7 @@ def fit(data: Any, basis: Any, water: Any = None, ppmlim: tuple = (0.2, 4.2),
             header when absent.
         tr (Optional[float]): Repetition time in seconds, likewise.
         **kwargs: Passed through to ``fit_FSLModel``.
+        workers (int): Processes to spread a batch over (see ``over_processes``).
 
     Returns:
         A FitResult, or one per spectrum for a batch, each with the data's processing

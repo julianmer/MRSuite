@@ -22,6 +22,7 @@ import sys
 from typing import Any
 
 from mrsuite.bridges.base import Deferred
+from mrsuite.core.parallel import over_processes
 from mrsuite.core.provenance import entry, file_checksum, history
 from mrsuite.core.result import FitResult
 from mrsuite.octave import scratch
@@ -68,6 +69,7 @@ def to_result(parsed: tuple, method: str = "lcmodel:LCModel",
 #*********#
 #   fit   #
 #*********#
+@over_processes
 def fit(data: Any, basis: str, water: Any = None, ppmlim: tuple = (0.5, 4.2),
         **kwargs) -> Any:
     """
@@ -84,6 +86,7 @@ def fit(data: Any, basis: str, water: Any = None, ppmlim: tuple = (0.5, 4.2),
             Without a ``save_path`` each call works in a folder of its own, removed
             afterwards: PyLCModel's default is ./tmp with fixed file names, so two fits
             started from one directory at once would overwrite each other's files.
+        workers (int): Processes to spread a batch over (see ``over_processes``).
 
     Returns:
         A FitResult, or one per spectrum for a batch, each with the data's processing

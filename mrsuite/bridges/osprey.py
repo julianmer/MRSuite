@@ -29,9 +29,10 @@ from nifti_mrs.nifti_mrs import NIFTI_MRS
 
 from mrsuite import __version__
 from mrsuite.bridges.fid_a import FIDABridge, FIDACodec
+from mrsuite.core.parallel import over_processes
 from mrsuite.core.provenance import entry, file_checksum, history
 from mrsuite.core.result import FitResult
-from mrsuite.octave import build_lbfgsb, scratch
+from mrsuite.octave import build_lbfgsb, resolve_runtime, scratch
 
 OSPREY_ROOT = Path(__file__).resolve().parents[2] / "externals" / "osprey"
 
@@ -202,7 +203,7 @@ class OspreyBridge(FIDABridge):
         of it. Best effort: the build needs mkoctfile, and everything outside the fit
         works without it, so a failure here is reported rather than fatal.
         """
-        if self._octave is None:
+        if self._octave is None and resolve_runtime(self._runtime) != "matlab":
             try:
                 build_lbfgsb(self._root, runtime=self._runtime)
             except (FileNotFoundError, RuntimeError) as exc:
@@ -263,9 +264,9 @@ class OspreyBridge(FIDABridge):
         Returns:
             The basis set container, as an Octave struct.
         """
-        self.octave.eval(f"__b = load('{path}'); "
-                         f"__basis = osp_recalculate_basis_specs(__b.BASIS);")
-        return self.octave.pull("__basis")
+        self.octave.eval(f"mrsuite_b = load('{path}'); "
+                         f"mrsuite_basis = osp_recalculate_basis_specs(mrsuite_b.BASIS);")
+        return self.octave.pull("mrsuite_basis")
 
     #************************#
     #   basis from lcmodel   #
@@ -310,26 +311,30 @@ class OspreyBridge(FIDABridge):
         with open(source, "w") as fh:
             fh.write(text)
 
+        # MATLAB as well as Octave: plain names, as MATLAB's cannot start with an
+        # underscore, and try/catch rather than Octave's unwind_protect
         self.octave.eval(f"""
-            __raw = io_readlcmraw_basis('{source}');
-            __mets = fieldnames(__raw);
-            for __k = 1:numel(__mets)
-                b = __raw.(__mets{{__k}});
+            mrsuite_raw = io_readlcmraw_basis('{source}');
+            mrsuite_mets = fieldnames(mrsuite_raw);
+            for mrsuite_k = 1:numel(mrsuite_mets)
+                b = mrsuite_raw.(mrsuite_mets{{mrsuite_k}});
                 if mod(numel(b.specs), 2) == 0
                     b.specs = circshift(b.specs, 1);
                     b.fids = ifft(ifftshift(b.specs, 1), [], 1);
                 end
-                save('-v7', fullfile('{folder}', [__mets{{__k}} '.mat']), 'b');
+                save(fullfile('{folder}', [mrsuite_mets{{mrsuite_k}} '.mat']), 'b', '-v7');
             end
-            __here = pwd;
+            mrsuite_here = pwd;
             cd('{folder}');
-            unwind_protect
-                __basis = fit_makeBasis('{folder}', {int(add_mm)}, 'unedited');
-            unwind_protect_cleanup
-                cd(__here);
-            end_unwind_protect
+            try
+                mrsuite_basis = fit_makeBasis('{folder}', {int(add_mm)}, 'unedited');
+            catch mrsuite_error
+                cd(mrsuite_here);
+                rethrow(mrsuite_error);
+            end
+            cd(mrsuite_here);
         """)
-        return self.octave.pull("__basis")
+        return self.octave.pull("mrsuite_basis")
 
 
 #***************#
@@ -384,10 +389,14 @@ def to_result(params: dict, res_basis: dict, crlb: Any = None,
 
 bridge = OspreyBridge()
 
+# basis containers built from .BASIS files in this process, by (path, mtime)
+_containers = {}
+
 
 #*********#
 #   fit   #
 #*********#
+@over_processes
 def fit(data: Any, basis: Any, fit_opts: Optional[dict] = None,
         crlb: bool = False) -> Any:
     """
@@ -411,6 +420,7 @@ def fit(data: Any, basis: Any, fit_opts: Optional[dict] = None,
             routine does not stand alone. An Osprey result therefore carries
             concentrations and QC but no uncertainties - enough to compare values
             against another method, not enough to weight that comparison.
+        workers (int): Processes to spread a batch over (see ``over_processes``).
 
     Returns:
         A FitResult, or one per spectrum for a batch, each with the data's processing
@@ -418,7 +428,11 @@ def fit(data: Any, basis: Any, fit_opts: Optional[dict] = None,
     """
     if isinstance(basis, (str, os.PathLike)):
         source = file_checksum(basis)
-        basis = bridge.basis_from_lcmodel(str(basis), add_mm=False)
+        # built once per file and process: a batch split over workers calls this per chunk
+        key = (os.path.abspath(basis), os.path.getmtime(basis))
+        if key not in _containers:
+            _containers[key] = bridge.basis_from_lcmodel(str(basis), add_mm=False)
+        basis = _containers[key]
     else:
         source = basis
     opts = bridge.fit_options(**(fit_opts or {}))

@@ -30,7 +30,7 @@ __version__ = "0.1.0a0"
 # processed data records which toolbox touched it.
 nifti_mrs_plus.set_provenance("MRSuite", __version__)
 
-_BRIDGES = {"fid_a", "fsl_mrs", "lcmodel", "osprey"}
+_BRIDGES = {"fid_a", "fsl_mrs", "lcmodel", "osprey", "spant"}
 
 __all__ = ["__version__", *sorted(_BRIDGES)]
 

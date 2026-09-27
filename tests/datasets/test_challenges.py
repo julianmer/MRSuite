@@ -23,6 +23,7 @@ import json
 import numpy as np
 import pytest
 
+from mrsuite import r
 from mrsuite.core.pipeline import Pipeline
 from mrsuite.core.result import FitResult
 from mrsuite.datasets import challenge2016, mrsi_challenge
@@ -72,9 +73,12 @@ def _fit(fitter, data, path):
     return Pipeline([module.step.fit(path)]).run(data)
 
 
+needs_r = pytest.mark.skipif(not r.available(), reason="Rscript not on PATH")
+
 FITTERS = [pytest.param("fsl_mrs", id="fsl_mrs"),
            pytest.param("lcmodel", id="lcmodel", marks=needs_lcmodel),
-           pytest.param("osprey", id="osprey", marks=needs_octave)]
+           pytest.param("osprey", id="osprey", marks=needs_octave),
+           pytest.param("spant", id="spant", marks=needs_r)]
 
 
 #*************#

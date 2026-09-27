@@ -17,12 +17,14 @@
 #*************#
 #   imports   #
 #*************#
+import shutil
 import sys
 from typing import Any
 
 from mrsuite.bridges.base import Deferred
 from mrsuite.core.provenance import entry, file_checksum, history
 from mrsuite.core.result import FitResult
+from mrsuite.octave import scratch
 
 
 #***************#
@@ -79,6 +81,9 @@ def fit(data: Any, basis: str, water: Any = None, ppmlim: tuple = (0.5, 4.2),
             without it they are unreferenced and filed under 'raw'.
         ppmlim (tuple): Fit range in ppm.
         **kwargs: Passed to ``PyLCModel``, e.g. ``path2exec``, ``save_path``, ``conj``.
+            Without a ``save_path`` each call works in a folder of its own, removed
+            afterwards: PyLCModel's default is ./tmp with fixed file names, so two fits
+            started from one directory at once would overwrite each other's files.
 
     Returns:
         A FitResult, or one per spectrum for a batch, each with the data's processing
@@ -86,9 +91,16 @@ def fit(data: Any, basis: str, water: Any = None, ppmlim: tuple = (0.5, 4.2),
     """
     from lcmodel_wrapper import PyLCModel, __version__
 
-    engine = PyLCModel(path2basis=str(basis), ppmlim=ppmlim, **kwargs)
-    scaling = "raw" if water is None else "molarity"
-    out = [to_result(report, scaling=scaling) for report in engine.report(data, water)]
+    own = "save_path" not in kwargs
+    workdir = scratch("lcmodel_") if own else kwargs["save_path"]
+    try:
+        engine = PyLCModel(path2basis=str(basis), ppmlim=ppmlim,
+                           **{**kwargs, "save_path": workdir})
+        scaling = "raw" if water is None else "molarity"
+        out = [to_result(report, scaling=scaling) for report in engine.report(data, water)]
+    finally:
+        if own:
+            shutil.rmtree(workdir, ignore_errors=True)
 
     # the binary is what fits, so it is recorded by its bytes, not only by the wrapper
     options = {"basis": file_checksum(basis), "ppmlim": ppmlim, "kwargs": kwargs,

@@ -19,10 +19,10 @@
 #*************#
 import atexit
 import os
-import platform
 import shutil
 import subprocess
 import tempfile
+from functools import lru_cache
 from typing import Optional
 
 from oct2py import Oct2Py
@@ -194,20 +194,32 @@ def session(root: str, runtime: Optional[str] = None, verbose: bool = False) -> 
 #   platform tag   #
 #******************#
 def platform_tag(runtime: Optional[str] = None) -> str:
-    """Name for the machine a MEX will be loaded on, e.g. 'darwin-arm64'.
+    """Name for the machine and Octave a MEX will be loaded into, e.g.
+    'darwin-arm64-octave9'.
 
-    A MEX is a native shared library, so the local one and the container's are different
-    binaries under the same filename. Each build is kept under its own tag and only the
-    matching directory goes on the Octave path.
+    A MEX is a native shared library built against one Octave, so the local one and the
+    container's are different binaries under the same filename, and one built for
+    Octave 7 does not load into Octave 9. Each build is kept under its own tag and only
+    the matching directory goes on the Octave path.
     """
-    if resolve_runtime(runtime) == "docker":
+    which = resolve_runtime(runtime)
+    return _platform_tag(which, docker.image_id() if which == "docker" else "")
+
+
+@lru_cache(maxsize=None)
+def _platform_tag(which: str, image: str) -> str:
+    """platform_tag, once per runtime and image: it asks Octave, which takes a while."""
+    probe = ["uname -sm", "octave-cli --eval 'disp(OCTAVE_VERSION)'"]
+    if which == "docker":
         docker.start()
-        out = subprocess.run(["docker", "exec", docker.CONTAINER, "uname", "-sm"],
-                             capture_output=True, text=True, timeout=60).stdout
-        system, machine = (out.strip().split() + ["", ""])[:2]
+        run = [["docker", "exec", docker.CONTAINER, "sh", "-c", p] for p in probe]
     else:
-        system, machine = platform.system(), platform.machine()
-    return f"{system.lower()}-{'arm64' if machine == 'aarch64' else machine}"
+        run = [["sh", "-c", p] for p in probe]
+    uname, version = (subprocess.run(r, capture_output=True, text=True, timeout=120)
+                      .stdout.strip() for r in run)
+    system, machine = (uname.split() + ["", ""])[:2]
+    major = version.splitlines()[-1].split(".")[0] if version else "unknown"
+    return f"{system.lower()}-{'arm64' if machine == 'aarch64' else machine}-octave{major}"
 
 
 #*************#

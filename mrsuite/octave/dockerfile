@@ -13,19 +13,25 @@
 #                                                                                                  #
 ####################################################################################################
 
-FROM debian:bookworm-slim
+# trixie for Octave 9.4, the version local installs run: Osprey's fit is sensitive enough
+# that under bookworm's 7.3 it lands in a different minimum on the same spectrum.
+FROM debian:trixie-slim
 
 # octave-signal and octave-image are Debian's prebuilt forge packages, so no headless
-# `pkg install -forge` compile step. liboctave-dev supplies mkoctfile, which builds
+# `pkg install -forge` compile step. octave-dev supplies mkoctfile, which builds
 # Osprey's bundled L-BFGS-B-C solver.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         octave \
-        liboctave-dev \
+        octave-dev \
         octave-signal \
         octave-image \
         build-essential \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+
+# fail the build rather than ship another Octave if Debian ever moves on
+RUN octave-cli --version | grep -q "version 9\." \
+    || (echo "expected Octave 9 from debian:trixie" >&2 && exit 1)
 
 # The forge packages are installed but deliberately not loaded: MRSuite's shims cover
 # what the toolboxes need, and leaving them unloaded keeps a container session on the

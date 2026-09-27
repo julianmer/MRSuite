@@ -101,6 +101,16 @@ def _mounts() -> List[str]:
     return [arg for p in paths for arg in ("-v", f"{p}:{p}")]
 
 
+#****************#
+#   has mounts   #
+#****************#
+def _has_mounts() -> bool:
+    """Whether the existing container sees every path this environment needs."""
+    proc = _docker("inspect", "-f", "{{range .Mounts}}{{.Source}}:{{.Destination}} {{end}}",
+                   CONTAINER, check=False, timeout=60)
+    return set(_mounts()[1::2]) <= set(proc.stdout.split())
+
+
 #***********#
 #   start   #
 #***********#
@@ -110,6 +120,11 @@ def start() -> str:
     Idempotent: an already-running container is left alone. Returns the container name.
     """
     state = _state()
+    if state is not None and not _has_mounts():
+        # made from another environment, whose oct2py is elsewhere: Octave would not
+        # see this one's helpers, and every exchange would fail with a missing file
+        stop(remove=True)
+        state = None
     if state == "running":
         return CONTAINER
     if state is not None:

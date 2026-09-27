@@ -45,6 +45,45 @@ def shim_path() -> str:
     return os.path.join(HERE, "shims")
 
 
+#**************************************************************************************************#
+#                                     Class FreshExchange                                          #
+#**************************************************************************************************#
+#                                                                                                  #
+# An Oct2Py session that passes each call through files Octave has not seen before.                #
+#                                                                                                  #
+#**************************************************************************************************#
+class FreshExchange(Oct2Py):
+    """An Oct2Py session that passes each call through files Octave has not seen before.
+
+    oct2py hands every call over in writer.mat, rewriting one open file in place. A local
+    Octave shares the host's page cache and always reads the current bytes. A container
+    on a macOS host reads the bind mount through the VM's file sharing, which caches a
+    file's size and contents for about a second; a call arriving within it reads the
+    truncated or half-rewritten file and fails with "unable to determine file format"
+    or "invalid array name subelement" - half the sessions, measured, and none once
+    every call waited 1.2 s. A folder of its own per call leaves the VM no cached view.
+
+    Overrides oct2py's private ``_feval``, the one path every call takes: oct2py derives
+    both exchange files from ``temp_dir`` on each call, but opens the writer only once.
+    """
+
+    #***********#
+    #   feval   #
+    #***********#
+    def _feval(self, *args, **kwargs):
+        root = self._settings.temp_dir
+        folder = tempfile.mkdtemp(dir=root)
+        self._out_fh.close()
+        self._out_fh = open(os.path.join(folder, "writer.mat"), "w+b")
+        self._settings.temp_dir = folder
+        try:
+            return super()._feval(*args, **kwargs)
+        finally:
+            self._settings.temp_dir = root
+            self._out_fh.close()
+            shutil.rmtree(folder, ignore_errors=True)
+
+
 #*************#
 #   scratch   #
 #*************#
@@ -129,7 +168,7 @@ def session(root: str, runtime: Optional[str] = None, verbose: bool = False) -> 
         exchange = scratch("oct2py_")
         atexit.register(shutil.rmtree, exchange, True)
         try:
-            oc = Oct2Py(temp_dir=exchange)
+            oc = FreshExchange(temp_dir=exchange)
         finally:
             if previous is None:
                 os.environ.pop("OCTAVE_EXECUTABLE", None)

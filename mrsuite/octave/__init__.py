@@ -27,13 +27,14 @@ from typing import Optional
 
 from oct2py import Oct2Py
 
-from mrsuite.octave import docker
+from mrsuite.octave import docker, matlab
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 # "local" uses the octave-cli on PATH, "docker" the container built from the
-# dockerfile beside this file, and "auto" prefers local and falls back. Settable
-# per session, or once via the environment.
+# dockerfile beside this file, and "auto" prefers local and falls back. "matlab" runs
+# the toolboxes in MATLAB instead, for anyone with a licence; it is only ever chosen
+# explicitly. Settable per session, or once via the environment.
 RUNTIME = os.environ.get("MRSUITE_OCTAVE_RUNTIME", "auto")
 
 
@@ -102,16 +103,16 @@ def scratch(prefix: str = "mrsuite_") -> str:
 #   runtime   #
 #*************#
 def resolve_runtime(runtime: Optional[str] = None) -> str:
-    """Settle on 'local' or 'docker', raising if the choice cannot be honoured.
+    """Settle on 'local', 'docker' or 'matlab', raising if the choice cannot be honoured.
 
     Args:
-        runtime: 'local', 'docker' or 'auto'. Defaults to ``RUNTIME``.
+        runtime: 'local', 'docker', 'matlab' or 'auto'. Defaults to ``RUNTIME``.
 
     Returns:
         The runtime to use.
 
     Raises:
-        ValueError: If ``runtime`` is not one of the three.
+        ValueError: If ``runtime`` is not one of the four.
         RuntimeError: If the requested runtime is unavailable, or neither is.
     """
     runtime = runtime or RUNTIME
@@ -127,8 +128,15 @@ def resolve_runtime(runtime: Optional[str] = None) -> str:
             raise RuntimeError("no Docker daemon reachable; start Docker or use runtime='local'")
         return "docker"
 
+    if runtime == "matlab":
+        if not matlab.available():
+            raise RuntimeError("the MATLAB Engine for Python is not installed; pip install "
+                               "<matlabroot>/extern/engines/python")
+        return "matlab"
+
     if runtime != "auto":
-        raise ValueError(f"unknown runtime '{runtime}'; expected 'local', 'docker' or 'auto'")
+        raise ValueError(f"unknown runtime '{runtime}'; "
+                         f"expected 'local', 'docker', 'matlab' or 'auto'")
 
     if have_local:
         return "local"
@@ -145,17 +153,25 @@ def session(root: str, runtime: Optional[str] = None, verbose: bool = False) -> 
     """Start an Octave session with ``root`` and the shims on its path.
 
     The container is a drop-in for a local interpreter rather than a separate execution
-    model, so the two runtimes differ only in which binary oct2py launches.
+    model, so the two runtimes differ only in which binary oct2py launches. The 'matlab'
+    runtime answers the same calls from MATLAB, with only ``root`` on its path: MATLAB
+    has the functions the shims stand in for, and Osprey ships its MEX for MATLAB.
 
     Args:
         root: Toolbox directory to add recursively.
-        runtime: 'local', 'docker' or 'auto'. Defaults to ``RUNTIME``.
-        verbose: Leave Octave's warnings on.
+        runtime: 'local', 'docker', 'matlab' or 'auto'. Defaults to ``RUNTIME``.
+        verbose: Leave the interpreter's warnings on.
 
     Returns:
         A live session.
     """
     which = resolve_runtime(runtime)
+
+    if which == "matlab":
+        oc = matlab.MatlabSession(root)
+        if not verbose:
+            oc.eval("warning('off', 'all');")
+        return oc
 
     if which == "docker":
         docker.start()
@@ -179,6 +195,9 @@ def session(root: str, runtime: Optional[str] = None, verbose: bool = False) -> 
 
     if not verbose:
         oc.eval("warning('off', 'all');")
+    # oct2py ends a session by killing Octave, which then dumps its workspace to
+    # ./octave-workspace; parallel workers sharing a folder race to delete it
+    oc.eval("crash_dumps_octave_core(false);")
     oc.eval(f"addpath(genpath('{root}'));")
     # shims and this runtime's MEX last: addpath prepends, so they end up at the front,
     # where they stand in for the MATLAB-only functions the toolboxes expect and shadow
@@ -268,30 +287,34 @@ def build_lbfgsb(osprey_root: str, runtime: Optional[str] = None,
 
     target = mex_path(which)
     out = os.path.join(target, "lbfgsb_wrapper.mex")
-    if os.path.exists(out) and not force:
+    # the wrapper Osprey ships, and MRSuite's variant for Osprey's quadratic subproblems
+    # (see shims/lbfgsb.m), both over the same L-BFGS-B-C sources
+    gateways = {out: os.path.join(mat, "lbfgsb_wrapper.c"),
+                os.path.join(target, "lbfgsb_quadratic.mex"):
+                    os.path.join(HERE, "src", "lbfgsb_quadratic.c")}
+    missing = {o: g for o, g in gateways.items() if force or not os.path.exists(o)}
+    if not missing:
         return out
     if not os.path.isdir(src):
         raise FileNotFoundError(f"L-BFGS-B-C sources not found under {lib}")
     os.makedirs(target, exist_ok=True)
+    if which == "local" and shutil.which("mkoctfile") is None:
+        raise FileNotFoundError(
+            "mkoctfile not on PATH - install Octave development files, "
+            "or use runtime='docker', which brings its own")
+    if which == "docker":
+        docker.start()
 
     units = ["lbfgsb", "linesearch", "subalgorithms", "print", "linpack",
              "miniCBLAS", "timer"]
-    build = ["mkoctfile", "--mex", "-DMATLAB_MEX_FILE", f"-I{src}", "-UDEBUG",
-             "-o", out, os.path.join(mat, "lbfgsb_wrapper.c")] + \
-            [os.path.join(src, f"{u}.c") for u in units]
-
-    if which == "docker":
-        docker.start()
-        cmd = ["docker", "exec", "-w", mat, docker.CONTAINER] + build
-    else:
-        if shutil.which("mkoctfile") is None:
-            raise FileNotFoundError(
-                "mkoctfile not on PATH - install Octave development files, "
-                "or use runtime='docker', which brings its own")
-        cmd = build
-
-    proc = subprocess.run(cmd, capture_output=True, text=True,
-                          cwd=None if which == "docker" else mat, timeout=1800)
-    if proc.returncode != 0 or not os.path.exists(out):
-        raise RuntimeError(f"L-BFGS-B-C build failed ({which}):\n{proc.stderr[-2000:]}")
+    for built, gateway in missing.items():
+        build = ["mkoctfile", "--mex", "-DMATLAB_MEX_FILE", f"-I{src}", "-UDEBUG",
+                 "-o", built, gateway] + [os.path.join(src, f"{u}.c") for u in units]
+        cmd = ["docker", "exec", "-w", mat, docker.CONTAINER] + build \
+            if which == "docker" else build
+        proc = subprocess.run(cmd, capture_output=True, text=True,
+                              cwd=None if which == "docker" else mat, timeout=1800)
+        if proc.returncode != 0 or not os.path.exists(built):
+            raise RuntimeError(f"L-BFGS-B-C build failed ({which}, "
+                               f"{os.path.basename(built)}):\n{proc.stderr[-2000:]}")
     return out

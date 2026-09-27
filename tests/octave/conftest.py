@@ -27,6 +27,8 @@ import pytest
 
 from mrsuite.octave import shim_path
 
+from tests.conftest import MATLAB
+
 # both engines are driven from a script file rather than an inline command: `matlab
 # -batch` silently produces no output for a multi-line command string
 EMIT = "fprintf('%s\\n', jsonencode(out));"
@@ -94,7 +96,7 @@ def run_matlab(body, datafile=None):
         dict: The decoded ``out`` struct.
     """
     directory, stem = _script(body, datafile)
-    return _run(["matlab", "-batch", f"addpath('{directory}'); {stem}"])
+    return _run([MATLAB, "-batch", f"addpath('{directory}'); {stem}"])
 
 
 #******************#

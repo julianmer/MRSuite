@@ -209,7 +209,7 @@ def test_fid_a_records_the_toolbox_version_and_every_argument(spectra):
     assert (step["Program"], step["Method"]) == ("FID-A", "op_addphase")
     assert step["Version"] == fid_a.bridge.version() != "unknown"
     assert details["args"] == [30.0] and details["kwargs"] == {}
-    assert {"mrsuite", "runtime", "octave"} <= set(details)
+    assert {"mrsuite", "runtime", "interpreter"} <= set(details)
 
 
 #******************#

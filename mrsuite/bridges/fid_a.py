@@ -464,10 +464,12 @@ class FIDABridge(Bridge):
     #   runtime   #
     #*************#
     def runtime(self) -> Dict[str, Any]:
-        """Where the Octave that ran the call lives, and which version it is."""
+        """Which interpreter ran the call, where, and at which version."""
+        which = resolve_runtime(self._runtime)
         if self._octave_version is None:
-            self._octave_version = str(self.octave.eval("version()", nout=1)).strip()
-        return {"runtime": resolve_runtime(self._runtime), "octave": self._octave_version}
+            name = "MATLAB" if which == "matlab" else "Octave"
+            self._octave_version = f"{name} {str(self.octave.eval('version()', nout=1)).strip()}"
+        return {"runtime": which, "interpreter": self._octave_version}
 
     #************#
     #   octave   #

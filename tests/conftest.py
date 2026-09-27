@@ -16,6 +16,7 @@
 #*************#
 #   imports   #
 #*************#
+import glob
 import os
 import shutil
 
@@ -27,10 +28,23 @@ CHALLENGE = "data/2016_fitting_challenge/datasets_JMRUI/dataset1_WS.txt"
 CHALLENGE_BASIS = "data/2016_fitting_challenge/basisset_LCModel/press3T_30ms.BASIS"
 
 HAVE_OCTAVE = shutil.which("octave-cli") is not None
-HAVE_MATLAB = shutil.which("matlab") is not None
+
+
+#************#
+#   matlab   #
+#************#
+def _matlab():
+    """The matlab launcher: on PATH, or else the newest macOS install in /Applications,
+    which the installer does not put on PATH."""
+    installed = sorted(glob.glob("/Applications/MATLAB_R*.app/bin/matlab"))
+    return shutil.which("matlab") or (installed[-1] if installed else None)
+
+
+MATLAB = _matlab()
+HAVE_MATLAB = MATLAB is not None
 
 needs_octave = pytest.mark.skipif(not HAVE_OCTAVE, reason="octave-cli not on PATH")
-needs_matlab = pytest.mark.skipif(not HAVE_MATLAB, reason="matlab not on PATH")
+needs_matlab = pytest.mark.skipif(not HAVE_MATLAB, reason="matlab not found")
 
 
 #**************#

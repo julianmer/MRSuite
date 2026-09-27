@@ -1,0 +1,22 @@
+####################################################################################################
+#                                            dockerfile                                            #
+####################################################################################################
+#                                                                                                  #
+# Authors: J. P. Merkofer (j.p.merkofer@tue.nl)                                                    #
+#                                                                                                  #
+# Created: 2026-09-27                                                                              #
+#                                                                                                  #
+# Purpose: R and spant for MRSuite, for machines without them. Like the Octave image it carries    #
+#          only the runtime: the repo is bind-mounted at its own path, and each job runs as        #
+#          `Rscript driver.R job.json`. Built by mrsuite/r/__init__.py.                            #
+#                                                                                                  #
+####################################################################################################
+
+# the R and spant versions local installs run, so both runtimes fit alike
+FROM rocker/r-ver:4.6.1
+
+RUN install2.r --error --skipinstalled remotes jsonlite \
+    && Rscript -e "remotes::install_version('spant', version = '4.4.0', upgrade = 'never')"
+
+# fail the build rather than ship another spant
+RUN Rscript -e 'stopifnot(packageVersion("spant") == "4.4.0")'

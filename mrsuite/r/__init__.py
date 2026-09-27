@@ -8,7 +8,8 @@
 #                                                                                                  #
 # Purpose: R for the spant bridge, run as Rscript on driver.R: a job goes in as JSON with its      #
 #          spectra as NIfTI-MRS files, and the result comes back the same way. Out of process      #
-#          on purpose, see driver.R.                                                               #
+#          on purpose, see driver.R. Either a local R or the container built from the dockerfile   #
+#          beside this file, which mounts the repo at its own path so every path still holds.      #
 #                                                                                                  #
 ####################################################################################################
 
@@ -21,30 +22,63 @@ import os
 import shutil
 import subprocess
 from functools import lru_cache
-from typing import Any, Dict
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+from mrsuite.octave import docker
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DRIVER = os.path.join(HERE, "driver.R")
+IMAGE = "mrsuite-r"
+
+# "local" uses the Rscript on PATH, "docker" the image built from the dockerfile beside
+# this file, and "auto" prefers local and falls back. Settable per call, or via the
+# environment.
+RUNTIME = os.environ.get("MRSUITE_R_RUNTIME", "auto")
+
+
+#*********************#
+#   resolve runtime   #
+#*********************#
+def resolve_runtime(runtime: Optional[str] = None) -> str:
+    """Settle on 'local' or 'docker', raising if neither can be honoured."""
+    runtime = runtime or RUNTIME
+    local = shutil.which("Rscript") is not None
+    if runtime not in ("auto", "local", "docker"):
+        raise ValueError(f"unknown R runtime '{runtime}'; expected 'local', 'docker' or 'auto'")
+    if runtime == "local" or (runtime == "auto" and local):
+        if not local:
+            raise RuntimeError("no Rscript on PATH; install R, or use runtime='docker'")
+        return "local"
+    if not docker.available():
+        raise RuntimeError("no R: install it, or start Docker for the containerised runtime")
+    return "docker"
 
 
 #***************#
 #   available   #
 #***************#
 def available() -> bool:
-    """Whether Rscript is on PATH; spant itself is checked by the first job."""
-    return shutil.which("Rscript") is not None
+    """Whether R can be run, locally or in Docker; spant is checked by the first job."""
+    try:
+        resolve_runtime()
+        return True
+    except RuntimeError:
+        return False
 
 
 #*********#
 #   run   #
 #*********#
-def run(job: Dict[str, Any], folder: str) -> Dict[str, Any]:
+def run(job: Dict[str, Any], folder: str, runtime: Optional[str] = None) -> Dict[str, Any]:
     """
     Run one job through driver.R.
 
     Args:
         job (Dict[str, Any]): The task and its arguments, as driver.R reads them.
-        folder (str): Where the job, its spectra and its result live.
+        folder (str): Where the job, its spectra and its result live; inside the repo, so
+            that the container sees it at the same path.
+        runtime (Optional[str]): 'local', 'docker' or 'auto'. Defaults to ``RUNTIME``.
 
     Returns:
         Dict[str, Any]: What driver.R wrote back.
@@ -55,7 +89,13 @@ def run(job: Dict[str, Any], folder: str) -> Dict[str, Any]:
     path, result = os.path.join(folder, "job.json"), os.path.join(folder, "result.json")
     with open(path, "w") as fh:
         json.dump({**job, "result": result}, fh)
-    proc = subprocess.run(["Rscript", DRIVER, path], capture_output=True, text=True)
+    command = ["Rscript", DRIVER, path]
+    if resolve_runtime(runtime) == "docker":
+        docker.build(image=IMAGE, dockerfile=Path(HERE) / "dockerfile")
+        # as the host user, so what R writes stays the caller's; a bare uid has no HOME
+        command = ["docker", "run", "--rm", "--user", f"{os.getuid()}:{os.getgid()}",
+                   "-e", "HOME=/tmp", "-v", f"{docker.REPO}:{docker.REPO}", IMAGE] + command
+    proc = subprocess.run(command, capture_output=True, text=True)
     if proc.returncode != 0 or not os.path.exists(result):
         raise RuntimeError(f"spant job '{job['task']}' failed:\n{proc.stderr[-2000:]}")
     with open(result) as fh:
@@ -65,14 +105,21 @@ def run(job: Dict[str, Any], folder: str) -> Dict[str, Any]:
 #**********#
 #   info   #
 #**********#
+def info(runtime: Optional[str] = None) -> Dict[str, Any]:
+    """spant's and R's versions and spant's exported functions, asked once per runtime."""
+    return _info(resolve_runtime(runtime))
+
+
+#*****************#
+#   info cached   #
+#*****************#
 @lru_cache(maxsize=None)
-def info() -> Dict[str, Any]:
-    """spant's and R's versions and spant's exported functions, asked once."""
+def _info(runtime: str) -> Dict[str, Any]:
     from mrsuite.octave import scratch
 
     folder = scratch("mrsuite_r_")
     try:
-        out = run({"task": "info"}, folder)
+        out = run({"task": "info"}, folder, runtime)
     finally:
         shutil.rmtree(folder, ignore_errors=True)
     out["functions"] = sorted(out["functions"])

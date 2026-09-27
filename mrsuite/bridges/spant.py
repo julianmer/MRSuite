@@ -125,7 +125,7 @@ class SpantBridge(Bridge):
     #   runtime   #
     #*************#
     def runtime(self) -> Dict[str, Any]:
-        return {"runtime": "local", "interpreter": r.info()["r"]}
+        return {"runtime": r.resolve_runtime(), "interpreter": r.info()["r"]}
 
     #************#
     #   invoke   #
@@ -273,9 +273,11 @@ def fit(data: Any, basis: str, method: str = "ABFIT", opts: Optional[dict] = Non
     reference = _ppmsep(str(basis))
     folder = scratch("mrsuite_spant_")
     try:
+        # copied in, so that a basis kept outside the repo is visible in the container too
+        copy = shutil.copy(basis, os.path.join(folder, "basis.BASIS"))
         out = r.run({"task": "fit", "inputs": _write(items, folder, "in"),
                      "refs": [item.SpecFreqChemShift for item in items],
-                     "basis": os.path.abspath(basis),
+                     "basis": copy,
                      "basis_ref": 4.65 if reference is None else reference,
                      "method": method, "opts": _plain(opts or {})}, folder)
     finally:

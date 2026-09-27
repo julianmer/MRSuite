@@ -59,22 +59,25 @@ def available() -> bool:
 #***********#
 #   image   #
 #***********#
-def build(force: bool = False) -> str:
-    """Build the Octave image if it is not already present.
+def build(force: bool = False, image: str = IMAGE, dockerfile: Path = DOCKERFILE) -> str:
+    """Build an image if it is not already present: Octave's, unless told otherwise.
 
     Args:
         force: Rebuild even when the image exists.
+        image: The tag to build.
+        dockerfile: Its dockerfile; the folder it sits in is the build context.
 
     Returns:
         The image tag.
     """
-    have = _docker("image", "inspect", IMAGE, check=False, timeout=60).returncode == 0
+    have = _docker("image", "inspect", image, check=False, timeout=60).returncode == 0
     if have and not force:
-        return IMAGE
+        return image
 
     # named explicitly: docker build looks for a capitalised Dockerfile by default
-    _docker("build", "-t", IMAGE, "-f", str(DOCKERFILE), str(HERE), timeout=3600)
-    return IMAGE
+    _docker("build", "-t", image, "-f", str(dockerfile), str(Path(dockerfile).parent),
+            timeout=3600)
+    return image
 
 
 #***********#

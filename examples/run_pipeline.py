@@ -17,7 +17,6 @@
 #*************#
 import argparse
 import os
-import re
 from typing import Tuple
 
 # third-party
@@ -27,67 +26,7 @@ from fsl_mrs.utils import mrs_io
 from nifti_mrs_plus import NIfTI_MRS_Plus
 from mrsuite.core.pipeline import Pipeline, results
 from mrsuite import fid_a, fsl_mrs
-
-
-#*************************************************#
-#   load fitting challenge data from ISMRM 2016   #
-#*************************************************#
-def load_ISMRM2016_challenge_data(config: dict) -> Tuple[NIfTI_MRS_Plus, NIfTI_MRS_Plus, list]:
-    """
-    Load MRS data from the ISMRM 2016 fitting challenge.
-
-    Args:
-        config (dict): Configuration dictionary containing paths and selection criteria.
-
-    Returns:
-        data (NIfTI_MRS_Plus): Loaded MRS data.
-        water (NIfTI_MRS_Plus): Loaded water reference data.
-        concs (dict): Set of ground truth concentrations for metabolites.
-    """
-    import pandas as pd
-
-    def load_ISMRM2016_challenge_concs(path2conc: str) -> dict:
-        truth = {'Ace': 0.0}  # initialize, Ace is only partially present
-
-        file = pd.read_excel(path2conc, header=17)
-        for i, met in enumerate(file['Metabolites']):
-            if not isinstance(met, str): break
-            truth[met] = file['concentration'][i]
-
-        truth['Mac'] = truth.pop('MMBL')  # rename key MMBL to Mac
-        return dict(sorted(truth.items()))
-
-    def listing(path, suffix=None):
-        """Sorted, suffix-filtered listing of a data directory.
-
-        The challenge repository keeps water-suppressed and unsuppressed spectra in one
-        folder (`dataset1_WS.txt` alongside `dataset1_nWS.txt`), so the two sets have to
-        be separated by suffix. Sorting is by the dataset number rather than by name:
-        spectra, water references and ground truth are paired positionally, and both
-        `os.listdir` order and plain lexicographic order would misalign them
-        (`dataset10` sorts before `dataset2`).
-        """
-        names = [f for f in os.listdir(path) if not f.startswith('.')]
-        if suffix:
-            names = [f for f in names if f.endswith(suffix)]
-        return sorted(names, key=lambda f: (int(re.search(r'\d+', f).group())
-                                            if re.search(r'\d+', f) else 0, f))
-
-    files = listing(config['path2concs'])[:config['test_size']]
-    concs = [load_ISMRM2016_challenge_concs(os.path.join(config['path2concs'], f)) for f in files]
-
-    files = listing(config['path2data'], config.get('data_suffix'))[:config['test_size']]
-    data_list = [mrs_io.read_FID(os.path.join(config['path2data'], f)) for f in files]
-    data = NIfTI_MRS_Plus(data_list)
-
-    if config['path2water']:
-        files = listing(config['path2water'], config.get('water_suffix'))[:config['test_size']]
-        water_list = [mrs_io.read_FID(os.path.join(config['path2water'], f)) for f in files]
-        water = NIfTI_MRS_Plus(water_list)
-    else:
-        water = None
-
-    return data, water, concs
+from mrsuite.datasets import challenge2016
 
 
 #***********************************************#
@@ -163,17 +102,7 @@ def parse_args() -> dict:
     }
 
     if args.dataset == 'ismrm':
-        # spectra and basis come from the challenge submodule; only the ground truth
-        # is kept in-repo, as that repository does not carry it
-        challenge = os.path.join(project_root, 'data', '2016_fitting_challenge')
-        config.update({
-            'path2basis': os.path.join(challenge, 'basisset_LCModel', 'press3T_30ms.BASIS'),
-            'path2concs': os.path.join(project_root, 'data', '2016_fitting_challenge_gts'),
-            'path2data': os.path.join(challenge, 'datasets_JMRUI'),
-            'path2water': os.path.join(challenge, 'datasets_JMRUI'),
-            'data_suffix': '_WS.txt',
-            'water_suffix': '_nWS.txt',
-        })
+        config.update({'path2basis': str(challenge2016.BASIS)})
     elif args.dataset == 'openneuro':
         config.update({
             'path2data': os.path.join(project_root, 'data/openneuro_ds005371'),
@@ -197,7 +126,7 @@ def main():
 
     print(f"Running pipeline on dataset: {config['dataset']}")
     if config['dataset'] == 'ismrm':
-        data, water, _ = load_ISMRM2016_challenge_data(config)
+        data, water, _ = challenge2016.load(config['test_size'])
     elif config['dataset'] == 'openneuro':
         data, water, _ = load_openneuro_data(config)
     else:

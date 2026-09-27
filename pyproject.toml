@@ -31,6 +31,9 @@ dependencies = [
     "fsl_mrs",
     "oct2py",         # bridges to the FID-A Octave sources in externals/fid-a
     "lcmodel-wrapper>=0.2",   # drives the LCModel binary; 0.2 for the coord parser
+    # loads the MRSI challenge; git main until a release ships MRSIChallengeDataModule
+    "augmentrum @ git+https://github.com/julianmer/Augmentrum.git@main",
+    "h5py",           # reads the MRSI challenge's basis set out of its .mat files
 ]
 
 [project.optional-dependencies]

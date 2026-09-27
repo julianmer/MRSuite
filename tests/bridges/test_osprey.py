@@ -69,7 +69,20 @@ def test_the_ppm_axis_ascends_from_centre_freq(codec, spectrum):
     ppm = np.asarray(codec.nifti2fida(spectrum)["ppm"]).ravel()
 
     assert ppm[0] < ppm[-1], "Osprey's axis ascends"
-    assert abs((ppm[0] + ppm[-1]) / 2 - OspreyCodec.CENTRE_PPM) < 1e-6
+    assert abs((ppm[0] + ppm[-1]) / 2 - spectrum.SpecFreqChemShift) < 1e-6
+
+
+#************#
+#   centre   #
+#************#
+def test_the_centre_is_the_one_the_data_states(codec, spectrum):
+    """Taken from SpecFreqChemShift rather than assumed: a guessed centre shifts the data
+    against a basis set that states its own, and nothing downstream notices."""
+    stated = spectrum.copy()
+    stated.add_hdr_field("SpecFreqChemShift", 4.70)
+
+    assert codec.nifti2fida(spectrum)["centerFreq"] == pytest.approx(4.65)   # the default
+    assert codec.nifti2fida(stated)["centerFreq"] == pytest.approx(4.70)
 
 
 #***************#

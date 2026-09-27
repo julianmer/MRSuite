@@ -16,6 +16,8 @@
 #*************#
 #   imports   #
 #*************#
+import json
+
 import numpy as np
 import pytest
 
@@ -180,15 +182,51 @@ def test_coilcombine_declines_on_a_single_coil(spectra):
 #****************#
 #   provenance   #
 #****************#
-def test_batched_calls_are_recorded_in_provenance(spectra):
+def test_fsl_mrs_records_each_step_once(spectra):
+    """FSL-MRS writes its own entry; the bridge must not add a second one."""
     out = fsl_mrs.conjugate(spectra)
 
-    md = getattr(out, "metadata", None)
-    if md is None:
-        pytest.skip("wrapper exposes no metadata attribute")
-    items = md.items() if hasattr(md, "items") else enumerate(md)
-    assert any("conjugate" in str(k) or "conjugate" in str(v) for k, v in items), \
-        f"call not recorded in provenance: {md}"
+    for spectrum in out.list():
+        steps = spectrum.hdr_ext["ProcessingApplied"]
+        assert [s["Program"] for s in steps].count("FSL-MRS") == 1
+        assert "MRSuite" not in [s["Program"] for s in steps]
+    # and the NIfTI-MRS+ batch carries the same history
+    assert out.metadata_individual[0]["ProcessingApplied"] == \
+        out[0].hdr_ext["ProcessingApplied"]
+
+
+#**********************#
+#   fid-a provenance   #
+#**********************#
+@needs_octave
+def test_fid_a_records_the_toolbox_version_and_every_argument(spectra):
+    """Enough to redo the call: the toolbox at its exact version, the function, and
+    each argument, with MRSuite and the runtime alongside."""
+    out = fid_a.op_addphase(spectra, 30.0)
+
+    step = out[0].hdr_ext["ProcessingApplied"][-1]
+    details = json.loads(step["Details"])
+    assert (step["Program"], step["Method"]) == ("FID-A", "op_addphase")
+    assert step["Version"] == fid_a.bridge.version() != "unknown"
+    assert details["args"] == [30.0] and details["kwargs"] == {}
+    assert {"mrsuite", "runtime", "octave"} <= set(details)
+
+
+#******************#
+#   fid-a header   #
+#******************#
+@needs_octave
+def test_a_fid_a_step_keeps_the_header_and_the_history(spectrum):
+    """FID-A hands back samples, not the header, which would lose the echo time, the
+    ppm reference and every earlier step at the first FID-A call."""
+    before = fsl_mrs.apodize(NIfTI_MRS_Plus([spectrum.copy()]), amount=[5.0])[0]
+    before.add_hdr_field("EchoTime", 0.03)
+    before.add_hdr_field("SpecFreqChemShift", 4.70)
+
+    after = fid_a.op_addphase(before, 30.0)
+
+    assert after.hdr_ext["EchoTime"] == 0.03 and after.SpecFreqChemShift == 4.70
+    assert [s["Program"] for s in after.hdr_ext["ProcessingApplied"]] == ["FSL-MRS", "FID-A"]
 
 
 #**********#

@@ -24,10 +24,12 @@ from typing import Any, List, Optional
 
 import numpy as np
 
+from mrs_tools.constants import PPM_SHIFT
 from nifti_mrs.nifti_mrs import NIFTI_MRS
 
 from mrsuite import __version__
 from mrsuite.bridges.fid_a import FIDABridge, FIDACodec
+from mrsuite.core.provenance import entry, file_checksum, history
 from mrsuite.core.result import FitResult
 from mrsuite.octave import build_lbfgsb, scratch
 
@@ -67,9 +69,6 @@ class OspreyCodec(FIDACodec):
     they use, not in the line that looks responsible.)
     """
 
-    # what Osprey's io_loadspec_niimrs uses, against FSL-MRS's 4.65
-    CENTRE_PPM = 4.68
-
     #**********#
     #   init   #
     #**********#
@@ -77,13 +76,13 @@ class OspreyCodec(FIDACodec):
         """
         Args:
             centre_ppm (Optional[float]): ppm at the centre of the spectrum, for every
-                conversion this codec makes. It has to agree with the basis set the data
-                will be fitted against, since fit_resampleBasis interpolates one ppm axis
-                onto the other and a mismatch shifts the whole spectrum against the
-                model. Osprey's shipped basis sets say 3, an LCModel .BASIS commonly says
-                4.65, and Osprey's own loader assumes 4.68.
+                conversion this codec makes. None takes each spectrum's own, which is
+                what it should almost always be: fit_resampleBasis interpolates the
+                basis set's ppm axis onto the data's, and each side states its own
+                centre (Osprey's shipped basis sets say 3, an LCModel .BASIS says what
+                its PPMSEP says), so the two line up as long as neither is guessed.
         """
-        self.centre_ppm = self.CENTRE_PPM if centre_ppm is None else centre_ppm
+        self.centre_ppm = centre_ppm
 
     #****************#
     #   nifti2fida   #
@@ -99,8 +98,9 @@ class OspreyCodec(FIDACodec):
         Returns:
             dict: The struct, in Osprey's dialect.
         """
-        centre = self.centre_ppm if centre_ppm is None else centre_ppm
-        out = super().nifti2fida(data, centre_ppm=centre)
+        out = super().nifti2fida(data, centre_ppm=self.centre_ppm if centre_ppm is None
+                                 else centre_ppm)
+        centre = out["centerFreq"]                    # resolved, from the data if not given
 
         fids = np.conj(np.asarray(out["fids"]))       # undo the upstream conjugation
         out["fids"] = fids
@@ -180,6 +180,7 @@ class OspreyBridge(FIDABridge):
     """
 
     name = "osprey"
+    program = "Osprey"
 
     #**********#
     #   init   #
@@ -291,7 +292,8 @@ class OspreyBridge(FIDABridge):
             path (str): An LCModel ``.BASIS`` file.
             add_mm (bool): Add Osprey's macromolecule and lipid basis functions.
             centre_ppm (Optional[float]): ppm at the centre, for a file without PPMSEP.
-                Defaults to the codec's, so that basis and data share one axis.
+                Defaults to the codec's, else to what NIfTI-MRS assumes for 1H data
+                that does not state it either (4.65).
 
         Returns:
             The basis set container, ready for ``fit_runFit``.
@@ -300,7 +302,8 @@ class OspreyBridge(FIDABridge):
         with open(path) as fh:
             text = fh.read()
         if "PPMSEP" not in text:
-            centre = self.codec.centre_ppm if centre_ppm is None else centre_ppm
+            centre = next(c for c in (centre_ppm, self.codec.centre_ppm, PPM_SHIFT["1H"])
+                          if c is not None)
             text = re.sub(r"^([ \t]*\$BASIS[ \t\r]*)$",
                           f" $NMUSED\n PPMSEP = {centre},\n $END\n\\1", text, flags=re.M)
         source = os.path.join(folder, "source.basis")
@@ -397,7 +400,10 @@ def fit(data: Any, basis: Any, fit_opts: Optional[dict] = None,
 
     Args:
         data: NIfTI-MRS or NIfTI-MRS+. A batch is fitted spectrum by spectrum.
-        basis: A basis container, from ``bridge.basis`` or ``bridge.basis_from_lcmodel``.
+        basis: An LCModel ``.BASIS`` file, as every fitter takes, or a basis container
+            from ``bridge.basis`` or ``bridge.basis_from_lcmodel``. A file is read without
+            Osprey's own macromolecules and lipids: a basis handed to all fitters brings
+            its own, and adding Osprey's would fit them twice.
         fit_opts (Optional[dict]): Overrides for ``bridge.fit_options()``.
         crlb (bool): Also run fit_Osprey_CRLB. Off by default, and left that way: the
             fit does not produce bounds, because Osprey computes them in its quantify
@@ -407,8 +413,14 @@ def fit(data: Any, basis: Any, fit_opts: Optional[dict] = None,
             against another method, not enough to weight that comparison.
 
     Returns:
-        A FitResult, or one per spectrum for a batch.
+        A FitResult, or one per spectrum for a batch, each with the data's processing
+        history and the fit itself as its provenance.
     """
+    if isinstance(basis, (str, os.PathLike)):
+        source = file_checksum(basis)
+        basis = bridge.basis_from_lcmodel(str(basis), add_mm=False)
+    else:
+        source = basis
     opts = bridge.fit_options(**(fit_opts or {}))
     items = data.list() if hasattr(data, "list") else [data]
     basis_max = float(np.max(np.real(np.asarray(basis["specs"]))))
@@ -426,7 +438,11 @@ def fit(data: Any, basis: Any, fit_opts: Optional[dict] = None,
             _, _, bounds = bridge.fit_Osprey_CRLB(
                 struct, basis, opts["bLineKnotSpace"], opts["range"], params,
                 float(np.asarray(params["refShift"]).ravel()[0]), nout=3)
-        out.append(to_result(params, res_basis, bounds, scale=scale))
+        result = to_result(params, res_basis, bounds, scale=scale)
+        result.provenance = history(one) + [
+            entry(bridge.program, bridge.version(), "fit_runFit",
+                  {"basis": source, "fit_opts": opts, "crlb": crlb, **bridge.runtime()})]
+        out.append(result)
 
     return out if hasattr(data, "list") else out[0]
 

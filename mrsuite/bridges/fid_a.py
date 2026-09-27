@@ -18,7 +18,7 @@
 #*************#
 import os
 from pathlib import Path
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import numpy as np
 
@@ -27,7 +27,8 @@ from nifti_mrs.nifti_mrs import NIFTI_MRS
 from oct2py import Oct2Py
 
 from mrsuite.bridges.base import Bridge
-from mrsuite.octave import session
+from mrsuite.core.provenance import git_version
+from mrsuite.octave import resolve_runtime, session
 
 # Absolute, so the bridge works from any working directory.
 FIDA_ROOT = Path(__file__).resolve().parents[2] / "externals" / "fid-a"
@@ -46,7 +47,7 @@ class FIDACodec:
     #****************#
     #   nifti2fida   #
     #****************#
-    def nifti2fida(self, data: NIFTI_MRS, centre_ppm: float = 4.65) -> dict:
+    def nifti2fida(self, data: NIFTI_MRS, centre_ppm: Optional[float] = None) -> dict:
         """
         Convert NIfTI_MRS data to FID-A struct format.
 
@@ -54,13 +55,17 @@ class FIDACodec:
 
         Args:
             data (NIfTI_MRS): Input MRS data to be converted.
-            centre_ppm (float): ppm at the centre of the spectrum. FID-A's own loaders
-                disagree (4.68 in io_loadspec_niimrs, 4.7 in io_loadspec_twix); the
-                default is FSL-MRS's, and data reaches MRSuite through FSL-MRS.
+            centre_ppm (Optional[float]): ppm at the centre of the spectrum. Defaults to
+                what the data states as SpecFreqChemShift, which NIfTI-MRS takes as 4.65
+                for 1H when unstated, rather than to a constant: FID-A's own loaders
+                disagree (4.68 in io_loadspec_niimrs, 4.7 in io_loadspec_twix), and the
+                data knows better than either.
 
         Returns:
             dict: FID-A struct representation of the input data.
         """
+        if centre_ppm is None:
+            centre_ppm = data.SpecFreqChemShift
         hdr = data.header   # extract the header and header extensions
         hdr_ext = data.hdr_ext  # extract the header extension
         fids = data[:]   # extract the time-domain data
@@ -432,6 +437,7 @@ class FIDABridge(Bridge):
     """
 
     name = "fid_a"
+    program = "FID-A"
 
     #**********#
     #   init   #
@@ -443,8 +449,25 @@ class FIDABridge(Bridge):
         self._verbose = verbose
         self._runtime = runtime
         self._octave: Optional[Oct2Py] = None
+        self._octave_version: Optional[str] = None
         self._codec = None
         self.nout = 1
+
+    #*************#
+    #   version   #
+    #*************#
+    def version(self) -> Optional[str]:
+        """The toolbox checkout's exact state, e.g. 'V1.2-357-g1eaa207'."""
+        return git_version(self._root)
+
+    #*************#
+    #   runtime   #
+    #*************#
+    def runtime(self) -> Dict[str, Any]:
+        """Where the Octave that ran the call lives, and which version it is."""
+        if self._octave_version is None:
+            self._octave_version = str(self.octave.eval("version()", nout=1)).strip()
+        return {"runtime": resolve_runtime(self._runtime), "octave": self._octave_version}
 
     #************#
     #   octave   #

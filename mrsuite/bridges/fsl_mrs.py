@@ -18,6 +18,7 @@
 #   imports   #
 #*************#
 import inspect
+import os
 from typing import Any, Callable, List, Optional
 
 import numpy as np
@@ -25,6 +26,7 @@ import numpy as np
 from fsl_mrs.utils.preproc import nifti_mrs_proc
 
 from mrsuite.bridges.base import Bridge
+from mrsuite.core.provenance import checksum, entry, file_checksum, history
 from mrsuite.core.result import FitResult
 
 
@@ -39,6 +41,8 @@ class FSLMRSBridge(Bridge):
     """Dispatch onto FSL-MRS's NIfTI-MRS processing functions."""
 
     name = "fsl_mrs"
+    program = "FSL-MRS"
+    records = False           # every nifti_mrs_proc function writes its own entry
 
     #**********#
     #   init   #
@@ -94,6 +98,13 @@ class FSLMRSBridge(Bridge):
     def _from_toolbox(self, obj):
         return obj
 
+    #*************#
+    #   version   #
+    #*************#
+    def version(self) -> str:
+        import fsl_mrs
+        return fsl_mrs.__version__
+
     #***************#
     #   available   #
     #***************#
@@ -141,7 +152,8 @@ def fit(data: Any, basis: Any, water: Any = None, ppmlim: tuple = (0.2, 4.2),
 
     Args:
         data: NIfTI-MRS or NIfTI-MRS+. A batch is fitted spectrum by spectrum.
-        basis: An ``fsl_mrs`` basis, from ``mrs_io.read_basis``.
+        basis: A basis file or folder FSL-MRS reads (an LCModel ``.BASIS``, as every
+            fitter takes), or an ``fsl_mrs`` basis from ``mrs_io.read_basis``.
         water: Unsuppressed reference, for molarity and molality scaling. Without it the
             result carries raw and internally referenced concentrations only.
         ppmlim (tuple): Fit range in ppm.
@@ -153,13 +165,22 @@ def fit(data: Any, basis: Any, water: Any = None, ppmlim: tuple = (0.2, 4.2),
         **kwargs: Passed through to ``fit_FSLModel``.
 
     Returns:
-        A FitResult, or one per spectrum for a batch.
+        A FitResult, or one per spectrum for a batch, each with the data's processing
+        history and the fit itself as its provenance.
 
     Raises:
         ValueError: If water scaling is asked for but no echo or repetition time can be
             found, since the T1 and T2 corrections cannot be applied without them.
     """
-    from fsl_mrs.utils import fitting, quantify
+    from fsl_mrs.utils import fitting, mrs_io, quantify
+
+    if isinstance(basis, (str, os.PathLike)):
+        source = file_checksum(basis)
+        basis = mrs_io.read_basis(str(basis))
+    else:
+        source = {"names": list(basis.names), "sha256": checksum(basis.original_basis_array)}
+    options = {"basis": source, "ppmlim": ppmlim, "baseline_order": baseline_order,
+               "method": method, "te": te, "tr": tr, "kwargs": kwargs}
 
     batched = hasattr(data, "list")
     items = data.list() if batched else [data]
@@ -187,7 +208,11 @@ def fit(data: Any, basis: Any, water: Any = None, ppmlim: tuple = (0.2, 4.2),
             res.calculateConcScaling(mrs, quant_info=quantify.QuantificationInfo(
                 echo, rep, mrs.names, mrs.centralFrequency / 1e6))
 
-        out.append(to_result(res))
+        result = to_result(res)
+        result.provenance = history(nmrs) + [
+            entry(bridge.program, bridge.version(), "fit_FSLModel",
+                  {**options, "water": ref})]
+        out.append(result)
 
     return out if batched else out[0]
 

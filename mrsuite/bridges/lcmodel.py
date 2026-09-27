@@ -17,8 +17,11 @@
 #*************#
 #   imports   #
 #*************#
+import sys
 from typing import Any
 
+from mrsuite.bridges.base import Deferred
+from mrsuite.core.provenance import entry, file_checksum, history
 from mrsuite.core.result import FitResult
 
 
@@ -78,12 +81,28 @@ def fit(data: Any, basis: str, water: Any = None, ppmlim: tuple = (0.5, 4.2),
         **kwargs: Passed to ``PyLCModel``, e.g. ``path2exec``, ``save_path``, ``conj``.
 
     Returns:
-        A FitResult, or one per spectrum for a batch.
+        A FitResult, or one per spectrum for a batch, each with the data's processing
+        history and the fit itself as its provenance.
     """
-    from lcmodel_wrapper import PyLCModel
+    from lcmodel_wrapper import PyLCModel, __version__
 
-    engine = PyLCModel(path2basis=basis, ppmlim=ppmlim, **kwargs)
+    engine = PyLCModel(path2basis=str(basis), ppmlim=ppmlim, **kwargs)
     scaling = "raw" if water is None else "molarity"
     out = [to_result(report, scaling=scaling) for report in engine.report(data, water)]
 
+    # the binary is what fits, so it is recorded by its bytes, not only by the wrapper
+    options = {"basis": file_checksum(basis), "ppmlim": ppmlim, "kwargs": kwargs,
+               "binary": file_checksum(engine.path2exec)}
+    items = data.list() if hasattr(data, "list") else [data]
+    refs = water.list() if hasattr(water, "list") else [water] * len(items)
+    for result, nmrs, ref in zip(out, items, refs):
+        result.provenance = history(nmrs) + [
+            entry("LCModel", f"PyLCModel {__version__}", "LCModel",
+                  {**options, "water": ref})]
+
     return out if hasattr(data, "list") else out[0]
+
+
+# ``lcmodel.step.fit(basis)``, as the bridges' fits are steps: LCModel is a binary rather
+# than a library, so there is no bridge, but its fit is a pipeline step all the same
+step = Deferred(sys.modules[__name__])

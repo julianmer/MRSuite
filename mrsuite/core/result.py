@@ -44,6 +44,9 @@ class FitResult:
         uncertainties (Dict[str, Dict[str, float]]): Kind -> metabolite -> value, in the
             units of the matching scaling. 'percentage' is CRLB as a percentage.
         qc (Dict[str, float]): Scalar quality measures, e.g. SNR, FWHM, MSE.
+        provenance (List[Dict[str, str]]): How this came about, as NIfTI-MRS
+            ProcessingApplied entries: the data's own processing history, then the fit,
+            with its program, exact version, basis and options.
         raw (Any): The method's own result object, untouched. Anything not captured
             above lives here, including the curves, which are too large to persist.
     """
@@ -53,6 +56,7 @@ class FitResult:
     concentrations: Dict[str, Dict[str, float]] = field(default_factory=dict)
     uncertainties: Dict[str, Dict[str, float]] = field(default_factory=dict)
     qc: Dict[str, float] = field(default_factory=dict)
+    provenance: List[Dict[str, str]] = field(default_factory=list)
     raw: Any = None
 
     #**********#

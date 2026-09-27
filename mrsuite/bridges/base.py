@@ -20,12 +20,14 @@
 #*************#
 #   imports   #
 #*************#
+import sys
 from abc import ABC, abstractmethod
-from typing import Any, Callable, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from nifti_mrs.nifti_mrs import NIFTI_MRS
 
 from nifti_mrs_plus import NIfTI_MRS_Plus
+from mrsuite.core import provenance
 
 
 #**************************************************************************************************#
@@ -43,11 +45,19 @@ class Bridge(ABC):
     whether or not MRSuite knows about it. Unknown names raise ``AttributeError`` at
     lookup, not a confusing failure inside the toolbox.
 
+    Every call that returns spectra records itself in their ProcessingApplied, as
+    FSL-MRS' own functions do: the toolbox and its exact version, the function, every
+    argument, and what else it ran on, so that the history alone reproduces the result.
+
     Attributes:
-        name (str): Toolbox name, as recorded in provenance.
+        name (str): Module name, as in ``mrsuite.<name>``.
+        program (str): The toolbox's own name, credited in ProcessingApplied.
+        records (bool): False for a toolbox that already records its own steps.
     """
 
     name: str = "bridge"
+    program: str = "bridge"
+    records: bool = True
 
     #**********#
     #   init   #
@@ -82,6 +92,20 @@ class Bridge(ABC):
     def available(self) -> List[str]:
         """Names this bridge can dispatch, for discovery and error messages."""
         return []
+
+    #*************#
+    #   version   #
+    #*************#
+    def version(self) -> Optional[str]:
+        """The toolbox's exact version, for provenance; None when it cannot be told."""
+        return None
+
+    #*************#
+    #   runtime   #
+    #*************#
+    def runtime(self) -> Dict[str, Any]:
+        """What else a call's result depends on, e.g. the interpreter that ran it."""
+        return {}
 
     #*****************#
     #   skip reason   #
@@ -146,10 +170,10 @@ class Bridge(ABC):
                     raise ValueError(
                         f"{self.name}.{func}: batched arguments have different lengths "
                         f"({n} vs {len(b)}); they must line up item for item.")
-            results = [self._call_one(target, self._pick(args, i), self._pick(kwargs, i))
-                       for i in range(n)]
-            return self._regroup(func, results, batched[0])
-        return self._call_one(target, args, kwargs)
+            results = [self._call_one(func, target, self._pick(args, i),
+                                      self._pick(kwargs, i)) for i in range(n)]
+            return self._regroup(results)
+        return self._call_one(func, target, args, kwargs)
 
     #**********#
     #   pick   #
@@ -166,56 +190,65 @@ class Bridge(ABC):
     #**************#
     #   call one   #
     #**************#
-    def _call_one(self, target, args, kwargs):
-        reason = self._skip_reason(getattr(target, "__name__", ""), args, kwargs)
+    def _call_one(self, func, target, args, kwargs):
+        reason = self._skip_reason(func, args, kwargs)
         if reason is not None:
             self._skipped.append(reason)
             return args[0] if args else None
 
-        args = tuple(self._to_toolbox(a) if isinstance(a, NIFTI_MRS) else a for a in args)
-        kwargs = {k: self._to_toolbox(v) if isinstance(v, NIFTI_MRS) else v
-                  for k, v in kwargs.items()}
-        out = target(*args, **kwargs)
-        if isinstance(out, tuple):
-            return tuple(self._from_toolbox(o) for o in out)
-        return self._from_toolbox(out)
+        source = next((a for a in list(args) + list(kwargs.values())
+                       if isinstance(a, NIFTI_MRS)), None)
+        out = target(*(self._to_toolbox(a) if isinstance(a, NIFTI_MRS) else a for a in args),
+                     **{k: self._to_toolbox(v) if isinstance(v, NIFTI_MRS) else v
+                        for k, v in kwargs.items()})
+        outs = tuple(self._from_toolbox(o) for o in out) if isinstance(out, tuple) \
+            else (self._from_toolbox(out),)
+
+        spectra = [o for o in outs if isinstance(o, NIFTI_MRS) and o is not source]
+        if source is not None and spectra:
+            # the data is what the history belongs to; everything else is an argument
+            item = provenance.entry(self.program, self.version(), func,
+                                    {"args": args[1:], "kwargs": kwargs, **self.runtime()})
+            for spectrum in spectra:
+                self._keep_header(source, spectrum)
+                if self.records:
+                    provenance.append(spectrum, item)
+        return outs if isinstance(out, tuple) else outs[0]
+
+    #*****************#
+    #   keep header   #
+    #*****************#
+    @staticmethod
+    def _keep_header(source: NIFTI_MRS, out: NIFTI_MRS) -> None:
+        """Carry the input's header fields over to the output.
+
+        A toolbox working on its own struct hands back the samples and little else, so
+        the echo time, the ppm reference and the processing history would be lost at
+        the first step. Fields the output already states win, and the dimension fields
+        are left to the output, since a step may have removed a dimension.
+        """
+        for key, value in source.hdr_ext.to_dict().items():
+            if not key.startswith("dim_") and key not in out.hdr_ext:
+                out.add_hdr_field(key, value)
 
     #*************#
     #   regroup   #
     #*************#
-    def _regroup(self, func, results, template: NIfTI_MRS_Plus):
+    def _regroup(self, results):
         """Rebuild batched results, keeping tuple-returning functions tuple-shaped."""
         if results and isinstance(results[0], tuple):
             width = len(results[0])
-            return tuple(self._wrap(func, [r[j] for r in results], template)
-                         for j in range(width))
-        return self._wrap(func, results, template)
+            return tuple(self._wrap([r[j] for r in results]) for j in range(width))
+        return self._wrap(results)
 
     #**********#
     #   wrap   #
     #**********#
-    def _wrap(self, func, items, template: NIfTI_MRS_Plus):
+    @staticmethod
+    def _wrap(items):
         if not items or not all(isinstance(i, NIFTI_MRS) for i in items):
             return items                       # non-MRS output: hand back the raw list
-        out = NIfTI_MRS_Plus(items)
-        self._record(out, func, template)
-        return out
-
-    #************#
-    #   record   #
-    #************#
-    def _record(self, out: NIfTI_MRS_Plus, func: str, source: NIfTI_MRS_Plus):
-        """Note the call in the wrapper's provenance metadata.
-
-        Best effort: provenance must never be the reason a pipeline fails, and the
-        metadata API is optional on the wrapper.
-        """
-        try:
-            out.update_metadata(f"{self.name}.{func}",
-                                {"toolbox": self.name, "function": func,
-                                 "n_items": len(out)})
-        except Exception:                      # noqa: BLE001 - provenance is advisory
-            pass
+        return NIfTI_MRS_Plus(items)           # picks up each spectrum's ProcessingApplied
 
 
 #**************************************************************************************************#
@@ -228,6 +261,10 @@ class Bridge(ABC):
 class Deferred:
     """A bridge's functions as pipeline steps, with their arguments bound.
 
+    Hand-written functions in the bridge's module are steps too, so a fit is one like
+    any other: ``fsl_mrs.step.fit(basis)``, ``osprey.step.fit(basis)``. A module with no
+    bridge at all, such as LCModel's, can be deferred onto directly.
+
     The data is a toolbox function's first argument, and ``functools.partial`` binds only
     leading ones, so there is no stdlib way to bind the rest and wait. Deferring could be
     inferred instead - no data passed, so it must be a step - but that is ambiguous for
@@ -236,20 +273,36 @@ class Deferred:
     explicit spelling avoids guessing.
 
     Args:
-        bridge (Bridge): The bridge to defer calls to.
+        bridge: The bridge to defer calls to, or a module of hand-written functions.
     """
 
     #**********#
     #   init   #
     #**********#
-    def __init__(self, bridge: Bridge):
+    def __init__(self, bridge: Any):
         self._bridge = bridge
 
     #**********#
     #   repr   #
     #**********#
     def __repr__(self) -> str:
-        return f"{self._bridge.name}.step"
+        name = getattr(self._bridge, "name", None) or self._bridge.__name__.rsplit(".", 1)[-1]
+        return f"{name}.step"
+
+    #*************#
+    #   resolve   #
+    #*************#
+    def _resolve(self, func: str) -> Callable:
+        """The bridge's function, else a hand-written one in the bridge's module."""
+        try:
+            return getattr(self._bridge, func)
+        except AttributeError:
+            if isinstance(self._bridge, Bridge):
+                module = sys.modules.get(type(self._bridge).__module__)
+                written = vars(module).get(func) if module else None
+                if callable(written):
+                    return written
+            raise
 
     #*************#
     #   getattr   #
@@ -257,7 +310,7 @@ class Deferred:
     def __getattr__(self, func: str) -> Callable:
         if func.startswith("_"):
             raise AttributeError(func)
-        call = getattr(self._bridge, func)     # raises AttributeError on an unknown name
+        call = self._resolve(func)             # raises AttributeError on an unknown name
 
         def bind(*args, **kwargs):
             def step(data):
@@ -273,7 +326,10 @@ class Deferred:
     #   dir   #
     #*********#
     def __dir__(self):
-        return sorted(self._bridge.available())
+        if isinstance(self._bridge, Bridge):
+            return sorted(self._bridge.available())
+        return sorted(n for n, v in vars(self._bridge).items()
+                      if callable(v) and not n.startswith("_"))
 
 
 #**************#

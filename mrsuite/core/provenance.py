@@ -18,6 +18,7 @@
 #*************#
 import hashlib
 import json
+import os
 import subprocess
 from datetime import datetime
 from functools import lru_cache
@@ -85,8 +86,20 @@ def checksum(array: Any) -> str:
 #*******************#
 def file_checksum(path: Any) -> Dict[str, str]:
     """A file by its path and the SHA-256 of its bytes, so a changed file shows."""
+    stat = os.stat(path)
+    return {"path": str(path),
+            "sha256": _sha256(os.path.abspath(path), stat.st_mtime_ns, stat.st_size)}
+
+
+#************#
+#   sha256   #
+#************#
+@lru_cache(maxsize=None)
+def _sha256(path: str, mtime: int, size: int) -> str:
+    """A file's SHA-256, read once per version of the file: a method records its basis
+    for every spectrum of a batch."""
     with open(path, "rb") as fh:
-        return {"path": str(path), "sha256": hashlib.sha256(fh.read()).hexdigest()}
+        return hashlib.sha256(fh.read()).hexdigest()
 
 
 #**************#
@@ -96,9 +109,9 @@ def describe(value: Any) -> Any:
     """
     A JSON-serialisable record of an argument, faithful enough to replay the call.
 
-    Small values are recorded as they are; arrays and spectra by checksum, shape and,
-    for spectra, their own history, since a reference spectrum's processing is part of
-    what produced the result.
+    Small values are recorded as they are; files by their bytes as well as their path;
+    arrays and spectra by checksum, shape and, for spectra, their own history, since a
+    reference spectrum's processing is part of what produced the result.
 
     Args:
         value: Any argument a step was given.
@@ -106,6 +119,8 @@ def describe(value: Any) -> Any:
     Returns:
         A structure json.dumps accepts.
     """
+    if isinstance(value, (str, os.PathLike)) and os.path.isfile(value):
+        return file_checksum(value)
     if value is None or isinstance(value, (bool, int, float, str)):
         return value
     if isinstance(value, complex):

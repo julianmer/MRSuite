@@ -114,7 +114,7 @@ def test_water_scaled_concentrations_are_filed_as_molarity(spectrum):
 def test_a_mismatched_number_of_references_is_rejected(spectra, spectrum):
     three = NIfTI_MRS_Plus([spectrum.copy() for _ in range(3)])
 
-    with pytest.raises(ValueError, match="3 water references for 2 spectra"):
+    with pytest.raises(ValueError, match="water gives 3 for 2 spectra"):
         lcmodel.fit(spectra, CHALLENGE_BASIS, water=three)
 
 

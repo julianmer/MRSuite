@@ -65,5 +65,5 @@ class TorchModel(Model, torch.nn.Module, PyTorchModelHubMixin, **HUB):
     #*************#
     #   runtime   #
     #*************#
-    def runtime(self) -> Dict[str, str]:
-        return {"torch": torch.__version__}
+    def runtime(self) -> Dict[str, Any]:
+        return {**super().runtime(), "torch": torch.__version__}

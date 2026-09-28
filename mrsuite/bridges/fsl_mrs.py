@@ -19,6 +19,7 @@
 #*************#
 import inspect
 import os
+from functools import lru_cache
 from typing import Any, Callable, List, Optional
 
 import numpy as np
@@ -26,8 +27,7 @@ import numpy as np
 from fsl_mrs.utils.preproc import nifti_mrs_proc
 
 from mrsuite.bridges.base import Bridge
-from mrsuite.core.parallel import over_processes
-from mrsuite.core.provenance import checksum, entry, file_checksum, history
+from mrsuite.core.method import method
 from mrsuite.core.result import FitResult
 
 
@@ -118,30 +118,21 @@ class FSLMRSBridge(Bridge):
 bridge = FSLMRSBridge()
 
 
-#****************#
-#   references   #
-#****************#
-def _references(items: List[Any], water: Any) -> List[Any]:
-    """Line a water reference up with the spectra it scales.
-
-    One per spectrum, which is how they are acquired. A single reference is not spread
-    across a batch: a batch is usually separate acquisitions, and scaling them all by
-    one subject's water would be wrong without being visibly wrong.
-    """
-    if water is None:
-        return [None] * len(items)
-
-    refs = water.list() if hasattr(water, "list") else [water]
-    if len(refs) != len(items):
-        raise ValueError(f"{len(refs)} water references for {len(items)} spectra; "
-                         f"give one per spectrum.")
-    return refs
+#***********#
+#   basis   #
+#***********#
+@lru_cache(maxsize=None)
+def _basis(path: str, mtime: float) -> Any:
+    """A basis file, read once per process and version of the file: a batch is fitted
+    spectrum by spectrum, and reading the basis for each would dominate a quick fit."""
+    from fsl_mrs.utils import mrs_io
+    return mrs_io.read_basis(path)
 
 
 #*********#
 #   fit   #
 #*********#
-@over_processes
+@method("FSL-MRS", version=lambda: bridge.version(), name="fit_FSLModel", parallel=True)
 def fit(data: Any, basis: Any, water: Any = None, ppmlim: tuple = (0.2, 4.2),
         baseline_order: int = 2, method: str = "Newton",
         te: Optional[float] = None, tr: Optional[float] = None, **kwargs) -> Any:
@@ -156,8 +147,9 @@ def fit(data: Any, basis: Any, water: Any = None, ppmlim: tuple = (0.2, 4.2),
         data: NIfTI-MRS or NIfTI-MRS+. A batch is fitted spectrum by spectrum.
         basis: A basis file or folder FSL-MRS reads (an LCModel ``.BASIS``, as every
             fitter takes), or an ``fsl_mrs`` basis from ``mrs_io.read_basis``.
-        water: Unsuppressed reference, for molarity and molality scaling. Without it the
-            result carries raw and internally referenced concentrations only.
+        water: Unsuppressed reference, for molarity and molality scaling, one per
+            spectrum. Without it the result carries raw and internally referenced
+            concentrations only.
         ppmlim (tuple): Fit range in ppm.
         baseline_order (int): Polynomial order of the baseline.
         method (str): 'Newton', 'MH' or 'VB'.
@@ -165,7 +157,7 @@ def fit(data: Any, basis: Any, water: Any = None, ppmlim: tuple = (0.2, 4.2),
             header when absent.
         tr (Optional[float]): Repetition time in seconds, likewise.
         **kwargs: Passed through to ``fit_FSLModel``.
-        workers (int): Processes to spread a batch over (see ``over_processes``).
+        workers (int): Processes to spread a batch over (see ``mrsuite.core.parallel``).
 
     Returns:
         A FitResult, or one per spectrum for a batch, each with the data's processing
@@ -175,49 +167,33 @@ def fit(data: Any, basis: Any, water: Any = None, ppmlim: tuple = (0.2, 4.2),
         ValueError: If water scaling is asked for but no echo or repetition time can be
             found, since the T1 and T2 corrections cannot be applied without them.
     """
-    from fsl_mrs.utils import fitting, mrs_io, quantify
+    from fsl_mrs.utils import fitting, quantify
 
     if isinstance(basis, (str, os.PathLike)):
-        source = file_checksum(basis)
-        basis = mrs_io.read_basis(str(basis))
-    else:
-        source = {"names": list(basis.names), "sha256": checksum(basis.original_basis_array)}
-    options = {"basis": source, "ppmlim": ppmlim, "baseline_order": baseline_order,
-               "method": method, "te": te, "tr": tr, "kwargs": kwargs}
+        basis = _basis(os.path.abspath(basis), os.path.getmtime(basis))
 
-    batched = hasattr(data, "list")
-    items = data.list() if batched else [data]
+    mrs = data.mrs(basis=basis, ref_data=None if water is None else water[:])
+    mrs.processForFitting()
+    res = fitting.fit_FSLModel(mrs, method=method, ppmlim=ppmlim,
+                               baseline_order=baseline_order, **kwargs)
 
-    out = []
-    for nmrs, ref in zip(items, _references(items, water)):
-        mrs = nmrs.mrs(basis=basis, ref_data=None if ref is None else ref[:])
-        mrs.processForFitting()
-        res = fitting.fit_FSLModel(mrs, method=method, ppmlim=ppmlim,
-                                   baseline_order=baseline_order, **kwargs)
+    if water is not None:
+        # hdr_ext is an Hdr_Ext, which supports `in` but has no .get
+        hdr = getattr(data, "hdr_ext", None)
+        def header(field):
+            return hdr[field] if hdr is not None and field in hdr else None
 
-        if ref is not None:
-            # hdr_ext is an Hdr_Ext, which supports `in` but has no .get
-            hdr = getattr(nmrs, "hdr_ext", None)
-            def header(field):
-                return hdr[field] if hdr is not None and field in hdr else None
+        echo = te if te is not None else header("EchoTime")
+        rep = tr if tr is not None else header("RepetitionTime")
+        if echo is None or rep is None:
+            raise ValueError(
+                "water scaling needs an echo and repetition time; the header has "
+                f"EchoTime={header('EchoTime')} and "
+                f"RepetitionTime={header('RepetitionTime')}. Pass te= and tr=.")
+        res.calculateConcScaling(mrs, quant_info=quantify.QuantificationInfo(
+            echo, rep, mrs.names, mrs.centralFrequency / 1e6))
 
-            echo = te if te is not None else header("EchoTime")
-            rep = tr if tr is not None else header("RepetitionTime")
-            if echo is None or rep is None:
-                raise ValueError(
-                    "water scaling needs an echo and repetition time; the header has "
-                    f"EchoTime={header('EchoTime')} and "
-                    f"RepetitionTime={header('RepetitionTime')}. Pass te= and tr=.")
-            res.calculateConcScaling(mrs, quant_info=quantify.QuantificationInfo(
-                echo, rep, mrs.names, mrs.centralFrequency / 1e6))
-
-        result = to_result(res)
-        result.provenance = history(nmrs) + [
-            entry(bridge.program, bridge.version(), "fit_FSLModel",
-                  {**options, "water": ref})]
-        out.append(result)
-
-    return out if batched else out[0]
+    return to_result(res)
 
 
 #***************#

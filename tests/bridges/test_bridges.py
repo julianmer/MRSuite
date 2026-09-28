@@ -316,7 +316,7 @@ def test_water_scaling_adds_the_molar_concentrations(spectrum, basis):
 def test_one_water_reference_is_not_spread_over_a_batch(spectra, basis, spectrum):
     """A batch is separate acquisitions, so scaling them all by one subject's water
     would be wrong without looking wrong. Rejected rather than broadcast."""
-    with pytest.raises(ValueError, match="1 water references for 2 spectra"):
+    with pytest.raises(ValueError, match="water gives 1 for 2 spectra"):
         fsl_mrs.fit(spectra, basis, water=spectrum, te=0.030, tr=2.0)
 
 
@@ -338,7 +338,7 @@ def test_a_reference_per_spectrum_is_scaled(spectra, basis, spectrum):
 def test_a_mismatched_number_of_references_is_rejected(spectra, basis, spectrum):
     three = NIfTI_MRS_Plus([spectrum.copy() for _ in range(3)])
 
-    with pytest.raises(ValueError, match="3 water references for 2 spectra"):
+    with pytest.raises(ValueError, match="water gives 3 for 2 spectra"):
         fsl_mrs.fit(spectra, basis, water=three, te=0.030, tr=2.0)
 
 

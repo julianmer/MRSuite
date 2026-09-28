@@ -103,10 +103,13 @@ def _assert_covers_truth(results, truth, path):
         assert expected <= set(reported), f"{result.method} misses {expected - set(reported)}"
         assert all(np.isfinite(reported[m]) for m in expected)
         fit = json.loads(result.provenance[-1]["Details"])
-        assert fit["basis"]["sha256"], "the fit must record which basis it used"
+        basis = fit["args"][0]
+        assert isinstance(basis["path"], str) and basis["sha256"], \
+            "the fit must record which basis it used"
         origin = result.provenance[0]
         assert origin["Program"] == "MRSuite" and "load" in origin["Method"]
-        assert json.loads(origin["Details"])["file"]["sha256"], "and which file the data is"
+        source = json.loads(origin["Details"])["file"]
+        assert isinstance(source["path"], str) and source["sha256"], "and which file the data is"
 
 
 #*************************#

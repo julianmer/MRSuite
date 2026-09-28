@@ -26,8 +26,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from nifti_mrs.nifti_mrs import NIFTI_MRS
 
-from nifti_mrs_plus import NIfTI_MRS_Plus
-from mrsuite.core import provenance
+from mrsuite.core.method import Function
 
 
 #**************************************************************************************************#
@@ -45,19 +44,24 @@ class Bridge(ABC):
     whether or not MRSuite knows about it. Unknown names raise ``AttributeError`` at
     lookup, not a confusing failure inside the toolbox.
 
-    Every call that returns spectra records itself in their ProcessingApplied, as
-    FSL-MRS' own functions do: the toolbox and its exact version, the function, every
-    argument, and what else it ran on, so that the history alone reproduces the result.
+    Each function it hands out is a method (see ``mrsuite.core.method``), so a call that
+    returns spectra records itself in their ProcessingApplied, as FSL-MRS' own functions
+    do: the toolbox and its exact version, the function, every argument, and what else
+    it ran on, so that the history alone reproduces the result. The bridge itself does
+    only the toolbox's side of a call: resolve, convert, call, convert back.
 
     Attributes:
         name (str): Module name, as in ``mrsuite.<name>``.
         program (str): The toolbox's own name, credited in ProcessingApplied.
         records (bool): False for a toolbox that already records its own steps.
+        batched (bool): True for a toolbox called once for a whole batch; ``_run`` then
+            takes the data as NIfTI-MRS+ and returns a list.
     """
 
     name: str = "bridge"
     program: str = "bridge"
     records: bool = True
+    batched: bool = False
 
     #**********#
     #   init   #
@@ -124,18 +128,20 @@ class Bridge(ABC):
     #*************#
     #   getattr   #
     #*************#
-    def __getattr__(self, func: str) -> Callable:
+    def __getattr__(self, func: str) -> Function:
         if func.startswith("_"):
             raise AttributeError(func)
         target = self._resolve(func)          # raises AttributeError if unknown
 
         def call(*args, **kwargs):
-            return self._invoke(func, target, args, kwargs)
+            return self._run(func, target, *args, **kwargs)
 
         call.__name__ = func
         call.__doc__ = getattr(target, "__doc__", None) or \
             f"{self.name} function '{func}', dispatched by MRSuite."
-        return call
+        self._skipped = []
+        return Function(call, self.program, self.version, self.runtime,
+                        batched=self.batched, records=self.records)
 
     #**********#
     #   step   #
@@ -155,100 +161,26 @@ class Bridge(ABC):
     def __dir__(self):
         return sorted(set(super().__dir__()) | set(self.available()))
 
-    #************#
-    #   invoke   #
-    #************#
-    def _invoke(self, func, target, args, kwargs):
-        """Batch over NIfTI-MRS+ if present, otherwise call once."""
-        self._skipped = []
-        batched = [a for a in list(args) + list(kwargs.values())
-                   if isinstance(a, NIfTI_MRS_Plus)]
-        if batched:
-            n = len(batched[0])
-            for b in batched[1:]:
-                if len(b) != n:
-                    raise ValueError(
-                        f"{self.name}.{func}: batched arguments have different lengths "
-                        f"({n} vs {len(b)}); they must line up item for item.")
-            results = [self._call_one(func, target, self._pick(args, i),
-                                      self._pick(kwargs, i)) for i in range(n)]
-            return self._regroup(results)
-        return self._call_one(func, target, args, kwargs)
+    #*********#
+    #   run   #
+    #*********#
+    def _run(self, func: str, target: Callable, *args, **kwargs) -> Any:
+        """One call of the toolbox function, spectra converted there and back.
 
-    #**********#
-    #   pick   #
-    #**********#
-    @staticmethod
-    def _pick(container, i):
-        """Take item i out of any batched argument, passing everything else through."""
-        def one(v):
-            return v[i] if isinstance(v, NIfTI_MRS_Plus) else v
-        if isinstance(container, dict):
-            return {k: one(v) for k, v in container.items()}
-        return tuple(one(v) for v in container)
-
-    #**************#
-    #   call one   #
-    #**************#
-    def _call_one(self, func, target, args, kwargs):
+        The batch, the header and the provenance are the method's; this is only the
+        toolbox's side of the call.
+        """
         reason = self._skip_reason(func, args, kwargs)
         if reason is not None:
             self._skipped.append(reason)
             return args[0] if args else None
 
-        source = next((a for a in list(args) + list(kwargs.values())
-                       if isinstance(a, NIFTI_MRS)), None)
         out = target(*(self._to_toolbox(a) if isinstance(a, NIFTI_MRS) else a for a in args),
                      **{k: self._to_toolbox(v) if isinstance(v, NIFTI_MRS) else v
                         for k, v in kwargs.items()})
-        outs = tuple(self._from_toolbox(o) for o in out) if isinstance(out, tuple) \
-            else (self._from_toolbox(out),)
-
-        spectra = [o for o in outs if isinstance(o, NIFTI_MRS) and o is not source]
-        if source is not None and spectra:
-            # the data is what the history belongs to; everything else is an argument
-            item = provenance.entry(self.program, self.version(), func,
-                                    {"args": args[1:], "kwargs": kwargs, **self.runtime()})
-            for spectrum in spectra:
-                self._keep_header(source, spectrum)
-                if self.records:
-                    provenance.append(spectrum, item)
-        return outs if isinstance(out, tuple) else outs[0]
-
-    #*****************#
-    #   keep header   #
-    #*****************#
-    @staticmethod
-    def _keep_header(source: NIFTI_MRS, out: NIFTI_MRS) -> None:
-        """Carry the input's header fields over to the output.
-
-        A toolbox working on its own struct hands back the samples and little else, so
-        the echo time, the ppm reference and the processing history would be lost at
-        the first step. Fields the output already states win, and the dimension fields
-        are left to the output, since a step may have removed a dimension.
-        """
-        for key, value in source.hdr_ext.to_dict().items():
-            if not key.startswith("dim_") and key not in out.hdr_ext:
-                out.add_hdr_field(key, value)
-
-    #*************#
-    #   regroup   #
-    #*************#
-    def _regroup(self, results):
-        """Rebuild batched results, keeping tuple-returning functions tuple-shaped."""
-        if results and isinstance(results[0], tuple):
-            width = len(results[0])
-            return tuple(self._wrap([r[j] for r in results]) for j in range(width))
-        return self._wrap(results)
-
-    #**********#
-    #   wrap   #
-    #**********#
-    @staticmethod
-    def _wrap(items):
-        if not items or not all(isinstance(i, NIFTI_MRS) for i in items):
-            return items                       # non-MRS output: hand back the raw list
-        return NIfTI_MRS_Plus(items)           # picks up each spectrum's ProcessingApplied
+        if isinstance(out, tuple):
+            return tuple(self._from_toolbox(o) for o in out)
+        return self._from_toolbox(out)
 
 
 #**************************************************************************************************#

@@ -32,8 +32,7 @@ from nifti_mrs.nifti_mrs import NIFTI_MRS
 from nifti_mrs_plus import NIfTI_MRS_Plus
 from mrsuite import r
 from mrsuite.bridges.base import Bridge
-from mrsuite.core import provenance
-from mrsuite.core.parallel import over_processes
+from mrsuite.core.method import method
 from mrsuite.core.result import FitResult
 from mrsuite.octave import scratch
 
@@ -88,6 +87,7 @@ class SpantBridge(Bridge):
 
     name = "spant"
     program = "spant"
+    batched = True
 
     #*************#
     #   resolve   #
@@ -95,7 +95,7 @@ class SpantBridge(Bridge):
     def _resolve(self, func: str) -> Callable:
         if func not in r.info()["functions"]:
             raise AttributeError(f"spant has no function '{func}'.")
-        return func                     # run by _invoke, which batches the call into one job
+        return func                     # run by _run, which batches the call into one job
 
     #****************#
     #   to toolbox   #
@@ -127,40 +127,32 @@ class SpantBridge(Bridge):
     def runtime(self) -> Dict[str, Any]:
         return {"runtime": r.resolve_runtime(), "interpreter": r.info()["r"]}
 
-    #************#
-    #   invoke   #
-    #************#
-    def _invoke(self, func, target, args, kwargs):
-        """Apply ``func`` to one spectrum or a batch, as a single R job."""
+    #*********#
+    #   run   #
+    #*********#
+    def _run(self, func, target, data, *args, **kwargs):
+        """Apply ``func`` to a batch, as a single R job."""
         self._skipped = []
-        if not args or not isinstance(args[0], (NIFTI_MRS, NIfTI_MRS_Plus)):
+        if not isinstance(data, NIfTI_MRS_Plus):
             raise TypeError(f"spant.{func}: the data comes first")
-        if any(isinstance(a, (NIFTI_MRS, NIfTI_MRS_Plus)) for a in args[1:]):
+        if any(isinstance(a, NIfTI_MRS_Plus) for a in args):
             raise TypeError(f"spant.{func}: pass further spectra by keyword")
-        batched = isinstance(args[0], NIfTI_MRS_Plus)
-        items = args[0].list() if batched else [args[0]]
-        spectra = {k: v for k, v in kwargs.items() if isinstance(v, (NIFTI_MRS, NIfTI_MRS_Plus))}
+        items = data.list()
+        spectra = {k: v for k, v in kwargs.items() if isinstance(v, NIfTI_MRS_Plus)}
         plain = {k: v for k, v in kwargs.items() if k not in spectra}
 
         folder = scratch("mrsuite_spant_")
         try:
             inputs = _write(items, folder, "in")
             outputs = [os.path.join(folder, f"out{i}.nii.gz") for i in range(len(items))]
-            per_item = {k: _write(_per_item(v, len(items)), folder, k) for k, v in spectra.items()}
+            per_item = {k: _write(v.list(), folder, k) for k, v in spectra.items()}
             r.run({"task": "call", "func": func, "inputs": inputs, "outputs": outputs,
                    "refs": [item.SpecFreqChemShift for item in items],
-                   "args": _plain(list(args[1:])), "kwargs": _plain(plain),
+                   "args": _plain(list(args)), "kwargs": _plain(plain),
                    "spectra": per_item}, folder)
-            results = [_read_back(o, item) for o, item in zip(outputs, items)]
+            return [_read_back(o, item) for o, item in zip(outputs, items)]
         finally:
             shutil.rmtree(folder, ignore_errors=True)
-
-        item = provenance.entry(self.program, self.version(), func,
-                                {"args": args[1:], "kwargs": kwargs, **self.runtime()})
-        for out, source in zip(results, items):
-            self._keep_header(source, out)
-            provenance.append(out, item)
-        return NIfTI_MRS_Plus(results) if batched else results[0]
 
 
 bridge = SpantBridge()
@@ -179,18 +171,6 @@ def _write(items: List[NIFTI_MRS], folder: str, stem: str) -> List[str]:
     for path, item in zip(paths, items):
         item.copy().save(path)
     return paths
-
-
-#**************#
-#   per item   #
-#**************#
-def _per_item(spectra: Any, n: int) -> List[NIFTI_MRS]:
-    """One spectrum per data spectrum: a batch as it is, a single one for all."""
-    if isinstance(spectra, NIfTI_MRS_Plus):
-        if len(spectra) != n:
-            raise ValueError(f"{len(spectra)} spectra for {n}; give one per spectrum")
-        return spectra.list()
-    return [spectra] * n
 
 
 #***********#
@@ -252,7 +232,8 @@ def to_result(row: Dict[str, Any], amplitudes: List[str], method: str) -> FitRes
 #*********#
 #   fit   #
 #*********#
-@over_processes
+@method("spant", version=lambda: bridge.version(), runtime=lambda: bridge.runtime(),
+        name="fit_mrs", batched=True, parallel=True)
 def fit(data: Any, basis: str, method: str = "ABFIT", opts: Optional[dict] = None) -> Any:
     """
     Fit with spant, as MRSuite's uniform result.
@@ -263,13 +244,13 @@ def fit(data: Any, basis: str, method: str = "ABFIT", opts: Optional[dict] = Non
             to the data. Its ppm reference is read from PPMSEP, else taken as 4.65.
         method (str): spant's fitting method.
         opts (Optional[dict]): Options for ``abfit_opts``, by name.
-        workers (int): Processes to spread a batch over (see ``over_processes``).
+        workers (int): Processes to spread a batch over (see ``mrsuite.core.parallel``).
 
     Returns:
         A FitResult, or one per spectrum for a batch, each with the data's processing
         history and the fit itself as its provenance.
     """
-    items = data.list() if isinstance(data, NIfTI_MRS_Plus) else [data]
+    items = data.list()
     reference = _ppmsep(str(basis))
     folder = scratch("mrsuite_spant_")
     try:
@@ -282,16 +263,7 @@ def fit(data: Any, basis: str, method: str = "ABFIT", opts: Optional[dict] = Non
                      "method": method, "opts": _plain(opts or {})}, folder)
     finally:
         shutil.rmtree(folder, ignore_errors=True)
-
-    options = {"basis": provenance.file_checksum(basis), "method": method, "opts": opts,
-               **bridge.runtime()}
-    results = []
-    for row, item in zip(out["rows"], items):
-        result = to_result(row, out["amplitudes"], method)
-        result.provenance = provenance.history(item) + [
-            provenance.entry(bridge.program, bridge.version(), "fit_mrs", options)]
-        results.append(result)
-    return results if isinstance(data, NIfTI_MRS_Plus) else results[0]
+    return [to_result(row, out["amplitudes"], method) for row in out["rows"]]
 
 
 #*************#

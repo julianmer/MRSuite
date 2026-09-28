@@ -31,7 +31,7 @@ from nifti_mrs.nifti_mrs import NIFTI_MRS
 
 from nifti_mrs_plus import NIfTI_MRS_Plus
 from mrsuite.core import provenance
-from mrsuite.core.result import FitResult
+from mrsuite.core.method import Method
 
 HUB = {"library_name": "mrsuite", "repo_url": "https://github.com/julianmer/MRSuite",
        "tags": ["mrs", "mrsuite"]}
@@ -78,17 +78,18 @@ def spectra(items: List[NIFTI_MRS]) -> np.ndarray:
 # A trained model as a pipeline step: spectra in, spectra or fit results out, in any framework.    #
 #                                                                                                  #
 #**************************************************************************************************#
-class Model(ModelHubMixin, **HUB):
+class Model(Method, ModelHubMixin, **HUB):
     """A trained model as a pipeline step: spectra in, spectra or fit results out.
 
-    Nothing here depends on a framework. A subclass states its constructor arguments -
-    they are its config on the Hub, so keep them to JSON values - and implements:
+    A method like any other (see ``mrsuite.core.method``), and nothing here depends on a
+    framework. A subclass states its constructor arguments - they are its config on the
+    Hub, so keep them to JSON values - and implements:
 
         prepare(items)         the spectra of a batch -> the model's input
         predict(x)             the model's output for that input, without training
         interpret(out, items)  the output -> one FitResult or NIfTI-MRS per spectrum
         fingerprint()          a checksum of the weights, for the provenance
-        runtime()              the framework's versions, for the provenance
+        runtime()              adds the framework's versions to the provenance
 
     plus the Hub's ``_save_pretrained`` and ``_from_pretrained`` to write and read its
     weights. TorchModel does all but prepare and interpret for PyTorch, where the model
@@ -108,6 +109,8 @@ class Model(ModelHubMixin, **HUB):
         batch_size (int): Spectra per prediction.
     """
 
+    program = "MRSuite"
+    batched = True
     acquisition: Dict[str, float] = {}
     batch_size = 64
 
@@ -140,41 +143,44 @@ class Model(ModelHubMixin, **HUB):
         raise NotImplementedError
 
     #*************#
+    #   version   #
+    #*************#
+    def version(self) -> str:
+        return provenance.mrsuite_version()
+
+    #*************#
     #   runtime   #
     #*************#
-    def runtime(self) -> Dict[str, str]:
-        """The framework's exact versions, for the provenance."""
-        return {}
+    def runtime(self) -> Dict[str, Any]:
+        """What ran, for the provenance: the model, its config, its exact weights and
+        where they came from. A framework adds its versions: ``{**super().runtime(), ...}``.
+        """
+        return {"model": f"{type(self).__module__}.{type(self).__qualname__}",
+                "config": getattr(self, "_hub_mixin_config", {}),
+                "weights": self.fingerprint(), "source": getattr(self, "source", None)}
 
-    #**********#
-    #   call   #
-    #**********#
-    def __call__(self, data: Any, *args, **kwargs) -> Any:
-        """Spectra run as a pipeline step; anything else goes to the framework's own call."""
-        if not isinstance(data, (NIFTI_MRS, NIfTI_MRS_Plus)):
-            return super().__call__(data, *args, **kwargs)
-
-        items = data.list() if isinstance(data, NIfTI_MRS_Plus) else [data]
+    #*********#
+    #   run   #
+    #*********#
+    def run(self, data: NIfTI_MRS_Plus) -> List[Any]:
+        """Check every spectrum, then prepare, predict and interpret batch by batch."""
+        items = data.list()
         for item in items:
             self.check(item)
         outs = []
         for start in range(0, len(items), self.batch_size):
             chunk = items[start:start + self.batch_size]
             outs += self.interpret(self.predict(self.prepare(chunk)), chunk)
+        return outs
 
-        item = self.record()
-        for out, source in zip(outs, items):
-            if isinstance(out, FitResult):
-                out.provenance = provenance.history(source) + [item]
-            else:
-                for key, value in source.hdr_ext.to_dict().items():
-                    if not key.startswith("dim_") and key not in out.hdr_ext:
-                        out.add_hdr_field(key, value)      # echo time, reference, history
-                provenance.append(out, item)
-
-        if not isinstance(data, NIfTI_MRS_Plus):
-            return outs[0]
-        return outs if isinstance(outs[0], FitResult) else NIfTI_MRS_Plus(outs)
+    #**********#
+    #   call   #
+    #**********#
+    def __call__(self, *args, **kwargs) -> Any:
+        """Spectra run as a method; anything else goes to the framework's own call."""
+        if args and isinstance(args[0], (NIFTI_MRS, NIfTI_MRS_Plus)):
+            return Method.__call__(self, *args, **kwargs)
+        return super(Method, self).__call__(*args, **kwargs)
 
     #***********#
     #   check   #
@@ -191,18 +197,6 @@ class Model(ModelHubMixin, **HUB):
             if abs(found[key] - expected) > tolerance[key] * abs(expected):
                 raise ValueError(f"{type(self).__name__} expects {key} {expected}, the data has "
                                  f"{found[key]}; resample or reference the data first")
-
-    #************#
-    #   record   #
-    #************#
-    def record(self) -> Dict[str, str]:
-        """The provenance entry: the model, its config, its exact weights and where from."""
-        details = {"model": f"{type(self).__module__}.{type(self).__qualname__}",
-                   "config": getattr(self, "_hub_mixin_config", {}),
-                   "weights": self.fingerprint(), "source": getattr(self, "source", None),
-                   **self.runtime()}
-        return provenance.entry("MRSuite", provenance.mrsuite_version(), type(self).__name__,
-                                details)
 
     #*********************#
     #   from pretrained   #

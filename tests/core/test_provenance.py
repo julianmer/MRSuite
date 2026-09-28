@@ -55,6 +55,21 @@ def test_small_arguments_are_values_and_large_ones_checksums():
     assert large["array"]["sha256"] != provenance.checksum(np.arange(1000.0) + 1)
 
 
+#************#
+#   a file   #
+#************#
+def test_a_file_is_recorded_by_its_bytes(tmp_path):
+    """A basis is passed by its path, and the path alone would not show a changed file."""
+    path = tmp_path / "basis.BASIS"
+    path.write_text("one")
+    before = provenance.describe({"basis": str(path)})["basis"]
+    path.write_text("three")
+    after = provenance.describe({"basis": path})["basis"]
+
+    assert before["path"] == after["path"] == str(path)
+    assert before["sha256"] != after["sha256"] == provenance.file_checksum(path)["sha256"]
+
+
 #****************#
 #   a spectrum   #
 #****************#

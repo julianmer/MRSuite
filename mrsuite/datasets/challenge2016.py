@@ -102,7 +102,7 @@ def load(n: Optional[int] = None, root: Path = ROOT,
             spectrum = mrs_io.read_FID(str(spectra / f))
             provenance.append(spectrum, provenance.entry(
                 'MRSuite', provenance.mrsuite_version(), 'mrsuite.datasets.challenge2016.load',
-                {'file': provenance.file_checksum(spectra / f),
+                {'file': spectra / f,
                  'reader': f'FSL-MRS {fsl_mrs.__version__} mrs_io.read_FID'}))
             out.append(spectrum)
         return NIfTI_MRS_Plus(out)

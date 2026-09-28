@@ -17,6 +17,8 @@
 #*************#
 import pytest
 
+from mrsuite.core.method import method
+from mrsuite.core.result import FitResult
 from mrsuite.datasets import challenge2016
 
 
@@ -36,14 +38,32 @@ def test_workers_change_nothing_but_the_time():
         [r.provenance[0]["Details"] for r in serial]
 
 
+#***********#
+#   water   #
+#***********#
+@pytest.mark.skipif(not challenge2016.BASIS.exists(), reason="challenge submodule not checked out")
+def test_each_worker_gets_the_references_of_its_own_spectra():
+    """Spectra cannot be pickled, so references travel as files, cut like the data."""
+    from mrsuite.bridges import fsl_mrs
+
+    data, water, _ = challenge2016.load(3)
+    serial = fsl_mrs.fit(data, str(challenge2016.BASIS), water=water, te=0.030, tr=2.0)
+    spread = fsl_mrs.fit(data, str(challenge2016.BASIS), water=water, te=0.030, tr=2.0,
+                         workers=2)
+
+    assert [r.conc("molarity") for r in spread] == [r.conc("molarity") for r in serial]
+
+
 #************#
 #   single   #
 #************#
 def test_one_worker_or_one_spectrum_runs_in_process(spectrum):
     """No processes for a single spectrum: it would only add their start-up."""
-    from mrsuite.core.parallel import over_processes
-
     seen = []
-    fit = over_processes(lambda data, *a, **k: seen.append(data) or "fitted")
 
-    assert fit(spectrum, workers=8) == "fitted" and seen == [spectrum]
+    @method("test", parallel=True)
+    def fit(data):
+        seen.append(data)
+        return FitResult("test")
+
+    assert fit(spectrum, workers=8).method == "test" and seen == [spectrum]

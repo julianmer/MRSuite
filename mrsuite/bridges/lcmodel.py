@@ -19,11 +19,10 @@
 #*************#
 import shutil
 import sys
-from typing import Any
+from typing import Any, Dict
 
 from mrsuite.bridges.base import Deferred
-from mrsuite.core.parallel import over_processes
-from mrsuite.core.provenance import entry, file_checksum, history
+from mrsuite.core.method import method
 from mrsuite.core.result import FitResult
 from mrsuite.octave import scratch
 
@@ -66,10 +65,31 @@ def to_result(parsed: tuple, method: str = "lcmodel:LCModel",
     return out
 
 
+#*************#
+#   version   #
+#*************#
+def _version() -> str:
+    """PyLCModel's release, which decides how LCModel is driven."""
+    from lcmodel_wrapper import __version__
+    return f"PyLCModel {__version__}"
+
+
+#************#
+#   binary   #
+#************#
+def _binary() -> Dict[str, Any]:
+    """The LCModel binary, which the provenance records by its bytes: LCModel is what
+    fits, not the wrapper. It is the one PyLCModel resolves, which ``LCMODEL_EXEC``
+    chooses, so it is the one that ran."""
+    from lcmodel_wrapper import binaries
+    return {"binary": binaries.resolve_executable()}
+
+
 #*********#
 #   fit   #
 #*********#
-@over_processes
+@method("LCModel", version=_version, runtime=_binary, name="LCModel", batched=True,
+        parallel=True)
 def fit(data: Any, basis: str, water: Any = None, ppmlim: tuple = (0.5, 4.2),
         **kwargs) -> Any:
     """
@@ -82,40 +102,31 @@ def fit(data: Any, basis: str, water: Any = None, ppmlim: tuple = (0.5, 4.2),
             spectrum. With it the concentrations are mM and filed under 'molarity';
             without it they are unreferenced and filed under 'raw'.
         ppmlim (tuple): Fit range in ppm.
-        **kwargs: Passed to ``PyLCModel``, e.g. ``path2exec``, ``save_path``, ``conj``.
+        **kwargs: Passed to ``PyLCModel``, e.g. ``save_path``, ``conj``. The binary is
+            chosen with ``LCMODEL_EXEC``, not ``path2exec``, so the provenance can tell it.
             Without a ``save_path`` each call works in a folder of its own, removed
             afterwards: PyLCModel's default is ./tmp with fixed file names, so two fits
             started from one directory at once would overwrite each other's files.
-        workers (int): Processes to spread a batch over (see ``over_processes``).
+        workers (int): Processes to spread a batch over (see ``mrsuite.core.parallel``).
 
     Returns:
         A FitResult, or one per spectrum for a batch, each with the data's processing
         history and the fit itself as its provenance.
     """
-    from lcmodel_wrapper import PyLCModel, __version__
+    from lcmodel_wrapper import PyLCModel
 
+    if "path2exec" in kwargs:
+        raise TypeError("choose the LCModel binary with LCMODEL_EXEC instead of path2exec")
     own = "save_path" not in kwargs
     workdir = scratch("lcmodel_") if own else kwargs["save_path"]
     try:
         engine = PyLCModel(path2basis=str(basis), ppmlim=ppmlim,
                            **{**kwargs, "save_path": workdir})
         scaling = "raw" if water is None else "molarity"
-        out = [to_result(report, scaling=scaling) for report in engine.report(data, water)]
+        return [to_result(report, scaling=scaling) for report in engine.report(data, water)]
     finally:
         if own:
             shutil.rmtree(workdir, ignore_errors=True)
-
-    # the binary is what fits, so it is recorded by its bytes, not only by the wrapper
-    options = {"basis": file_checksum(basis), "ppmlim": ppmlim, "kwargs": kwargs,
-               "binary": file_checksum(engine.path2exec)}
-    items = data.list() if hasattr(data, "list") else [data]
-    refs = water.list() if hasattr(water, "list") else [water] * len(items)
-    for result, nmrs, ref in zip(out, items, refs):
-        result.provenance = history(nmrs) + [
-            entry("LCModel", f"PyLCModel {__version__}", "LCModel",
-                  {**options, "water": ref})]
-
-    return out if hasattr(data, "list") else out[0]
 
 
 # ``lcmodel.step.fit(basis)``, as the bridges' fits are steps: LCModel is a binary rather

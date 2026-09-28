@@ -100,7 +100,7 @@ def load(subject: str, signal: str = 'all', voxels: Optional[int] = None,
 
     # anything beyond the composite comes from a test subject's separate truth file
     source = module.mat_path(subject, need_truth=module.canonical_signal(signal) != 'all')
-    origin = {'subject': subject, 'signal': signal, 'file': provenance.file_checksum(source),
+    origin = {'subject': subject, 'signal': signal, 'file': source,
               'reader': f'Augmentrum {augmentrum.__version__} (git '
                         f'{provenance.git_version(augmentrum.__path__[0])})'}
 

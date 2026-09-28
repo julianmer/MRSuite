@@ -29,8 +29,7 @@ from nifti_mrs.nifti_mrs import NIFTI_MRS
 
 from mrsuite import __version__
 from mrsuite.bridges.fid_a import FIDABridge, FIDACodec
-from mrsuite.core.parallel import over_processes
-from mrsuite.core.provenance import entry, file_checksum, history
+from mrsuite.core.method import method
 from mrsuite.core.result import FitResult
 from mrsuite.octave import build_lbfgsb, resolve_runtime, scratch
 
@@ -396,7 +395,8 @@ _containers = {}
 #*********#
 #   fit   #
 #*********#
-@over_processes
+@method("Osprey", version=lambda: bridge.version(), runtime=lambda: bridge.runtime(),
+        name="fit_runFit", parallel=True)      # per call: a caller may swap in a MATLAB bridge
 def fit(data: Any, basis: Any, fit_opts: Optional[dict] = None,
         crlb: bool = False) -> Any:
     """
@@ -420,45 +420,33 @@ def fit(data: Any, basis: Any, fit_opts: Optional[dict] = None,
             routine does not stand alone. An Osprey result therefore carries
             concentrations and QC but no uncertainties - enough to compare values
             against another method, not enough to weight that comparison.
-        workers (int): Processes to spread a batch over (see ``over_processes``).
+        workers (int): Processes to spread a batch over (see ``mrsuite.core.parallel``).
 
     Returns:
         A FitResult, or one per spectrum for a batch, each with the data's processing
         history and the fit itself as its provenance.
     """
     if isinstance(basis, (str, os.PathLike)):
-        source = file_checksum(basis)
-        # built once per file and process: a batch split over workers calls this per chunk
+        # built once per file and process: a batch is fitted spectrum by spectrum
         key = (os.path.abspath(basis), os.path.getmtime(basis))
         if key not in _containers:
             _containers[key] = bridge.basis_from_lcmodel(str(basis), add_mm=False)
         basis = _containers[key]
-    else:
-        source = basis
     opts = bridge.fit_options(**(fit_opts or {}))
-    items = data.list() if hasattr(data, "list") else [data]
-    basis_max = float(np.max(np.real(np.asarray(basis["specs"]))))
 
-    out = []
-    for one in items:
-        struct = bridge.codec.nifti2fida(one)
-        scale = float(np.max(np.real(np.asarray(struct["specs"])))) / basis_max
-        struct["fids"] = np.asarray(struct["fids"]) / scale
-        struct["specs"] = np.asarray(struct["specs"]) / scale
+    struct = bridge.codec.nifti2fida(data)
+    scale = (float(np.max(np.real(np.asarray(struct["specs"]))))
+             / float(np.max(np.real(np.asarray(basis["specs"])))))
+    struct["fids"] = np.asarray(struct["fids"]) / scale
+    struct["specs"] = np.asarray(struct["specs"]) / scale
 
-        params, res_basis = bridge.fit_runFit(struct, basis, "Osprey", opts, nout=2)
-        bounds = None
-        if crlb:
-            _, _, bounds = bridge.fit_Osprey_CRLB(
-                struct, basis, opts["bLineKnotSpace"], opts["range"], params,
-                float(np.asarray(params["refShift"]).ravel()[0]), nout=3)
-        result = to_result(params, res_basis, bounds, scale=scale)
-        result.provenance = history(one) + [
-            entry(bridge.program, bridge.version(), "fit_runFit",
-                  {"basis": source, "fit_opts": opts, "crlb": crlb, **bridge.runtime()})]
-        out.append(result)
-
-    return out if hasattr(data, "list") else out[0]
+    params, res_basis = bridge.fit_runFit(struct, basis, "Osprey", opts, nout=2)
+    bounds = None
+    if crlb:
+        _, _, bounds = bridge.fit_Osprey_CRLB(
+            struct, basis, opts["bLineKnotSpace"], opts["range"], params,
+            float(np.asarray(params["refShift"]).ravel()[0]), nout=3)
+    return to_result(params, res_basis, bounds, scale=scale)
 
 
 #*************#

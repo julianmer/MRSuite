@@ -126,3 +126,11 @@ def test_a_quantifying_model():
 #*******************#
 def test_a_decomposing_model(challenge):
     check(WAND(WAND_METABOLITES, 1792, 2036, WAND_ACQUISITION), challenge[0])
+
+
+#*********************#
+#   processing step   #
+#*********************#
+def test_a_decomposing_model_as_a_processing_step(challenge):
+    check(WAND(WAND_METABOLITES, 1792, 2036, WAND_ACQUISITION), challenge[0],
+          remove=["artifacts"])

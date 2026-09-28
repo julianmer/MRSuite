@@ -153,6 +153,30 @@ def test_a_decomposition_comes_back_as_spectra():
     assert item.hdr_ext["ProcessingApplied"][-1]["Method"] == "WAND"
 
 
+#*****************#
+#   keep/remove   #
+#*****************#
+@pytest.mark.skipif(not challenge2016.BASIS.exists(), reason="challenge submodule not checked out")
+def test_wand_as_a_processing_step_removes_or_keeps_components():
+    data, _, _ = challenge2016.load(2)
+    wand = WAND(WAND_METABOLITES, 1792, 2036, WAND_ACQUISITION)
+
+    cleaned = wand(data, remove=["artifacts"])
+    untouched = wand(data, remove=[])
+    everything = wand(data, keep=["metabolites", "baseline", "artifacts"])
+    nothing = wand(data, remove=["metabolites", "baseline", "artifacts"])
+
+    assert [c.shape for c in cleaned.list()] == [d.shape for d in data.list()]
+    assert np.allclose(untouched[0][:], data[0][:])
+    assert np.allclose(nothing[0][:], data[0][:] - everything[0][:])
+    step = cleaned[0].hdr_ext["ProcessingApplied"][-1]
+    assert json.loads(step["Details"])["kwargs"] == {"remove": ["artifacts"]}
+    with pytest.raises(ValueError, match="no component"):
+        wand(data, keep=["NotAMetabolite"])
+    with pytest.raises(ValueError, match="not both"):
+        wand(data, keep=["NAA"], remove=["baseline"])
+
+
 #**************************************************************************************************#
 #                                        Class NumpyModel                                          #
 #**************************************************************************************************#

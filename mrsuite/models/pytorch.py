@@ -36,8 +36,11 @@ class TorchModel(Model, torch.nn.Module, PyTorchModelHubMixin, **HUB):
     """A Model in PyTorch: implement prepare, forward and interpret, as for any torch module.
 
     Prediction runs ``forward`` in eval mode without gradients, on the model's device.
-    Calling the model on a tensor is plain PyTorch, so training code is unchanged.
+    Calling the model on a tensor is plain PyTorch, so training code is unchanged, and
+    ``learn`` trains the module itself through Keras' TorchModuleWrapper.
     """
+
+    keras_backend = "torch"
 
     #*************#
     #   predict   #
@@ -51,6 +54,23 @@ class TorchModel(Model, torch.nn.Module, PyTorchModelHubMixin, **HUB):
                 return self(torch.as_tensor(x).to(device))
         finally:
             self.train(mode)
+
+    #**************#
+    #   as keras   #
+    #**************#
+    def as_keras(self, keras: Any) -> Any:
+        """This module inside a Keras model, whose training updates the module in place."""
+        module = self
+
+        class Wrapped(keras.Model):
+            def __init__(self):
+                super().__init__()
+                self.module = keras.layers.TorchModuleWrapper(module)
+
+            def call(self, x):
+                return self.module(x)
+
+        return Wrapped()
 
     #*****************#
     #   fingerprint   #

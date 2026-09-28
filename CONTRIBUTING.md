@@ -49,8 +49,10 @@ implement `run`, and `version` and `runtime` where you can.
 **A trained model.** Subclass `mrsuite.models.Model` for any framework, or
 `mrsuite.models.TorchModel` for PyTorch. You implement `prepare` (spectra to input),
 `forward` or `predict`, and `interpret` (output to one `FitResult` or spectrum per
-input), and set `acquisition` to what the model was trained on. `MLP` and `WAND` in
-`mrsuite/models/` are complete examples.
+input), and set `acquisition` to what the model was trained on. To make it learnable,
+name its `objectives` and give `target` (what the output should be for a batch's truth)
+and `loss` (in `keras.ops`); then `model.learn(source, steps=...)` trains it in one Keras
+loop, whatever the framework. `MLP` and `WAND` in `mrsuite/models/` are complete examples.
 
 **A whole toolbox.** Subclass `mrsuite.bridges.Bridge` and implement `_resolve`,
 `_to_toolbox` and `_from_toolbox`. Every function of the toolbox then becomes a method.

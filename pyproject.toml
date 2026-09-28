@@ -42,6 +42,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest"]
+train = ["keras>=3.0"]   # Model.learn: one Keras loop for PyTorch, TensorFlow and JAX models
 
 [project.urls]
 Repository = "https://github.com/julianmer/MRSuite"

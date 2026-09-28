@@ -22,7 +22,7 @@ import importlib.util
 import sys
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 
@@ -61,13 +61,18 @@ def load_file(path: Path) -> ModuleType:
 #*************#
 #   spectra   #
 #*************#
-def spectra(items: List[NIFTI_MRS]) -> np.ndarray:
+def spectra(items: Union[List[NIFTI_MRS], NIfTI_MRS_Plus]) -> np.ndarray:
     """A batch as (batch, 2, points): the plain FFT of each FID, real and imaginary.
 
     No shift and no conjugation - the spectrum as NumPy's FFT gives it from the samples
-    as NIfTI-MRS stores them.
+    as NIfTI-MRS stores them. A NIfTI-MRS+ is read as the one array it holds, which is
+    how a training batch arrives: no NIfTI-MRS object per spectrum.
     """
-    specs = np.fft.fft(np.stack([np.asarray(i[:]).reshape(i.shape[3]) for i in items]), axis=-1)
+    if isinstance(items, NIfTI_MRS_Plus):
+        fids = items.numpy()
+    else:
+        fids = np.stack([np.asarray(i[:]) for i in items])
+    specs = np.fft.fft(fids.reshape(len(fids), -1), axis=-1)
     return np.stack([specs.real, specs.imag], axis=1)
 
 
@@ -102,17 +107,29 @@ class Model(Method, ModelHubMixin, **HUB):
         model = MyModel.from_pretrained("MRSuite/my-model")
         results = Pipeline([fsl_mrs.step.coilcombine(), model]).run(data)
 
+    To learn, a model names its ``objectives`` and implements, beside prepare:
+
+        target(truth, data, objective)  what the output should be for a batch's truth
+        loss(target, out, objective)    how far the output is from it, in keras.ops
+
+    and its framework adapter gives ``as_keras`` and ``keras_backend``, so every model
+    learns in the one Keras loop (see ``learn``).
+
     Attributes:
         acquisition (Dict[str, float]): What the model was trained on - 'points',
             'bandwidth' (Hz), 'frequency' (MHz) and 'centre' (ppm); spectra that differ
             are refused rather than silently misread. Empty to check nothing.
         batch_size (int): Spectra per prediction.
+        objectives (Tuple[str, ...]): What the model can learn from, the first by default.
+        keras_backend (Optional[str]): The Keras backend its framework learns on.
     """
 
     program = "MRSuite"
     batched = True
     acquisition: Dict[str, float] = {}
     batch_size = 64
+    objectives: Tuple[str, ...] = ()
+    keras_backend: Optional[str] = None
 
     #*************#
     #   prepare   #
@@ -131,8 +148,9 @@ class Model(Method, ModelHubMixin, **HUB):
     #***************#
     #   interpret   #
     #***************#
-    def interpret(self, out: Any, items: List[NIFTI_MRS]) -> List[Any]:
-        """The model's output as one FitResult or NIfTI-MRS per spectrum."""
+    def interpret(self, out: Any, items: List[NIFTI_MRS], **options) -> List[Any]:
+        """The model's output as one FitResult or NIfTI-MRS per spectrum; ``options`` are
+        the model's own, given when it is called (e.g. WAND's keep and remove)."""
         raise NotImplementedError
 
     #*****************#
@@ -141,6 +159,69 @@ class Model(Method, ModelHubMixin, **HUB):
     def fingerprint(self) -> str:
         """A SHA-256 of the weights, so the provenance pins exactly what ran."""
         raise NotImplementedError
+
+    #************#
+    #   target   #
+    #************#
+    def target(self, truth: Any, data: NIfTI_MRS_Plus, objective: str) -> Any:
+        """What the model's output should be for a training batch, from its truth."""
+        raise NotImplementedError
+
+    #**********#
+    #   loss   #
+    #**********#
+    def loss(self, target: Any, out: Any, objective: str) -> Any:
+        """How far the output is from the target, as one number, in keras.ops."""
+        raise NotImplementedError
+
+    #**************#
+    #   as keras   #
+    #**************#
+    def as_keras(self, keras: Any) -> Any:
+        """The model as Keras trains it; the framework adapter's to give."""
+        raise NotImplementedError
+
+    #***********#
+    #   learn   #
+    #***********#
+    def learn(self, source: Any, steps: int, objective: Optional[str] = None, batch: int = 16,
+              lr: float = 1e-4, every: Optional[int] = None, to: Optional[str] = None
+              ) -> List[float]:
+        """
+        Learn from a source of spectra and their truth, in one Keras loop for every framework.
+
+        Keras settles its backend and device once per process: the first model to learn
+        sets KERAS_BACKEND to its framework's, and KERAS_TORCH_DEVICE picks the device
+        ('cpu', 'cuda', 'mps'; Keras' own choice when unset). The model learns in place:
+        afterwards it predicts, saves and pushes to the Hub as it did before.
+
+        Args:
+            source: A ``mrsuite.training.Source``: a simulator, a benchmark's training
+                split or your own data.
+            steps (int): Batches to learn from.
+            objective (Optional[str]): One of ``objectives``; the first by default.
+            batch (int): Spectra per batch.
+            lr (float): Adam's learning rate.
+            every (Optional[int]): Steps between checkpoints and loss reports; must divide
+                ``steps``. All of them by default.
+            to (Optional[str]): Folder to save a checkpoint to every ``every`` steps, as
+                ``step-<n>``, each loadable with ``from_pretrained``.
+
+        Returns:
+            List[float]: The mean loss over each stretch of ``every`` steps.
+
+        Raises:
+            ValueError: If the objective is not one the model has, or the source's
+                spectra are acquired unlike the model's.
+        """
+        from mrsuite.training.loop import learn
+
+        objective = objective or (self.objectives[0] if self.objectives else None)
+        if objective not in self.objectives:
+            raise ValueError(f"{type(self).__name__} learns from {list(self.objectives)}, "
+                             f"not {objective!r}")
+        self._compare(source.acquisition)
+        return learn(self, source, steps, objective, batch, lr, every, to)
 
     #*************#
     #   version   #
@@ -162,7 +243,7 @@ class Model(Method, ModelHubMixin, **HUB):
     #*********#
     #   run   #
     #*********#
-    def run(self, data: NIfTI_MRS_Plus) -> List[Any]:
+    def run(self, data: NIfTI_MRS_Plus, **options) -> List[Any]:
         """Check every spectrum, then prepare, predict and interpret batch by batch."""
         items = data.list()
         for item in items:
@@ -170,7 +251,7 @@ class Model(Method, ModelHubMixin, **HUB):
         outs = []
         for start in range(0, len(items), self.batch_size):
             chunk = items[start:start + self.batch_size]
-            outs += self.interpret(self.predict(self.prepare(chunk)), chunk)
+            outs += self.interpret(self.predict(self.prepare(chunk)), chunk, **options)
         return outs
 
     #**********#
@@ -190,10 +271,20 @@ class Model(Method, ModelHubMixin, **HUB):
         if np.prod(item.shape) != item.shape[3]:
             raise ValueError(f"{type(self).__name__} takes single spectra, not shape "
                              f"{item.shape}; combine coils and averages first")
-        found = {"points": item.shape[3], "bandwidth": 1 / item.dwelltime,
-                 "frequency": item.spectrometer_frequency[0], "centre": item.SpecFreqChemShift}
+        self._compare({"points": item.shape[3], "bandwidth": 1 / item.dwelltime,
+                       "frequency": item.spectrometer_frequency[0],
+                       "centre": item.SpecFreqChemShift})
+
+    #*************#
+    #   compare   #
+    #*************#
+    def _compare(self, found: Dict[str, float]) -> None:
+        """Refuse an acquisition - a spectrum's or a training source's - unlike the model's."""
         tolerance = {"points": 0, "bandwidth": 1e-3, "frequency": 1e-2, "centre": 1e-3}
         for key, expected in self.acquisition.items():
+            if key not in found:
+                raise ValueError(f"{type(self).__name__} expects {key} {expected}; the data "
+                                 f"does not state its {key}")
             if abs(found[key] - expected) > tolerance[key] * abs(expected):
                 raise ValueError(f"{type(self).__name__} expects {key} {expected}, the data has "
                                  f"{found[key]}; resample or reference the data first")

@@ -17,7 +17,7 @@
 #   imports   #
 #*************#
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import numpy as np
 import torch
@@ -49,6 +49,18 @@ class WAND(TorchModel):
     named in its header - the metabolites, then 'baseline', then 'artifacts' - each
     extended to the full length by repeating its edge values, as the original's scripts do.
 
+    As a processing step it hands back an ordinary spectrum of the input's shape instead:
+
+        wand.step(remove=["artifacts"])             # the data without them
+        wand.step(remove=["baseline", "artifacts"])
+        wand.step(keep=["NAA", "Cr", "PCr"])        # only these; "metabolites" for all
+
+    ``remove`` subtracts the components from the data, so outside the network's window
+    the data is untouched; ``keep`` adds the components up, zero outside the window.
+
+    It learns the components from any source that gives each metabolite's signal and the
+    baseline: the artifacts are what the data holds beyond them.
+
     Args:
         metabolites (List[str]): The basis spectra, in the network's output order.
         first (int): First point of the spectral window.
@@ -60,6 +72,7 @@ class WAND(TorchModel):
     """
 
     repo = Path(__file__).resolve().parents[2] / "externals" / "wand-for-mrs"
+    objectives = ("components",)
 
     #**********#
     #   init   #
@@ -100,7 +113,10 @@ class WAND(TorchModel):
     #***************#
     #   interpret   #
     #***************#
-    def interpret(self, out: torch.Tensor, items) -> list:
+    def interpret(self, out: torch.Tensor, items, keep: Optional[List[str]] = None,
+                  remove: Optional[List[str]] = None) -> list:
+        if keep is not None or remove is not None:
+            return self._select(out, items, keep, remove)
         n = int(self.acquisition.get("points", items[0].shape[3]))
         full = torch.nn.functional.pad(out, (0, 0, self.first, n - self.last), mode="replicate")
         full = full.cpu().double().numpy()
@@ -115,6 +131,62 @@ class WAND(TorchModel):
                               "Description": "The metabolites, then baseline and artifacts"}})
             results.append(result)
         return results
+
+    #************#
+    #   select   #
+    #************#
+    def _select(self, out: torch.Tensor, items, keep: Optional[List[str]],
+                remove: Optional[List[str]]) -> list:
+        """Each spectrum with components removed, or only the kept ones, as the input was."""
+        if keep is not None and remove is not None:
+            raise ValueError("WAND keeps or removes components, not both")
+        named = [n for given in (keep if keep is not None else remove)
+                 for n in (self.metabolites if given == "metabolites" else [given])]
+        unknown = sorted(set(named) - set(self.components))
+        if unknown:
+            raise ValueError(f"WAND has no component {unknown}; it has {self.components} "
+                             f"and 'metabolites'")
+
+        chosen = [i for i, c in enumerate(self.components) if c in named]
+        window = out[..., chosen].sum(-1).cpu().double().numpy()      # (batch, 2, window)
+        results = []
+        for spec, item in zip(window, items):
+            full = np.zeros(item.shape[3], complex)
+            full[self.first:self.last] = spec[0] + 1j * spec[1]
+            fid = np.fft.ifft(full)
+            if remove is not None:
+                fid = np.asarray(item[:]).reshape(-1) - fid
+            results.append(gen_nifti_mrs(fid.reshape(item.shape), item.dwelltime,
+                                         item.spectrometer_frequency[0],
+                                         nucleus=item.nucleus[0], dim_tags=item.dim_tags))
+        return results
+
+    #************#
+    #   target   #
+    #************#
+    def target(self, truth, data, objective: str) -> np.ndarray:
+        """The components over the window, centred as forward centres its input.
+
+        Each metabolite and the baseline come from the truth; the artifacts are the rest
+        of the data - noise, water, lipids, whatever the source added - which is how the
+        original defines them.
+        """
+        missing = [c for c in self.components[:-1] if c not in truth.components]
+        if missing:
+            raise KeyError(f"WAND learns each component; the source gives no {missing}")
+        parts = [np.asarray(truth.components[c]) for c in self.components[:-1]]
+        parts.append(data.numpy().reshape(len(data), -1) - sum(parts))
+        specs = np.fft.fft(np.stack(parts, axis=-1), axis=1)[:, self.first:self.last]
+        specs = specs - specs.mean(axis=1, keepdims=True)
+        return np.stack([specs.real, specs.imag], axis=1).astype(np.float32)
+
+    #**********#
+    #   loss   #
+    #**********#
+    def loss(self, target, out, objective: str):
+        """The mean squared error over every component, as the original's 'mse'."""
+        from keras import ops
+        return ops.mean(ops.square(out - target))
 
     #*************#
     #   runtime   #

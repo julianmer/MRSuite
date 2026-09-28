@@ -19,6 +19,7 @@
 from pathlib import Path
 from typing import Dict, List
 
+import numpy as np
 import torch
 
 from mrsuite.core.provenance import git_version
@@ -57,6 +58,7 @@ class MLP(TorchModel):
     """
 
     repo = Path(__file__).resolve().parents[2] / "externals" / "ood-robust-mrs"
+    objectives = ("concentrations",)
     signal_parameters = (["gamma", "sigma", "eps", "phi0", "phi1"]
                          + [f"baseline{i}" for i in range(6)])
 
@@ -107,6 +109,29 @@ class MLP(TorchModel):
                                      metabolites=list(self.metabolites),
                                      concentrations=concentrations, raw=parameters))
         return results
+
+    #************#
+    #   target   #
+    #************#
+    def target(self, truth, data, objective: str) -> np.ndarray:
+        """The concentrations of the model's metabolites, which its first outputs estimate."""
+        missing = [m for m in self.metabolites if m not in truth.concentrations]
+        if missing:
+            raise KeyError(f"MLP learns concentrations; the source gives none for {missing}")
+        return np.stack([np.asarray(truth.concentrations[m]) for m in self.metabolites],
+                        axis=1).astype(np.float32)
+
+    #**********#
+    #   loss   #
+    #**********#
+    def loss(self, target, out, objective: str):
+        """The original's concentration loss ('mae_conc'): the mean absolute error on
+        non-negative concentrations, macromolecules left out."""
+        from keras import ops
+        kept = ops.convert_to_tensor([0.0 if "mm" in m.lower() or "mac" in m.lower() else 1.0
+                                      for m in self.metabolites])
+        estimate = ops.maximum(out[:, :len(self.metabolites)], 0)
+        return ops.mean(ops.abs(ops.maximum(target, 0) - estimate) * kept)
 
     #*************#
     #   runtime   #

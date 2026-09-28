@@ -40,9 +40,7 @@ JOBS = {
     "mlp": {"model": "mlp", "basis": str(BASIS_7T), "basisFmt": "7tslaser", "ppmlim": [0.5, 4.0],
             "dataType": "aumc2", "width": 512, "depth": 3},
     "wand": {"model": "wand", "basis": str(challenge2016.ROOT / "basisset_JMRUI") + "/",
-             "specType": "synth", "arch": "unet", "dataType": "std_rw_p",
-             "unet": str(Path(__file__).resolve().parents[2] / "externals" / "ood-robust-mrs"
-                         / "models" / "nnModels.py")},
+             "specType": "synth", "arch": "unet", "dataType": "std_rw_p"},
 }
 PUBLISHED = {"mlp": ["mlp_super/epoch=0-step=7537664.ckpt",
                      "mlp_selfsuper/epoch=0-step=3572224.ckpt"],

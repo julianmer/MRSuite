@@ -19,7 +19,6 @@
 #*************#
 #   imports   #
 #*************#
-import importlib.util
 import json
 import os
 import sys
@@ -43,10 +42,6 @@ def framework(job):
                            ppmlim=tuple(job["ppmlim"]), dataType=job.get("dataType", "none"),
                            arch="mlp", width=job["width"], depth=job["depth"], dropout=0.0)
 
-    # WAND's repository never committed its U-Net; the sibling repository's is the source
-    spec = importlib.util.spec_from_file_location("frameworks.nnModels", job["unet"])
-    sys.modules["frameworks.nnModels"] = module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
     from frameworks.frameworkWAND import FrameworkWAND
     return FrameworkWAND(job["basis"], basisFmt=job.get("basisFmt", ""),
                          specType=job["specType"], ppmlim=job.get("ppmlim"), model=job["arch"],

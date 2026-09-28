@@ -26,11 +26,6 @@ from mrsuite.core.result import FitResult
 from mrsuite.models.base import load_file, spectra
 from mrsuite.models.pytorch import TorchModel
 
-ROOT = Path(__file__).resolve().parents[2] / "externals" / "ood-robust-mrs"
-
-# after the concentrations: two linewidths, shift, zero- and first-order phase, a baseline
-PARAMETERS = ["gamma", "sigma", "eps", "phi0", "phi1"] + [f"baseline{i}" for i in range(6)]
-
 
 #**************************************************************************************************#
 #                                            Class MLP                                             #
@@ -54,7 +49,16 @@ class MLP(TorchModel):
         acquisition (Dict[str, float]): What it was trained on; see Model.
         width (int): Width of the first hidden layer; each next one halves it.
         depth (int): Number of hidden layers.
+
+    Attributes:
+        repo (Path): The original repository, which the network is loaded from.
+        signal_parameters (List[str]): What the output holds after the concentrations:
+            two linewidths, shift, zero- and first-order phase, and a baseline.
     """
+
+    repo = Path(__file__).resolve().parents[2] / "externals" / "ood-robust-mrs"
+    signal_parameters = (["gamma", "sigma", "eps", "phi0", "phi1"]
+                         + [f"baseline{i}" for i in range(6)])
 
     #**********#
     #   init   #
@@ -65,7 +69,7 @@ class MLP(TorchModel):
         self.metabolites, self.first, self.last = list(metabolites), first, last
         self.acquisition = dict(acquisition)
         # 'relu' as the published models ran: their configs' 'activation' was never read
-        self.net = load_file(ROOT / "models" / "nnModels.py").MLP(
+        self.net = load_file(self.repo / "models" / "nnModels.py").MLP(
             (2, last - first), len(metabolites), width=width, depth=depth, act="relu")
 
     #*************#
@@ -98,7 +102,7 @@ class MLP(TorchModel):
             creatine = raw.get("Cr", 0) + raw.get("PCr", 0)
             if creatine:
                 concentrations["internal"] = {m: v / creatine for m, v in raw.items()}
-            parameters = dict(zip(PARAMETERS, row[len(self.metabolites):].tolist()))
+            parameters = dict(zip(self.signal_parameters, row[len(self.metabolites):].tolist()))
             results.append(FitResult(method=f"mrsuite:{type(self).__name__}",
                                      metabolites=list(self.metabolites),
                                      concentrations=concentrations, raw=parameters))
@@ -108,4 +112,4 @@ class MLP(TorchModel):
     #   runtime   #
     #*************#
     def runtime(self) -> Dict[str, str]:
-        return {**super().runtime(), "ood-robust-mrs": git_version(str(ROOT))}
+        return {**super().runtime(), "ood-robust-mrs": git_version(str(self.repo))}

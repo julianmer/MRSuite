@@ -19,6 +19,7 @@
 import os
 import re
 import warnings
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, List, Optional
 
@@ -388,8 +389,15 @@ def to_result(params: dict, res_basis: dict, crlb: Any = None,
 
 bridge = OspreyBridge()
 
-# basis containers built from .BASIS files in this process, by (path, mtime)
-_containers = {}
+
+#***********#
+#   basis   #
+#***********#
+@lru_cache(maxsize=None)
+def _basis(path: str, mtime: float) -> Any:
+    """A .BASIS file as a basis container, built once per process and version of the file:
+    a batch is fitted spectrum by spectrum."""
+    return bridge.basis_from_lcmodel(path, add_mm=False)
 
 
 #*********#
@@ -427,11 +435,7 @@ def fit(data: Any, basis: Any, fit_opts: Optional[dict] = None,
         history and the fit itself as its provenance.
     """
     if isinstance(basis, (str, os.PathLike)):
-        # built once per file and process: a batch is fitted spectrum by spectrum
-        key = (os.path.abspath(basis), os.path.getmtime(basis))
-        if key not in _containers:
-            _containers[key] = bridge.basis_from_lcmodel(str(basis), add_mm=False)
-        basis = _containers[key]
+        basis = _basis(os.path.abspath(basis), os.path.getmtime(basis))
     opts = bridge.fit_options(**(fit_opts or {}))
 
     struct = bridge.codec.nifti2fida(data)

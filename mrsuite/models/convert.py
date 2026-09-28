@@ -20,7 +20,6 @@ import json
 import os
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 from typing import Any, Dict, Type
 
@@ -43,7 +42,7 @@ def run_reference(cls: Type[TorchModel], job: Dict[str, Any],
     Run a job through the model's original code.
 
     Args:
-        cls (Type[TorchModel]): The MRSuite model; its module's ROOT is the original's
+        cls (Type[TorchModel]): The MRSuite model; its ``repo`` is the original's
             repository, which the job runs in.
         job (Dict[str, Any]): The task and the original's settings, as reference.py reads them.
         python (str): The original environment's Python. Defaults to ``PYTHON``.
@@ -61,8 +60,7 @@ def run_reference(cls: Type[TorchModel], job: Dict[str, Any],
         path, result = os.path.join(folder, "job.json"), os.path.join(folder, "result.json")
         with open(path, "w") as fh:
             json.dump({**job, "result": result}, fh)
-        root = sys.modules[cls.__module__].ROOT
-        proc = subprocess.run([python, str(REFERENCE), path], cwd=root, capture_output=True,
+        proc = subprocess.run([python, str(REFERENCE), path], cwd=cls.repo, capture_output=True,
                               text=True, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
         if proc.returncode != 0:
             raise RuntimeError(f"the original {cls.__name__} failed:\n{proc.stderr[-3000:]}")

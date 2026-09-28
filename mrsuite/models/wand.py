@@ -7,9 +7,8 @@
 # Created: 2026-09-27                                                                              #
 #                                                                                                  #
 # Purpose: WAND, the wavelet-based decomposition of a spectrum into its metabolites, baseline      #
-#          and artifacts. The network and the wavelet transform are the originals, from            #
-#          externals/wand-for-mrs, and the U-Net from externals/ood-robust-mrs, since the WAND     #
-#          repository never committed its own copy of the same file; this wraps them as a Model.   #
+#          and artifacts. The U-Net and the wavelet transform are the originals, from              #
+#          externals/wand-for-mrs; this wraps them as a Model.                                     #
 #                                                                                                  #
 ####################################################################################################
 
@@ -28,9 +27,6 @@ from nifti_mrs.create_nmrs import gen_nifti_mrs
 from mrsuite.core.provenance import git_version
 from mrsuite.models.base import load_file, spectra
 from mrsuite.models.pytorch import TorchModel
-
-ROOT = Path(__file__).resolve().parents[2] / "externals" / "wand-for-mrs"
-UNET = Path(__file__).resolve().parents[2] / "externals" / "ood-robust-mrs"
 
 
 #**************************************************************************************************#
@@ -58,7 +54,12 @@ class WAND(TorchModel):
         first (int): First point of the spectral window.
         last (int): The point after it.
         acquisition (Dict[str, float]): What it was trained on; see Model.
+
+    Attributes:
+        repo (Path): The original repository, which the network and transform are loaded from.
     """
+
+    repo = Path(__file__).resolve().parents[2] / "externals" / "wand-for-mrs"
 
     #**********#
     #   init   #
@@ -69,10 +70,10 @@ class WAND(TorchModel):
         self.metabolites, self.first, self.last = list(metabolites), first, last
         self.acquisition = dict(acquisition)
         self.components = self.metabolites + ["baseline", "artifacts"]
-        self.cwt = load_file(ROOT / "utils" / "wavelets.py").CWT(
+        self.cwt = load_file(self.repo / "utils" / "wavelets.py").CWT(
             last - first, wavelet=("morlet", {"mu": 14}), scales="log-piecewise", nv=32,
             padtype=None)
-        self.net = load_file(UNET / "models" / "nnModels.py").UNet(
+        self.net = load_file(self.repo / "frameworks" / "nnModels.py").UNet(
             n_channels=2, n_classes=2 * (len(metabolites) + 1))
 
     #*************#
@@ -119,5 +120,4 @@ class WAND(TorchModel):
     #   runtime   #
     #*************#
     def runtime(self) -> Dict[str, str]:
-        return {**super().runtime(), "wand-for-mrs": git_version(str(ROOT)),
-                "ood-robust-mrs": git_version(str(UNET))}
+        return {**super().runtime(), "wand-for-mrs": git_version(str(self.repo))}

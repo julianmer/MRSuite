@@ -212,7 +212,7 @@ class Model(Method, ModelHubMixin, **HUB):
 
         Raises:
             ValueError: If the objective is not one the model has, or the source's
-                spectra are acquired unlike the model's.
+                spectra are shaped or acquired unlike the ones the model takes.
         """
         from mrsuite.training.loop import learn
 
@@ -220,6 +220,9 @@ class Model(Method, ModelHubMixin, **HUB):
         if objective not in self.objectives:
             raise ValueError(f"{type(self).__name__} learns from {list(self.objectives)}, "
                              f"not {objective!r}")
+        if any(source.dim_tags):
+            raise ValueError(f"{type(self).__name__} takes single spectra; the source gives "
+                             f"{[t for t in source.dim_tags if t]} too")
         self._compare(source.acquisition)
         return learn(self, source, steps, objective, batch, lr, every, to)
 

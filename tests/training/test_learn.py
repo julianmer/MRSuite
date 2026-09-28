@@ -61,6 +61,25 @@ class ToySource(Source):
                            components=components)
 
 
+#**************************************************************************************************#
+#                                         Class CoilSource                                         #
+#**************************************************************************************************#
+#                                                                                                  #
+# The toy spectra as two coils, each a scaled copy.                                                #
+#                                                                                                  #
+#**************************************************************************************************#
+class CoilSource(ToySource):
+    """The toy spectra as two coils, each a scaled copy."""
+
+    dim_tags = ["DIM_COIL"]
+
+    def draw(self, n):
+        fids, truth = super().draw(n)
+        coils = np.array([1.0, 0.5])
+        truth.components = {k: v[..., None] * coils for k, v in truth.components.items()}
+        return fids[..., None] * coils, truth
+
+
 #*************#
 #   batches   #
 #*************#
@@ -70,6 +89,18 @@ def test_a_batch_reaches_the_model_as_real_data_does():
     assert isinstance(data, NIfTI_MRS_Plus) and data.numpy().shape == (4, 1, 1, 1, 1024)
     assert np.allclose(spectra(data), spectra(data.list()))       # one array, or objects
     assert set(truth.concentrations) == set(MLP_METABOLITES)
+
+
+#***********#
+#   coils   #
+#***********#
+def test_a_batch_takes_any_shape_nifti_mrs_allows():
+    """Several coils are a fifth dimension with its tag, and the truth has it too."""
+    data, truth = CoilSource(MLP_METABOLITES, MLP_ACQUISITION).batch(3)
+
+    assert data.numpy().shape == (3, 1, 1, 1, 1024, 2)
+    assert data.list()[0].dim_tags[0] == "DIM_COIL"
+    assert truth.components["NAA"].shape == (3, 1024, 2)
 
 
 #************#
@@ -115,3 +146,5 @@ def test_what_a_model_cannot_learn_from_is_refused():
         mlp.learn(ToySource(MLP_METABOLITES, MLP_ACQUISITION), steps=1, objective="spectra")
     with pytest.raises(KeyError, match="gives none for"):
         mlp.learn(ToySource(MLP_METABOLITES[:-1], MLP_ACQUISITION), steps=1)
+    with pytest.raises(ValueError, match="single spectra"):
+        mlp.learn(CoilSource(MLP_METABOLITES, MLP_ACQUISITION), steps=1)

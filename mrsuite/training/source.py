@@ -17,7 +17,7 @@
 #   imports   #
 #*************#
 from dataclasses import dataclass, field
-from typing import Dict, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -43,9 +43,10 @@ class Truth:
     Attributes:
         concentrations (Dict[str, np.ndarray]): Metabolite -> (n,) amplitudes of the
             source's basis functions, which is what a model quantifies.
-        components (Dict[str, np.ndarray]): Name -> (n, points) complex FIDs in the data's
-            own convention, e.g. each metabolite's signal and 'baseline'. Together with
-            the noise and anything unnamed they add up to the data.
+        components (Dict[str, np.ndarray]): Name -> complex FIDs shaped as the data,
+            (n, points, *dims), in the data's own convention: each basis function's
+            signal, 'baseline', 'water', 'noise', whatever the source can tell apart.
+            Together with anything unnamed they add up to the data.
         parameters (Dict[str, np.ndarray]): Name -> (n,) values of the source's own
             signal model, e.g. linewidths and phases, in its own terms.
     """
@@ -67,20 +68,24 @@ class Source:
 
     A subclass states the acquisition its spectra share and implements ``draw``; the
     batch comes back as NIfTI-MRS+ holding one array, so a model prepares it exactly as
-    it prepares real data, at no cost per spectrum.
+    it prepares real data, from the array rather than from each spectrum. Spectra have
+    any shape NIfTI-MRS allows: several coils, say, are a fifth dimension with its tag.
 
     Attributes:
         acquisition (Dict[str, float]): 'points', 'bandwidth' (Hz), 'frequency' (MHz)
             and 'centre' (ppm), as a model states what it was trained on.
+        dim_tags (List[Optional[str]]): Tags of the dimensions after the points, as
+            NIfTI-MRS names them (e.g. ['DIM_COIL']); empty for single spectra.
     """
 
     acquisition: Dict[str, float] = {}
+    dim_tags: List[Optional[str]] = []
 
     #**********#
     #   draw   #
     #**********#
     def draw(self, n: int) -> Tuple[np.ndarray, Truth]:
-        """The next ``n`` spectra as (n, points) complex FIDs, and their truth."""
+        """The next ``n`` spectra as (n, points, *dims) complex FIDs, and their truth."""
         raise NotImplementedError
 
     #***********#
@@ -97,19 +102,23 @@ class Source:
             Tuple[NIfTI_MRS_Plus, Truth]: The spectra, held as one array, and the truth.
         """
         fids, truth = self.draw(n)
-        return self._template(n).set_data(fids.reshape(n, 1, 1, 1, -1)), truth
+        fids = fids.reshape(n, 1, 1, 1, *fids.shape[1:])
+        item = self._template(fids.shape[1:])
+        return NIfTI_MRS_Plus([item.copy() for _ in range(n)]).set_data(fids), truth
 
     #**************#
     #   template   #
     #**************#
-    def _template(self, n: int) -> NIfTI_MRS_Plus:
-        """Headers for a batch of ``n``, built once: only the samples change per batch."""
+    def _template(self, shape: Tuple[int, ...]) -> Any:
+        """One spectrum's header for this shape, built once. Each batch gets copies of its
+        own: NIfTI-MRS+ writes its array back into its objects, so batches cannot share."""
         cache = self.__dict__.setdefault("_templates", {})
-        if n not in cache:
+        if shape not in cache:
             a = self.acquisition
-            item = gen_nifti_mrs(np.zeros((1, 1, 1, int(a["points"])), complex),
-                                 1 / a["bandwidth"], a["frequency"])
+            tags = (list(self.dim_tags) + [None] * 3)[:3]
+            item = gen_nifti_mrs(np.zeros(shape, complex), 1 / a["bandwidth"],
+                                 a["frequency"], dim_tags=tags)
             if "centre" in a:
                 item.add_hdr_field("SpecFreqChemShift", a["centre"])
-            cache[n] = NIfTI_MRS_Plus([item.copy() for _ in range(n)])
-        return cache[n]
+            cache[shape] = item
+        return cache[shape]

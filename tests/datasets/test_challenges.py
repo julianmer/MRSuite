@@ -223,13 +223,30 @@ def test_the_2016_config_simulates_on_the_challenge_grid(tmp_path):
                                     frequency=123.26, centre=4.65)
 
 
+#****************#
+#   truth mrsi   #
+#****************#
+@needs_mrsi
+def test_the_mrsi_truth_gives_the_papers_lineshape():
+    """Read off the noiseless truth, the voxels' decay is the one the descriptor paper
+    states: TG 114 +/- 2 ms throughout, T2' with a median of 112-132 ms."""
+    samples = mrsi_challenge.truth_parameters((MRSI_SUBJECT,), voxels=200)
+
+    assert 0.112 < np.median(samples["TG"]) < 0.116
+    t2_prime = 1 / (samples["Cr.d"] + 1 - (1 / 0.160 + 1 / 0.177) / 2)   # tCr's own T2 out
+    assert 0.100 < np.median(t2_prime) < 0.140
+    assert set(samples) >= {"NAA", "NAA.d", "snr", "f_shift"}
+    assert "Cr" not in samples and "Lac" not in samples      # fixed reference, zero throughout
+
+
 #*****************#
 #   config mrsi   #
 #*****************#
 @needs_mrsi
 @needs_sim
 def test_the_mrsi_config_simulates_on_the_challenge_grid(tmp_path):
-    config = mrsi_challenge.mrs_sim_config(folder=tmp_path, subjects=(MRSI_SUBJECT,))
+    config = mrsi_challenge.mrs_sim_config(folder=tmp_path, subjects=(MRSI_SUBJECT,),
+                                           voxels=300)
 
     assert set(config["metabolites"]) == (set(mrsi_challenge.NAMES.values())
                                           | set(mrsi_challenge.MACROMOLECULES))

@@ -45,6 +45,20 @@ NAMES = dict(zip(METABOLITES, ('Asp', 'GABA', 'Gln', 'Glu', 'Lac', 'Lac41', 'NAA
 MACROMOLECULES = ('mm_0_9', 'mm_1_21', 'mm_1_43', 'mm_1_67', 'mm_2_04',
                   'mm_2_26', 'mm_2_99', 'mm_3_21', 'mm_3_77')
 
+# The fixed simulation constants of the descriptor paper's Table 1 (arXiv 2609.02637):
+# grey- and white-matter concentration (mM) and T2 (ms) of each basis function.
+TISSUE = {'asp': (3.70, 2.07, 200, 200), 'gaba': (1.86, 0.88, 200, 200),
+          'gln': (3.90, 2.20, 200, 200), 'glu': (8.60, 6.00, 200, 200),
+          'lac': (0.0, 0.0, 200, 200), 'lac41': (0.0, 0.0, 200, 200),
+          'naa': (10.98, 7.49, 261, 351), 'naag': (1.40, 2.60, 261, 351),
+          'pe': (2.12, 2.12, 200, 200), 'pe40': (2.12, 2.12, 200, 200),
+          'tau': (1.93, 1.74, 200, 200), 'mins': (4.30, 3.10, 200, 200),
+          'sino': (0.50, 0.57, 200, 200), 'tcho': (1.38, 1.78, 235, 239),
+          'tcr': (6.90, 5.50, 160, 177), 'tcr39': (6.90, 5.50, 160, 177)}
+
+# The training subjects' noise SD per channel (the paper's Table 6).
+NOISE_SD = 1.0e-3
+
 
 #************#
 #   module   #
@@ -159,30 +173,116 @@ def basis(path: str, subject: str = 'Sub1', data_dir: Path = DATA_DIR) -> str:
                        centre_ppm=acquisition['ppm_offset'])
 
 
+#**********************#
+#   truth parameters   #
+#**********************#
+def truth_parameters(subjects: Tuple[str, ...] = ('Sub1', 'Sub2'), voxels: int = 2000,
+                     seed: int = 0, data_dir: Path = DATA_DIR) -> Dict[str, np.ndarray]:
+    """
+    Each brain voxel's simulation parameters, read off the release's own ground truth.
+
+    The release is built as the descriptor paper (arXiv 2609.02637, Section 2) states:
+    each metabolite decays with its tissue's T2 (``TISSUE``), and each voxel adds one
+    decay exp(-t/T2' - t^2/TG^2) and its B0 shift. So the noiseless metabolite signal,
+    divided by the metabolites with their decays and shift, leaves exactly that voxel
+    factor, real to machine precision; a line through its logarithm gives T2' and TG.
+    The tissue weights come from the concentrations themselves (the paper's Eq. 6).
+
+    Only voxels with at least half the median creatine are used: at the slab's edges the
+    signal vanishes and the division with it.
+
+    Args:
+        subjects (Tuple[str, ...]): The training subjects to read.
+        voxels (int): Voxels to draw, evenly over the subjects' brain voxels.
+        seed (int): Seeds the noise level each voxel is given (see 'snr').
+        data_dir (Path): Where the release lives.
+
+    Returns:
+        Dict[str, np.ndarray]: (voxels,) values in MRS-Sim's terms, as
+        ``mrs_sim.distributions`` takes them: each metabolite's amplitude relative to
+        creatine (Lac and Lac41, zero throughout the release, and the reference left
+        out), each metabolite's Lorentzian width '<name>.d' in 1/s less MRS-Sim's own
+        1/s, 'snr' (the peak of Cr + Cr39's real spectrum over the time-domain noise
+        SD, at the training noise level times 0.6-1.4, which the testing subjects span),
+        'f_shift' in ppm, and 'TG' in s (MRS-Sim samples its Gaussian width uniformly).
+    """
+    import h5py
+
+    module = _module(data_dir)
+    acquisition = module.read_acquisition(subjects[0])
+    frequency = acquisition['spectrometer_frequency_mhz']
+    table = np.array([TISSUE[m] for m in METABOLITES])      # c_GM, c_WM, T2_GM, T2_WM
+    concentrations, t2 = table[:, :2], table[:, 2:] / 1e3
+    creatine = [METABOLITES.index('tcr'), METABOLITES.index('tcr39')]
+    per_subject = -(-voxels // len(subjects))
+    rows = []
+    for subject in subjects:
+        with h5py.File(module.mat_path(subject, need_truth=False), 'r') as f:
+            def complex_(a):
+                return a['real'] + 1j * a['imag'] if a.dtype.names else a
+            skip = int(round(acquisition['echo_time_s'] / acquisition['dwell_time_s']))
+            vt = complex_(f['VtMeta'][()])[skip:skip + acquisition['n_points']]
+            t = np.asarray(f['t'][()]).ravel()
+            maps, b0 = f['metaMap'][()], f['B0map'][()]     # the .mat as h5py sees it: (.., z, y, x)
+            mask = f['brainMask'][()] > 0
+            level = 0.5 * np.median(maps[creatine[0]][mask & (maps[creatine[0]] > 0)])
+            where = np.argwhere(mask & (maps[creatine[0]] > level))
+            for z, y, x in where[np.linspace(0, len(where) - 1, per_subject).astype(int)]:
+                conc = maps[:, z, y, x]
+                weights, *_ = np.linalg.lstsq(concentrations, conc, rcond=None)
+                decay = (weights * concentrations)[:, None, :] * np.exp(-t[None, :, None] / t2[:, None, :])
+                lines = vt * decay.sum(-1).T                # (points, metabolites)
+                shift = np.exp(2j * np.pi * b0[z, y, x] * t)
+                factor = (complex_(f['xtMeta'][:, z, y, x]) / (lines.sum(1) * shift)).real
+                fit = slice(0, acquisition['n_points'] // 3)   # well above rounding
+                (r1, r2), *_ = np.linalg.lstsq(np.stack([t[fit], t[fit] ** 2], 1),
+                                               -np.log(factor[fit]), rcond=None)
+                gm = weights[0] * concentrations[:, 0]
+                share = np.where(conc > 0, gm / np.maximum(weights @ concentrations.T, 1e-30),
+                                 weights[0] / weights.sum())
+                rates = share / t2[:, 0] + (1 - share) / t2[:, 1] + r1
+                peak = np.fft.fft(lines[:, creatine].sum(1) * factor).real.max()
+                rows.append((conc / conc[creatine[0]], rates, peak, b0[z, y, x], r2))
+    ratio, rates, peak, b0, r2 = (np.array(v) for v in zip(*rows))
+    level = np.random.default_rng(seed).uniform(0.6, 1.4, len(peak))
+    samples = {NAMES[m]: ratio[:, i] for i, m in enumerate(METABOLITES)
+               if m not in ('tcr', 'tcr39', 'lac', 'lac41')}
+    samples.update({f'{NAMES[m]}.d': rates[:, i] - 1 for i, m in enumerate(METABOLITES)})
+    samples.update({'snr': peak / (NOISE_SD * level), 'f_shift': b0 / frequency,
+                    'TG': 1 / np.sqrt(r2)})
+    return samples
+
+
 #********************#
 #   mrs-sim config   #
 #********************#
 def mrs_sim_config(folder: Optional[Path] = None,
-                   subjects: Tuple[str, ...] = ('Sub1', 'Sub2'),
-                   data_dir: Path = DATA_DIR) -> Dict:
+                   subjects: Tuple[str, ...] = ('Sub1', 'Sub2'), voxels: int = 2000,
+                   seed: int = 0, data_dir: Path = DATA_DIR) -> Dict:
     """
-    MRS-Sim on this challenge's own basis and grid, to simulate training data from.
+    MRS-Sim on this challenge's own basis and grid, matched to its training data.
 
     The release's basis (see ``basis``) is written and compiled into ``folder`` once,
     and the config simulates on the data's grid: 384 points at the release's bandwidth.
-    Concentrations are sampled relative to Cr + Cr39, the two moieties of the shared
-    creatine map, both fixed at 1; each range runs from 0 to 1.25 times the largest
-    ground-truth amplitude relative to creatine over ``subjects``' brain voxels. The
-    challenge ties each moiety pair (Lac/Lac41, PE/PE40) to one amplitude, which
-    MRS-Sim cannot, so the pairs are sampled independently over the same range; the
-    macromolecules, whose amplitudes the release keeps fixed, get 0 to 2 at the basis'
-    own scale; lactate, absent in the training subjects, gets 0 to 0.5. The remaining
-    ranges and switches follow MRS-Sim's published config and are the recipe's to tune.
+    Every parameter is drawn uniformly, and independently, over the 1st-99th percentile
+    of the training subjects' own ground truth (``truth_parameters``): each metabolite's
+    amplitude relative to Cr + Cr39 (both fixed at 1, the two moieties of the one
+    creatine map), the Lorentzian widths (one range for all lines, as MRS-Sim takes it),
+    the Gaussian width 1/TG^2, SNR and shift. Independent amplitudes also keep a model
+    from learning the release's two fixed tissue compositions (the paper's own warning).
+    MRS-Sim's fitted distributions (``mrs_sim.distributions``) are not used here: at
+    MRS-Sim dffb5ed they give these bounded values heavy tails, a third of the Asp, GABA
+    and Gln amplitudes far outside the release's. What the training truth does not give
+    keeps a range: Lac and Lac41 (zero in the release) 0 to 0.5, the macromolecules 0 to
+    2 at the basis' own scale; baseline and residual water follow MRS-Sim's published
+    config. The release has no phase errors or eddy currents, so neither is simulated.
 
     Args:
-        folder (Optional[Path]): Where the compiled basis lives; ``data/basis_sets``
-            by default.
-        subjects (Tuple[str, ...]): Whose ground truth sets the concentration ranges.
+        folder (Optional[Path]): Where the compiled basis lives; ``data/basis_sets`` by
+            default. It is made once.
+        subjects (Tuple[str, ...]): Whose ground truth the parameters follow.
+        voxels (int): Voxels the distributions are fitted to.
+        seed (int): Seeds the noise levels drawn for the SNR.
         data_dir (Path): Where the release lives.
 
     Returns:
@@ -203,23 +303,15 @@ def mrs_sim_config(folder: Optional[Path] = None,
         # the .BASIS is zero-filled to twice the data's points, as LCModel stores it
         mrs_sim.compile_basis(path, mat, te=1.66, centre=4.7, pulse_sequence='FID-MRSI',
                               points=acquisition['n_points'])
-    ratios = []
-    for subject in subjects:
-        aux = module.read_aux(subject, signal='meta')
-        values = aux['metaMap'][aux['brainMask'] > 0]
-        creatine = values[:, METABOLITES.index('tcr')]
-        keep = creatine > 0.5 * np.median(creatine[creatine > 0])
-        ratios.append(values[keep] / creatine[keep, None])
-    ratio = np.concatenate(ratios)
 
+    samples = truth_parameters(subjects, voxels, seed, data_dir)
+    span = lambda v: [round(float(np.percentile(v, 1)), 4), round(float(np.percentile(v, 99)), 4)]
     names = list(NAMES.values()) + list(MACROMOLECULES)
-    ranges = {}
-    for i, met in enumerate(METABOLITES):
-        if met in ('tcr', 'tcr39'):
-            continue
-        high = round(1.25 * float(np.percentile(ratio[:, i], 99)), 3)
-        ranges[NAMES[met].lower()] = [0.0, high if high > 0 else 0.5]
+    ranges = {name.lower(): span(v) for name, v in samples.items()
+              if '.' not in name and name not in ('snr', 'f_shift', 'TG')}
+    ranges.update({'lac': [0.0, 0.5], 'lac41': [0.0, 0.5]})
     ranges.update({mm: [0.0, 2.0] for mm in MACROMOLECULES})
+    widths = np.concatenate([v for k, v in samples.items() if k.endswith('.d')])
 
     config = mrs_sim.config()
     config.update({
@@ -232,12 +324,14 @@ def mrs_sim_config(folder: Optional[Path] = None,
         'lineshape': 'voigt', 'num_coils': 1, 'drop_prob': 0.0,
         'b0': False, 'eddy': False, 'fshift_g': True, 'fshift_i': False,
         'phi0': False, 'phi1': False, 'noise': True, 'apodize': False, 'mm_lip': False,
-        'snr': [5, 30],
+        'snr': span(samples['snr']),
         'notes': '2024 MRSI challenge: the release\'s basis (VtMeta and VtMM) on the '
-                 'data grid; concentration ranges are 0 to 1.25x the ground truth\'s '
-                 '99th percentile relative to Cr+Cr39 over the training subjects\' '
-                 'brain voxels; moiety pairs sampled independently.'})
-    config['parameters'] = {'d': [3, 10], 'g': [5, 20], 'dmm': [10, 100], 'gmm': [5, 20],
-                            'f_shift': [-0.1, 0.1], 'phi0': [-45, 45], 'phi1': [-20, 20],
-                            'snr': [5, 30], **ranges}
+                 'data grid; amplitudes, Lorentzian and Gaussian widths, SNR and shift '
+                 'sampled uniformly over the 1st-99th percentile of the ground truth of '
+                 f'{", ".join(subjects)} ({voxels} brain voxels); SNR covers 0.6-1.4x '
+                 'the training noise level.'})
+    config['parameters'] = {'d': span(widths), 'g': span(1 / samples['TG'] ** 2),
+                            'dmm': [10, 100], 'gmm': [5, 20],
+                            'f_shift': span(samples['f_shift']),
+                            'snr': span(samples['snr']), **ranges}
     return config

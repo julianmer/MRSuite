@@ -57,3 +57,9 @@ A set of standards for generating reproducible reports, including:
 - **Contribution List**: Construct a list of contributors for the utilized modules.
 - **Version Control**: Track changes to modules versions and hardware specifications.
 - **Contribution Guidelines**: Clear guidelines for contributing new modules and improvements.
+
+
+## External Tools and Their Licences
+MRSuite does not ship the external tools it drives: each is fetched separately and keeps its
+own licence. MRS-Sim, for example, is licensed under AGPL-3.0; MRSuite runs it in a process of
+its own and never bundles it.

@@ -66,7 +66,35 @@ def test_the_truth_adds_up_to_the_data(simulated):
     assert {"baseline", "water", "noise"} <= set(truth.components)
     assert set(truth.concentrations) <= set(truth.components)     # a signal for each
     assert set(truth.concentrations) <= set(mrs_sim.config()["metabolites"])
-    assert {"phi0", "snr", "d:NAA"} <= set(truth.parameters)
+    assert {"phi0", "snr", "NAA.d"} <= set(truth.parameters)
+
+
+#****************#
+#   amplitudes   #
+#****************#
+def test_the_concentrations_are_the_amplitudes_in_the_data():
+    """At the first point, with phases and eddy currents off, each basis function's
+    signal is its concentration times its basis FID: no per-spectrum normaliser left."""
+    config = mrs_sim.config()
+    config.update(phi0=False, phi1=False, eddy=False, b0=False)
+    _, truth = mrs_sim.simulate(config, n=3, seed=0)
+    basis = mrs_sim.basis(config)
+
+    for name in ("NAA", "Cr", "Glu"):
+        in_data = (truth.components[name][:, 0] / basis[name][0]).real
+        np.testing.assert_allclose(in_data, truth.concentrations[name], rtol=1e-3)
+
+
+#***************#
+#   noiseless   #
+#***************#
+def test_noise_off_gives_the_noiseless_spectra():
+    config = mrs_sim.config()
+    config["noise"] = False
+    data, truth = mrs_sim.simulate(config, n=2, seed=0)
+    fids = data.numpy().reshape(len(data), -1)
+
+    assert np.abs(truth.components["noise"]).max() < 1e-5 * np.abs(fids).max()
 
 
 #************#
@@ -140,6 +168,9 @@ def test_a_dot_basis_compiles_to_mrs_sims_own_mat(tmp_path):
         mrs_sim.basis({"PM_basis_set": str(mat), "metabolites": ["Nope"]})
     with pytest.raises(ValueError, match="never padded"):
         mrs_sim.compile_basis(BASIS_2016, tmp_path / "no.mat", te=30.0, points=1 << 20)
+    with pytest.raises(ValueError, match="mirrored"):
+        mrs_sim.compile_basis(BASIS_2016.parents[1] / "basisset_JMRUI", tmp_path / "no.mat",
+                              te=30.0)
 
 
 #************#

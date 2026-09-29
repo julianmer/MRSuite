@@ -188,13 +188,17 @@ def _assert_simulates_the_challenge(config, points, bandwidth, frequency, centre
     assert item.SpecFreqChemShift == pytest.approx(centre)
     assert set(truth.concentrations) == set(config["metabolites"])
 
+    # the concentrations are amplitudes in the data; relative to the reference they are
+    # the ratios MRS-Sim sampled, fixed for the reference and within range for the rest
     reference = config["wrt_metab"].split(",")
+    unit = truth.concentrations[reference[0]] / config["wrt_metab_ratio"][0]
     for name, values in truth.concentrations.items():
+        ratios = values / unit
         if name in reference:
-            assert np.allclose(values, config["wrt_metab_ratio"][reference.index(name)])
+            assert np.allclose(ratios, config["wrt_metab_ratio"][reference.index(name)])
         else:
             low, high = config["parameters"][name.lower()]
-            assert (low <= values).all() and (values <= high).all(), name
+            assert (low - 1e-6 <= ratios).all() and (ratios <= high + 1e-6).all(), name
 
     from fsl_mrs.utils.misc import calculateAxes
     spectrum = np.fft.fftshift(np.fft.fft(truth.components["NAA"][0]))

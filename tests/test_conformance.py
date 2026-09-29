@@ -75,9 +75,6 @@ def test_fid_a_processing(challenge):
 #   osprey   #
 #************#
 @needs_octave
-@pytest.mark.xfail(strict=True, raises=ValueError,
-                   reason="Osprey hands ResonantNucleus back as an Octave cell, which "
-                          "FIDACodec.fida2nifti does not unwrap; open, predates this check")
 def test_osprey_processing(challenge):
     from mrsuite import osprey
     check(osprey.op_addphase, challenge[0], 30.0)

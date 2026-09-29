@@ -53,8 +53,9 @@ def config(name: str = "coil_combined_with_artifacts") -> Dict[str, Any]:
 
     Args:
         name (str): The file in MRS-Sim's ``src/config/predefined``, without '.json'. At
-            the pinned commit only 'coil_combined_with_artifacts' and 'denoising_dataset'
-            match MRS-Sim's code; the others predate it.
+            the pinned commit 'coil_combined_with_artifacts' and 'denoising_dataset'
+            simulate; three others need several coils, which this driver does not take
+            apart yet, and the rest predate MRS-Sim's code.
 
     Returns:
         Dict[str, Any]: The config, as MRS-Sim reads it.
@@ -102,6 +103,10 @@ def compile_basis(basis: Union[str, Path], out: Union[str, Path], te: float,
     from fsl_mrs.utils import mrs_io
     from scipy import io as scipy_io
 
+    if Path(basis).suffix.lower() != ".basis":
+        raise ValueError(f"{basis} is not an LCModel .BASIS; FSL-MRS reads other formats, "
+                         f"such as jMRUI's, in the opposite orientation, which would simulate "
+                         f"mirrored spectra")
     b = mrs_io.read_basis(str(basis))
     fids = b.original_basis_array                       # (points, n), NIfTI-MRS orientation
     n = points or fids.shape[0]
@@ -245,8 +250,12 @@ class Source(source.Source):
         self._data, self._truth, self._next = r["data"], _truth(r), 0
         self._dwell, self._frequency, self._centre = (float(r["dwell"]), float(r["frequency"]),
                                                       float(r["centre"]))
-        self._ranges = {str(k): [float(lo), float(hi)] for k, lo, hi
-                        in zip(r["labels"], r["range_min"], r["range_max"])}
+        self._ranges = {str(k): [float(lo), float(hi)] for k, (lo, hi)
+                        in zip(r["labels"], r["parameter_ranges"])}
+        self._concentration_ranges = {str(k): [float(lo), float(hi)] for k, (lo, hi)
+                                      in zip(r["metabolites"], r["concentration_ranges"])}
+        self._table, self._provenance = (json.loads(str(r["mrssynmrs"])),
+                                         json.loads(str(r["provenance"])))
         self._drawn += 1
 
     #**********#
@@ -279,58 +288,52 @@ class Source(source.Source):
     #   recipe   #
     #************#
     def recipe(self) -> Dict[str, Any]:
-        """How the spectra are made: the MRSsynMRS report filled from the config and the
-        ranges MRS-Sim really sampled, plus the config and the seed."""
+        """How the spectra are made, as the MRSsynMRS report.
+
+        Its first four sections are MRS-Sim's own table (src/mrssynmrs.py), which MRSuite
+        only completes where its own sampling decides: the reference metabolites fixed
+        at their ratios, basis functions the table misses, the number of points and the
+        metabolite-level shifts. MRS-Sim's table stops at Metabolites, so MRSuite fills
+        Components, Artifacts and Data Quality from the config and the ranges MRS-Sim
+        really sampled. MRS-Sim's provenance record, the config and the seed go beside it.
+        """
         c, r = self.config, self._ranges
         reference = [m.strip() for m in c["wrt_metab"].split(",")]
         ratios = c.get("wrt_metab_ratio") or [1 / len(reference)] * len(reference)
-        background = [m for m in c["metabolites"]
+        names = list(self._concentration_ranges)
+        background = [m for m in names
                       if "mm" in m.lower() or "lip" in m.lower() or "mac" in m.lower()]
-        _, header = _basis_mat(c)
 
+        table = copy.deepcopy(self._table)
         report = recipe_.report()
-        report["Experiment"]["Nucleus"] = "1H"
+        report.update({section: table[section] for section in
+                       ("Experiment", "Software", "Pulse Sequence", "Metabolites")})
 
-        software = report["Software"]
-        software["Basis Set Simulation"]["Name"] = str(header.get("notes", "")) or None
-        software["Signal Model"].update({
-            "Name": f"MRS-Sim ({version()})",
-            "Repository (Link, DOI, or RRID)": "https://github.com/JohnLaMaster/MRS-Sim"})
-        software["Additional Code"].update({
+        report["Software"]["Additional Code"].append({
             "Name": f"MRSuite {provenance.mrsuite_version()}",
-            "Repository (Link, DOI, or RRID)": "https://github.com/julianmer/MRSuite",
-            "Purpose": "training source (mrsuite.simulators.mrs_sim)"})
-
-        sequence = report["Pulse Sequence"]
-        sequence.update({"Field Strength [T]": round(float(header["B0"]), 3),
-                         "Localization": str(header.get("pulse_sequence", "")) or None,
-                         "Spectral Width [Hz]": self.acquisition["bandwidth"],
-                         "Number of Points": self.acquisition["points"]})
-        sequence["Sequence Timing(s)"].update({"Repetition Time(s) [ms]": "not modelled",
-                                               "Echo Time(s) [ms]": c.get("TE")})
-        sequence["Water Suppression"]["Method"] = "none (see Artifacts - Residual Water)"
+            "Repository": "https://github.com/julianmer/MRSuite",
+            "Purpose": "the training source (mrsuite.simulators.mrs_sim): fixes the reference "
+                       "metabolites, shares one Gaussian width per group, applies dropout"})
+        # MRS-Sim drops the header's text fields when it loads a basis; the .mat keeps them
+        _, header = _basis_mat(c)
+        if not report["Software"]["Basis Set Simulation"].get("Name"):
+            report["Software"]["Basis Set Simulation"]["Name"] = str(header.get("notes")) or None
+        if not report["Pulse Sequence"].get("Localization"):
+            report["Pulse Sequence"]["Localization"] = str(header.get("pulse_sequence")) or None
+        report["Pulse Sequence"]["Number of Points"] = self.acquisition["points"]
 
         metabolites = report["Metabolites"]
-        metabolites.update({
-            "Distribution": "uniform within each range",
-            "Component dropout probability": c.get("drop_prob", 0.0),
-            "Units": f"amplitudes of the basis functions, relative to "
-                     f"{' + '.join(reference)} fixed at {ratios}",
-            "Concentration Ranges": {
-                m: (f"fixed at {ratios[reference.index(m)]:g} (reference)"
-                    if m in reference else r[m.lower()]) for m in c["metabolites"]},
-            "T2 Relaxation Ranges": ("not applied (Gaussian lineshape)"
-                                     if c["lineshape"] == "gaussian" else
-                                     {m: r[f"d:{m}"] for m in c["metabolites"]}),
-            "Metabolite-Level Frequency Shifts": ({m: r[f"f_shifts:{m}"]
-                                                   for m in c["metabolites"]}
-                                                  if c["fshift_i"] else "not applied")})
-        metabolites["Sources of Parameter Values"].update({
-            "Concentration Ranges (Link or DOI)":
-                "the config's 'parameters'; MRS-Sim's metabolites_database.json otherwise",
-            "T2 Relaxation Ranges (Link or DOI)":
-                "MRS-Sim's lineshape decay 'd' in exp(-(d + g*t)*t), not a T2 in ms",
-            "T1 Relaxation Ranges (Link or DOI)": "not modelled (fully relaxed)"})
+        metabolites["Units"] = (f"ratio to {' + '.join(reference)}, fixed at "
+                                f"{[float(x) for x in ratios]}")
+        ranges = metabolites.get("Concentration Ranges") or {}
+        for name in names:
+            if name in reference:
+                ranges[name] = f"fixed at {ratios[reference.index(name)]:g} (reference)"
+            elif name not in ranges:
+                ranges[name] = self._concentration_ranges[name]
+        metabolites["Concentration Ranges"] = ranges
+        metabolites["Metabolite-Level Frequency Shifts"] = (
+            {m: r[f"{m}.f_shifts"] for m in names} if c["fshift_i"] else "not applied")
 
         components = report["Components"]
         components.update({"Number Spectral Averages": 1,
@@ -377,8 +380,8 @@ class Source(source.Source):
         artifacts["Eddy Currents"].update({
             "Model Used (Equation, Description, or DOI)":
                 "MRS-Sim first_order_eddy_currents (amplitude, time constant)",
-            "If Analytical, Parameter Ranges": {"Amplitude": r.get("ecc0"),
-                                                "Time Constant": r.get("ecc1")},
+            "If Analytical, Parameter Ranges": {"Amplitude": r.get("ecc[0]"),
+                                                "Time Constant": r.get("ecc[1]")},
             "Applied": bool(c["eddy"])})
         artifacts["Out-of-Voxel"]["Applied"] = False
         artifacts["Motion"]["Applied"] = False
@@ -390,7 +393,7 @@ class Source(source.Source):
             "Definition of SNR used": f"MRS-Sim's, on {c.get('snr_metab', c['wrt_metab'])}"})
         quality["Linewidths"].update({
             "Metabolite-level Linewidths recorded":
-                "per spectrum: 'd:<name>' and 'g:<name>' in the truth parameters",
+                "per spectrum: '<name>.d' and '<name>.g' in the truth parameters",
             "Reference Metabolite and Moiety": c["wrt_metab"]})
 
         path = Path(c["PM_basis_set"])
@@ -403,7 +406,8 @@ class Source(source.Source):
                                "config": copy.deepcopy(c), "seed": self.seed,
                                "chunk": self.chunk, "components": self.components,
                                "basis": provenance.file_checksum(path),
-                               "sampled_ranges": dict(r)}}
+                               "sampled_ranges": {**self._concentration_ranges, **r},
+                               "mrs_sim_provenance": copy.deepcopy(self._provenance)}}
 
 
 #*********#
@@ -412,9 +416,8 @@ class Source(source.Source):
 def _run(config: Dict[str, Any], n: int, seed: int, components: bool) -> Dict[str, np.ndarray]:
     """One MRS-Sim job, in its own process, with the MRS-Sim checkout as its working folder."""
     if config.get("num_coils", 1) > 1:
-        raise ValueError(f"MRS-Sim ({version()}) fails on several coils inside its own noise "
-                         f"model (physics_model.py, generate_noise); simulate combined spectra, "
-                         f"num_coils 1")
+        raise ValueError("MRSuite's MRS-Sim driver does not yet take several coils apart into "
+                         "their truth; simulate combined spectra, num_coils 1")
     if os.path.isabs(config.get("PM_basis_set", "")):
         # MRS-Sim resolves the basis inside its checkout ('./src/basis_sets/' + name)
         config = {**config, "PM_basis_set": os.path.relpath(config["PM_basis_set"],
@@ -447,11 +450,8 @@ def _run(config: Dict[str, Any], n: int, seed: int, components: bool) -> Dict[st
 #***********#
 def _truth(r: Dict[str, np.ndarray]) -> Truth:
     """The driver's arrays as a Truth, by name."""
-    metabolites = [str(m) for m in r["metabolites"]]
-    concentrations = dict(zip(metabolites, r["concentrations"].T))
-    skip = {m.lower() for m in metabolites}
-    parameters = {str(k): v for k, v in zip(r["labels"], r["parameters"].T)
-                  if str(k) not in skip}
+    concentrations = dict(zip((str(m) for m in r["metabolites"]), r["concentrations"].T))
+    parameters = dict(zip((str(k) for k in r["labels"]), r["parameters"].T))
     components = {}
     if len(r["components"]):
         components = dict(zip((str(k) for k in r["names"]), r["components"].transpose(1, 0, 2)))

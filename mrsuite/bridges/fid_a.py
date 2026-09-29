@@ -404,9 +404,8 @@ class FIDACodec:
             hdr_ext[f'dim_{5 + i}'] = tag
 
         f0 = np.asarray(fida['txfrq']).ravel()[0] / 1e6  # back to MHz
-        nucleus = hdr_ext.get('ResonantNucleus', ['1H'])
-        if isinstance(nucleus, (list, tuple)):
-            nucleus = nucleus[0]
+        # a list from Python, an array from an Octave cell (Osprey hands it back as one)
+        nucleus = str(np.asarray(hdr_ext.get('ResonantNucleus', ['1H'])).ravel()[0])
 
         return gen_nifti_mrs(
             fids,

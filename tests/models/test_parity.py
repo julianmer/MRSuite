@@ -91,6 +91,8 @@ def _parity(model, kind):
     torch.save(model.net.state_dict(), folder / "weights.pt")
     np.save(folder / "input.npy", x)
     convert.run_reference(type(model), {**JOBS[kind], "task": "forward",
+                                        "batch_statistics": getattr(model, "batch_statistics",
+                                                                    False),
                                         "weights": str(folder / "weights.pt"),
                                         "input": str(folder / "input.npy"),
                                         "output": str(folder / "output.npy")})

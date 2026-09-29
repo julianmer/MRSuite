@@ -205,6 +205,36 @@ def test_a_source_states_its_recipe(tmp_path):
     assert json.loads(Path(path).read_text())["generation"]["seed"] == 0
 
 
+#*******************#
+#   distributions   #
+#*******************#
+def test_simulations_follow_the_distributions_fitted_to_data(tmp_path):
+    """MRS-Sim's own pipeline, fed values as data would give them: its fitted marginals
+    and correlations come back out of the simulation, and a parameter asked to be
+    independent is."""
+    from scipy import io
+
+    rng = np.random.default_rng(0)
+    n = 300
+    shift = rng.normal(0, 0.02, n)
+    samples = {"NAA": rng.lognormal(0.5, 0.1, n), "NAA.d": rng.gamma(20, 0.5, n),
+               "snr": 100 + 400 * shift + rng.normal(0, 3, n), "f_shift": shift}
+
+    copula = mrs_sim.distributions(samples, tmp_path / "fits", independent=("NAA",))
+    corr = io.loadmat(copula["correlation"], simplify_cells=True)
+    names = [str(x) for x in corr["names"]]
+    naa = names.index("NAA_ampl")
+    assert np.allclose(np.delete(corr["corr"][naa], naa), 0)
+
+    config = mrs_sim.config()
+    config["copula"] = copula
+    _, truth = mrs_sim.simulate(config, n=64, seed=0, components=False)
+    p = truth.parameters
+    for key in ("snr", "NAA.d"):
+        assert abs(np.mean(p[key]) - np.mean(samples[key])) < 0.6 * np.std(samples[key])
+    assert np.corrcoef(p["f_shift"], p["snr"])[0, 1] > 0.8
+
+
 #************#
 #   source   #
 #************#

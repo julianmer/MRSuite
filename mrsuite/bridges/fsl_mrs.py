@@ -91,7 +91,7 @@ class FSLMRSBridge(Bridge):
     #   to toolbox   #
     #****************#
     def _to_toolbox(self, obj):
-        return obj          # FSL-MRS takes NIfTI-MRS directly
+        return _fsl(obj)
 
     #******************#
     #   from toolbox   #
@@ -127,6 +127,16 @@ def _basis(path: str, mtime: float) -> Any:
     spectrum by spectrum, and reading the basis for each would dominate a quick fit."""
     from fsl_mrs.utils import mrs_io
     return mrs_io.read_basis(path)
+
+
+#*********#
+#   fsl   #
+#*********#
+def _fsl(data: Any) -> Any:
+    """Any NIfTI-MRS as FSL-MRS's own class, which adds what FSL-MRS calls on it (such as
+    ``mrs()``); spectra made by other methods and simulators are plain NIfTI-MRS."""
+    from fsl_mrs.core.nifti_mrs import NIFTI_MRS
+    return data if isinstance(data, NIFTI_MRS) else NIFTI_MRS(data)
 
 
 #*********#
@@ -172,7 +182,7 @@ def fit(data: Any, basis: Any, water: Any = None, ppmlim: tuple = (0.2, 4.2),
     if isinstance(basis, (str, os.PathLike)):
         basis = _basis(os.path.abspath(basis), os.path.getmtime(basis))
 
-    mrs = data.mrs(basis=basis, ref_data=None if water is None else water[:])
+    mrs = _fsl(data).mrs(basis=basis, ref_data=None if water is None else water[:])
     mrs.processForFitting()
     res = fitting.fit_FSLModel(mrs, method=method, ppmlim=ppmlim,
                                baseline_order=baseline_order, **kwargs)

@@ -171,6 +171,86 @@ def _basis_mat(config: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     return mat["metabolites"], mat["header"]
 
 
+#*******************#
+#   distributions   #
+#*******************#
+def distributions(samples: Dict[str, np.ndarray], folder: Union[str, Path],
+                  independent: Tuple[str, ...] = ()) -> Dict[str, str]:
+    """
+    MRS-Sim's own fitted distributions for parameter values seen in real data.
+
+    MRS-Sim's pipeline (src/findParamDist.py, then its CopulaInVivoSampler) fits a
+    marginal distribution to each parameter and the correlations between them, and
+    simulates from both. It reads Osprey's parameter export, one file per spectrum,
+    so the values are written that way, each parameter as its own key; put the result
+    in a config as ``config["copula"]`` and the simulation samples from it.
+
+    Args:
+        samples (Dict[str, np.ndarray]): (n,) values per parameter, in MRS-Sim's own
+            units and names: a basis function's name for its amplitude (relative to
+            the config's reference metabolites), '<name>.d' for its Lorentzian width
+            in 1/s (MRS-Sim adds a fixed 1/s of its own), 'snr' in MRS-Sim's terms (peak
+            of the reference lines' real spectrum over the noise's time-domain SD), and
+            'f_shift' in ppm.
+        folder (Union[str, Path]): Where the files and MRS-Sim's fits go.
+        independent (Tuple[str, ...]): Parameters to sample without correlations, by
+            the names above.
+
+    Returns:
+        Dict[str, str]: The fitted distributions and the correlation matrix, as paths.
+    """
+    from scipy import io as scipy_io
+
+    keys = {name: _osprey_key(name) for name in samples}
+    n = {len(np.ravel(v)) for v in samples.values()}
+    if len(n) != 1:
+        raise ValueError(f"every parameter needs the same number of samples, not {sorted(n)}")
+    folder = Path(folder)
+    shutil.rmtree(folder, ignore_errors=True)
+    for i in range(n.pop()):
+        spectrum = folder / "parameters" / f"{i:06d}"
+        spectrum.mkdir(parents=True)
+        scipy_io.savemat(str(spectrum / "fitting_parameters.mat"), {
+            "header": {"names": np.array(list(samples), dtype=object)},
+            **{keys[k]: float(np.ravel(v)[i]) for k, v in samples.items()}})
+
+    proc = subprocess.run(
+        [PYTHON, "src/findParamDist.py", "--paramPath", str(folder / "parameters"),
+         "--savedir", str(folder / "fits"), "--paramKeys", ",".join(keys.values()),
+         "--findCorr"],
+        cwd=ROOT, capture_output=True, text=True,
+        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "MPLBACKEND": "Agg"})
+    fitted, corr = (folder / "fits" / "parameter_distributions_best_fit.json",
+                    folder / "fits" / "correlation_matrix.mat")
+    if proc.returncode != 0 or not fitted.exists() or not corr.exists():
+        raise RuntimeError(f"MRS-Sim's findParamDist.py failed:\n{proc.stderr[-3000:]}")
+
+    mat = scipy_io.loadmat(str(corr), simplify_cells=True)
+    names = [str(x) for x in np.ravel(mat["names"])]
+    matrix = np.asarray(mat["corr"], float)
+    for key in (keys[k] for k in independent):
+        i = names.index(key)
+        matrix[i, :] = matrix[:, i] = 0.0
+        matrix[i, i] = 1.0
+    scipy_io.savemat(str(corr), {"corr": matrix, "names": np.array(names, dtype=object)})
+    return {"distributions": str(fitted), "correlation": str(corr)}
+
+
+#****************#
+#   osprey key   #
+#****************#
+def _osprey_key(name: str) -> str:
+    """A parameter's name as findParamDist.py reads Osprey's export, and back as
+    CopulaInVivoSampler resolves it (see the driver's maps)."""
+    if name == "snr":
+        return "SNR"
+    if name == "f_shift":
+        return "global_freqShift"
+    if name.endswith(".d"):
+        return f"{name[:-2]}_lorentzLB"
+    return f"{name}_ampl"
+
+
 #**************#
 #   simulate   #
 #**************#

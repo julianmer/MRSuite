@@ -36,7 +36,7 @@ from src.aux import inv_Fourier_Transform, sample_baselines, sample_resWater
 from src.mainFcns import prepare
 from src.mrssynmrs import export_mrssynmrs_table
 from src.provenance import collect_provenance
-from src.sampling import UniformRangeSampler
+from src.sampling import CopulaInVivoSampler, UniformRangeSampler
 
 
 #************#
@@ -93,7 +93,15 @@ def main(job):
     with open(path, "w") as fh:
         json.dump({**job["config"], "totalEntries": job["n"]}, fh)
     cfg, water_cfg, baseline_cfg, pm, l, ind, p, n = prepare(path)
-    sampler = UniformRangeSampler(pm, seed=job["seed"])
+    copula = job["config"].get("copula")
+    if copula:
+        # the keys mrsuite.simulators.mrs_sim.distributions wrote, back to MRS-Sim's columns
+        sampler = CopulaInVivoSampler(
+            pm, copula["distributions"], copula["correlation"], seed=job["seed"],
+            suffix_to_ind={"lorentzLB": "d"},
+            global_param_map={"snr": "SNR", "f_shift": "global_freqShift"})
+    else:
+        sampler = UniformRangeSampler(pm, seed=job["seed"])
     # the basis functions by position: prepare adds 'mac' and 'lip' group keys to ind,
     # which hide a basis function of that name, so no column is looked up by its name
     names = sampler.registry.metabolite_names

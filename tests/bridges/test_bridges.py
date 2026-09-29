@@ -278,6 +278,21 @@ def test_fsl_mrs_fit_returns_a_uniform_result(spectrum, basis):
 
 
 #***************#
+#   fit plain   #
+#***************#
+def test_fsl_mrs_fits_any_nifti_mrs(spectrum, basis):
+    """Spectra from other methods and simulators are plain NIfTI-MRS, without FSL-MRS's
+    additions; they fit exactly as FSL-MRS's own objects do."""
+    from nifti_mrs.create_nmrs import gen_nifti_mrs
+
+    plain = gen_nifti_mrs(np.asarray(spectrum[:]), spectrum.dwelltime,
+                          spectrum.spectrometer_frequency[0], nucleus=spectrum.nucleus[0],
+                          dim_tags=spectrum.dim_tags)
+
+    assert fsl_mrs.fit(plain, basis).conc("raw") == fsl_mrs.fit(spectrum, basis).conc("raw")
+
+
+#***************#
 #   fit batch   #
 #***************#
 def test_fsl_mrs_fit_returns_one_result_per_spectrum(spectra, basis):

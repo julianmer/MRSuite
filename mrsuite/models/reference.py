@@ -65,9 +65,14 @@ def config(model):
 #   forward   #
 #*************#
 def forward(model, job):
-    """The original's output on the given spectra, with the given weights, in eval mode."""
+    """The original's output on the given spectra, with the given weights, in eval mode;
+    batch normalisation from the batch itself when the job asks, as the paper's scripts ran."""
     model.net.load_state_dict(torch.load(job["weights"]))
     model.eval()
+    if job.get("batch_statistics"):
+        for module in model.modules():
+            if isinstance(module, torch.nn.modules.batchnorm._BatchNorm):
+                module.train()
     x = torch.from_numpy(np.load(job["input"]))
     with torch.no_grad():
         if job["model"] == "mlp":

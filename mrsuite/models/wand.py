@@ -61,11 +61,17 @@ class WAND(TorchModel):
     It learns the components from any source that gives each metabolite's signal and the
     baseline: the artifacts are what the data holds beyond them.
 
+    Its batch normalisation uses the statistics of the spectra decomposed together, as
+    the paper's own evaluation ran it, which quantifies the 2016 challenge better than the
+    stored running averages do; a spectrum's decomposition then depends on the others in
+    its batch (up to ``batch_size``). ``batch_statistics=False`` uses the averages instead.
+
     Args:
         metabolites (List[str]): The basis spectra, in the network's output order.
         first (int): First point of the spectral window.
         last (int): The point after it.
         acquisition (Dict[str, float]): What it was trained on; see Model.
+        batch_statistics (bool): Normalise with each batch's own statistics.
 
     Attributes:
         repo (Path): The original repository, which the network and transform are loaded from.
@@ -78,10 +84,11 @@ class WAND(TorchModel):
     #   init   #
     #**********#
     def __init__(self, metabolites: List[str], first: int, last: int,
-                 acquisition: Dict[str, float]) -> None:
+                 acquisition: Dict[str, float], batch_statistics: bool = True) -> None:
         super().__init__()
         self.metabolites, self.first, self.last = list(metabolites), first, last
         self.acquisition = dict(acquisition)
+        self.batch_statistics = batch_statistics
         self.components = self.metabolites + ["baseline", "artifacts"]
         self.cwt = load_file(self.repo / "utils" / "wavelets.py").CWT(
             last - first, wavelet=("morlet", {"mu": 14}), scales="log-piecewise", nv=32,
@@ -94,6 +101,25 @@ class WAND(TorchModel):
     #*************#
     def prepare(self, items) -> torch.Tensor:
         return torch.from_numpy(spectra(items))
+
+    #*************#
+    #   predict   #
+    #*************#
+    def predict(self, x: torch.Tensor) -> torch.Tensor:
+        """In inference mode; with ``batch_statistics`` the stored running averages are set
+        aside for the call, so batch normalisation takes the batch's own statistics and the
+        weights stay exactly as they were."""
+        if not self.batch_statistics:
+            return super().predict(x)
+        norms = [m for m in self.modules() if isinstance(m, torch.nn.modules.batchnorm._BatchNorm)]
+        kept = [(m.running_mean, m.running_var) for m in norms]
+        for m in norms:
+            m.running_mean = m.running_var = None
+        try:
+            return super().predict(x)
+        finally:
+            for m, (mean, var) in zip(norms, kept):
+                m.running_mean, m.running_var = mean, var
 
     #*************#
     #   forward   #

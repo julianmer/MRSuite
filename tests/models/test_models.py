@@ -21,6 +21,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import torch
 
 from nifti_mrs.create_nmrs import gen_nifti_mrs
 
@@ -154,6 +155,25 @@ def test_a_checkpoint_loads_by_name_alone(mlp, tmp_path):
     (stranger / "config.json").write_text('{"model": "os.path.join"}')
     with pytest.raises(ValueError, match="MRSuite model"):
         mrsuite.models.load(stranger)
+
+
+#**********************#
+#   batch statistics   #
+#**********************#
+def test_wand_normalises_with_the_batch_and_keeps_its_weights():
+    """As the paper's evaluation ran it: the batch's own statistics, not the stored
+    averages, and the weights exactly as they were afterwards."""
+    torch.manual_seed(0)
+    wand = WAND(WAND_METABOLITES, 1792, 2036, WAND_ACQUISITION)
+    x = torch.randn(4, 2, 2048)
+    before = wand.fingerprint()
+
+    batch = wand.predict(x)
+    wand.batch_statistics = False
+    stored = wand.predict(x)
+
+    assert not torch.allclose(batch, stored)
+    assert wand.fingerprint() == before
 
 
 #****************#

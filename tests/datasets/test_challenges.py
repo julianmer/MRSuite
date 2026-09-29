@@ -222,6 +222,24 @@ def test_the_2016_config_simulates_on_the_challenge_grid(tmp_path):
     _assert_simulates_the_challenge(config, points=2048, bandwidth=4000.0,
                                     frequency=123.26, centre=4.65)
 
+    # measured the challenge's way, the simulated SNR covers the challenge's 20-161 (and a
+    # little more: MRS-Sim sets noise against Cr + PCr, the challenge measures its top peak)
+    simulated, _ = mrs_sim.simulate(config, n=16, seed=1, components=False)
+    ratios = challenge2016.snr(simulated)
+    assert 10 < ratios.min() and ratios.max() < 250 and np.ptp(ratios) > 50
+
+
+#*********#
+#   snr   #
+#*********#
+@needs_2016
+def test_the_2016_snr_is_the_challenges_own():
+    """The paper's values: SNR ~86 for dataset 1, 20, 30, 43 and 161 for 12, 15, 18, 21."""
+    data, _, _ = challenge2016.load()
+    ratios = challenge2016.snr(data)
+
+    np.testing.assert_allclose(ratios[[0, 11, 14, 17, 20]], [86, 20, 30, 43, 161], rtol=0.05)
+
 
 #****************#
 #   truth mrsi   #

@@ -22,6 +22,8 @@ import sys
 from pathlib import Path
 from typing import Any, List, Optional
 
+from mrsuite.training import recipe as recipe_
+
 
 #**************#
 #   keras on   #
@@ -64,6 +66,7 @@ def learn(model: Any, source: Any, steps: int, objective: str, batch: int, lr: f
     every = every or steps
     if steps % every:
         raise ValueError(f"every={every} does not divide steps={steps}")
+    recipe = source.recipe() if to else None
 
     class Stream(keras.utils.PyDataset):
         """Endless batches, prepared as the model prepares real data."""
@@ -77,10 +80,17 @@ def learn(model: Any, source: Any, steps: int, objective: str, batch: int, lr: f
             return model.prepare(data), model.target(truth, data, objective)
 
     class Keep(keras.callbacks.Callback):
-        """The model as it stands after every ``every`` steps, loadable by from_pretrained."""
+        """The model as it stands after every ``every`` steps, loadable by from_pretrained,
+        each with the recipe that made its data, when the source gives one."""
 
         def on_epoch_end(self, epoch, logs=None):
-            model.save_pretrained(Path(to) / f"step-{(epoch + 1) * every}")
+            folder = Path(to) / f"step-{(epoch + 1) * every}"
+            model.save_pretrained(folder)
+            if recipe:
+                training = {"model": f"{type(model).__module__}.{type(model).__qualname__}",
+                            "objective": objective, "steps": (epoch + 1) * every,
+                            "batch": batch, "learning_rate": lr}
+                recipe_.save({**recipe, "training": training}, folder / "recipe.json")
 
     trainable = model.as_keras(keras)
     trainable.compile(optimizer=keras.optimizers.Adam(learning_rate=lr),

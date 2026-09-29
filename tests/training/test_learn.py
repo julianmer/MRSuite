@@ -20,6 +20,8 @@ import os
 
 os.environ.setdefault("KERAS_TORCH_DEVICE", "cpu")      # before anything imports keras
 
+import json
+
 import numpy as np
 import pytest
 
@@ -48,11 +50,13 @@ class ToySource(Source):
         points, bandwidth = int(acquisition["points"]), acquisition["bandwidth"]
         self.t = np.arange(points) / bandwidth
         self.hz = np.linspace(-0.3, 0.3, len(metabolites)) * bandwidth    # one line each
+        lines = np.exp(2j * np.pi * self.hz[:, None] * self.t - self.t / 0.05)
+        self.basis = dict(zip(self.metabolites, lines))
 
     def draw(self, n):
         amps = self.rng.uniform(0, 2, (n, len(self.metabolites)))
-        lines = np.exp(2j * np.pi * self.hz[:, None] * self.t - self.t / 0.05)
-        components = {m: amps[:, i, None] * lines[i] for i, m in enumerate(self.metabolites)}
+        components = {m: amps[:, i, None] * self.basis[m]
+                      for i, m in enumerate(self.metabolites)}
         components["baseline"] = self.rng.uniform(0, 1, (n, 1)) * np.exp(-self.t / 0.002)
         noise = 0.01 * (self.rng.normal(size=(n, len(self.t))) +
                         1j * self.rng.normal(size=(n, len(self.t))))
@@ -109,14 +113,40 @@ def test_a_batch_takes_any_shape_nifti_mrs_allows():
 def test_a_model_learns_in_place(tmp_path):
     mlp = MLP(MLP_METABOLITES, 602, 957, MLP_ACQUISITION)
     before = mlp.fingerprint()
+    source = ToySource(MLP_METABOLITES, MLP_ACQUISITION)
+    source.recipe = lambda: {"MRSsynMRS": {"Experiment": {"ID": "toy"}}}
 
-    losses = mlp.learn(ToySource(MLP_METABOLITES, MLP_ACQUISITION), steps=150, every=50,
-                       lr=1e-3, to=str(tmp_path))
+    losses = mlp.learn(source, steps=150, every=50, lr=1e-3, to=str(tmp_path))
 
     assert len(losses) == 3 and losses[-1] < losses[0]
     assert mlp.fingerprint() != before
     assert sorted(p.name for p in tmp_path.iterdir()) == ["step-100", "step-150", "step-50"]
     assert MLP.from_pretrained(tmp_path / "step-150").fingerprint() == mlp.fingerprint()
+
+    # each checkpoint carries the recipe that made its data, with the training stated
+    recipe = json.loads((tmp_path / "step-150" / "recipe.json").read_text())
+    assert recipe["MRSsynMRS"]["Experiment"]["ID"] == "toy"
+    assert recipe["training"]["steps"] == 150 and recipe["training"]["objective"]
+
+
+#***********************#
+#   self - supervised   #
+#***********************#
+def test_the_mlp_learns_from_spectra_alone():
+    """The 'spectra' objective fits the source's basis through the original signal
+    model: no concentrations are read, and the loss falls all the same."""
+    import torch
+
+    torch.manual_seed(0)
+    mlp = MLP(MLP_METABOLITES, 602, 957, MLP_ACQUISITION)
+    before = mlp.fingerprint()
+    source = ToySource(MLP_METABOLITES, MLP_ACQUISITION)
+    source.draw = lambda n, draw=source.draw: (draw(n)[0], Truth())    # spectra only
+
+    losses = mlp.learn(source, steps=90, every=30, lr=1e-3, objective="spectra")
+
+    assert len(losses) == 3 and np.isfinite(losses).all() and losses[-1] < losses[0]
+    assert mlp.fingerprint() != before
 
 
 #****************#
@@ -143,8 +173,16 @@ def test_what_a_model_cannot_learn_from_is_refused():
     with pytest.raises(ValueError, match="points"):
         mlp.learn(ToySource(MLP_METABOLITES, WAND_ACQUISITION), steps=1)
     with pytest.raises(ValueError, match="learns from"):
-        mlp.learn(ToySource(MLP_METABOLITES, MLP_ACQUISITION), steps=1, objective="spectra")
+        mlp.learn(ToySource(MLP_METABOLITES, MLP_ACQUISITION), steps=1, objective="phases")
     with pytest.raises(KeyError, match="gives none for"):
         mlp.learn(ToySource(MLP_METABOLITES[:-1], MLP_ACQUISITION), steps=1)
     with pytest.raises(ValueError, match="single spectra"):
         mlp.learn(CoilSource(MLP_METABOLITES, MLP_ACQUISITION), steps=1)
+
+    bare = ToySource(MLP_METABOLITES, MLP_ACQUISITION)
+    bare.basis = None
+    with pytest.raises(ValueError, match="gives none"):
+        mlp.learn(bare, steps=1, objective="spectra")
+    with pytest.raises(KeyError, match="lacks"):
+        mlp.learn(ToySource(MLP_METABOLITES[:-1] + ["Other"], MLP_ACQUISITION), steps=1,
+                  objective="spectra")

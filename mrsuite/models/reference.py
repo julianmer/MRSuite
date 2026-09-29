@@ -78,6 +78,21 @@ def forward(model, job):
 
 
 #**********#
+#   loss   #
+#**********#
+def loss(model, job):
+    """The original's loss on the given spectra and parameters, with the basis and axes
+    it used, so the wrapper's re-expression is held to the same numbers."""
+    x = torch.from_numpy(np.load(job["input"]))
+    theta = torch.from_numpy(np.load(job["theta"]))
+    err = model.loss(x, None, None, theta, type=job["loss"])
+    basis = model.basisObj
+    np.savez(job["output"], loss=err.numpy(), basis=model.basis, t=basis.t, f=basis.f,
+             first=model.first, last=model.last,
+             names=np.array([str(n) for n in list(basis.names)[:model.basis.shape[1]]]))
+
+
+#**********#
 #   main   #
 #**********#
 if __name__ == "__main__":
@@ -86,6 +101,9 @@ if __name__ == "__main__":
     model = framework(job)
     if job["task"] == "config":
         result = config(model)
+    elif job["task"] == "loss":
+        loss(model, job)
+        result = {"ok": True}
     else:
         forward(model, job)
         result = {"ok": True}

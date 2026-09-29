@@ -205,7 +205,9 @@ class Model(Method, ModelHubMixin, **HUB):
             every (Optional[int]): Steps between checkpoints and loss reports; must divide
                 ``steps``. All of them by default.
             to (Optional[str]): Folder to save a checkpoint to every ``every`` steps, as
-                ``step-<n>``, each loadable with ``from_pretrained``.
+                ``step-<n>``, each loadable with ``from_pretrained`` or
+                ``mrsuite.models.load``, and each with the source's recipe beside it as
+                ``recipe.json``, when the source gives one (see ``Source.recipe``).
 
         Returns:
             List[float]: The mean loss over each stretch of ``every`` steps.
@@ -291,6 +293,19 @@ class Model(Method, ModelHubMixin, **HUB):
             if abs(found[key] - expected) > tolerance[key] * abs(expected):
                 raise ValueError(f"{type(self).__name__} expects {key} {expected}, the data has "
                                  f"{found[key]}; resample or reference the data first")
+
+    #*********************#
+    #   save pretrained   #
+    #*********************#
+    def save_pretrained(self, save_directory: Any, *, config: Optional[Dict[str, Any]] = None,
+                        **kwargs) -> Any:
+        """Save as the Hub mixin does, with the model's class in the config, so
+        ``mrsuite.models.load`` picks the class without being told; from_pretrained
+        ignores the extra key."""
+        config = dict(config if config is not None
+                      else getattr(self, "_hub_mixin_config", None) or {})
+        config["model"] = f"{type(self).__module__}.{type(self).__qualname__}"
+        return super().save_pretrained(save_directory, config=config, **kwargs)
 
     #*********************#
     #   from pretrained   #

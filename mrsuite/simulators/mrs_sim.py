@@ -17,13 +17,14 @@
 #*************#
 #   imports   #
 #*************#
+import copy
 import json
 import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, Union
 
 import numpy as np
 
@@ -32,6 +33,7 @@ from nifti_mrs.create_nmrs import gen_nifti_mrs
 from nifti_mrs_plus import NIfTI_MRS_Plus
 from mrsuite.core import provenance
 from mrsuite.octave import scratch
+from mrsuite.training import recipe as recipe_
 from mrsuite.training import source
 from mrsuite.training.source import Truth
 
@@ -67,6 +69,101 @@ def config(name: str = "coil_combined_with_artifacts") -> Dict[str, Any]:
 def version() -> Optional[str]:
     """The MRS-Sim checkout's exact state, for the provenance."""
     return provenance.git_version(str(ROOT))
+
+
+#*******************#
+#   compile basis   #
+#*******************#
+def compile_basis(basis: Union[str, Path], out: Union[str, Path], te: float,
+                  centre: float = 4.65, vendor: str = "", pulse_sequence: str = "",
+                  points: Optional[int] = None) -> str:
+    """
+    MRS-Sim's basis .mat from an LCModel .BASIS, as src/compileBasisSet.py builds one.
+
+    MRS-Sim's own compiler reads MARSS spin simulations; this builds the same file from
+    a .BASIS, so any basis a fitter uses can also simulate. The basis functions keep
+    the .BASIS' own scale and NIfTI-MRS' orientation, which FSL-MRS' reader gives, and
+    MRS-Sim simulates on exactly this grid ('resample' off), so its spectra come out at
+    the basis' bandwidth and points.
+
+    Args:
+        basis (Union[str, Path]): The .BASIS file.
+        out (Union[str, Path]): The .mat to write.
+        te (float): Echo time in ms, which the .BASIS does not state reliably.
+        centre (float): The ppm the spectrum is centred on.
+        vendor (str): For the header, if known.
+        pulse_sequence (str): For the header, if known.
+        points (Optional[int]): Cut the basis FIDs to this many points, to put a longer
+            basis on the data's grid. More points than the basis has is refused.
+
+    Returns:
+        str: The path written.
+    """
+    from fsl_mrs.utils import mrs_io
+    from scipy import io as scipy_io
+
+    b = mrs_io.read_basis(str(basis))
+    fids = b.original_basis_array                       # (points, n), NIfTI-MRS orientation
+    n = points or fids.shape[0]
+    if n > fids.shape[0]:
+        raise ValueError(f"{basis} has {fids.shape[0]} points, not the {n} asked for; "
+                         f"a basis is cut to the data's grid, never padded")
+    fids, bandwidth, frequency = fids[:n], float(b.original_bw), float(b.cf)
+    names = [str(name) for name in b.names]
+    if len({name.lower() for name in names}) != len(names):
+        raise ValueError(f"{basis} holds names that collide once lowercased, as MRS-Sim "
+                         f"stores them: {sorted(names)}")
+
+    dwell = 1 / bandwidth
+    header = {"B0": frequency / 42.5774785, "carrier_frequency": frequency,
+              "dwelltime": dwell, "linewidth": 1, "Ns": n,
+              "ppm": np.linspace(-0.5 * bandwidth, 0.5 * bandwidth, n) / frequency + centre,
+              "TE": te, "vendor": vendor, "t": (np.arange(0, n * dwell, dwell))[:n],
+              "spectralwidth": bandwidth, "centerFreq": centre,
+              "pulse_sequence": pulse_sequence,
+              "notes": f"Compiled by MRSuite {provenance.mrsuite_version()} from "
+                       f"{Path(basis).name} (sha256 "
+                       f"{provenance.file_checksum(basis)['sha256']}), at its own scale."}
+    metabolites = {name.lower(): {"fid": np.stack([fid.real, fid.imag]),
+                                  "min": 0.0, "max": 1.0}
+                   for name, fid in zip(names, fids.T)}
+    scipy_io.savemat(str(out), {"metabolites": metabolites, "header": header})
+    return str(out)
+
+
+#***********#
+#   basis   #
+#***********#
+def basis(config: Dict[str, Any]) -> Dict[str, np.ndarray]:
+    """
+    The config's basis functions, by the config's names: complex FIDs on the simulation grid.
+
+    As the .mat stores them, without the fixed 1 Hz broadening MRS-Sim adds inside its
+    forward model.
+    """
+    metabolites = _basis_mat(config)[0]
+    fids = {}
+    for name in config["metabolites"]:
+        if name.lower() not in metabolites:
+            raise KeyError(f"the basis {config['PM_basis_set']} has no {name!r}; it has "
+                           f"{sorted(metabolites)}")
+        fid = np.asarray(metabolites[name.lower()]["fid"], float).reshape(2, -1)
+        fids[name] = fid[0] + 1j * fid[1]
+    return fids
+
+
+#***************#
+#   basis mat   #
+#***************#
+def _basis_mat(config: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """The config's basis .mat, resolved as MRS-Sim resolves it: its metabolites and header."""
+    from scipy import io as scipy_io
+
+    path = Path(config["PM_basis_set"])
+    if not path.is_absolute():
+        path = ROOT / "src" / "basis_sets" / path
+    mat = scipy_io.loadmat(str(path), simplify_cells=True)
+    return mat["metabolites"], mat["header"]
 
 
 #**************#
@@ -148,6 +245,8 @@ class Source(source.Source):
         self._data, self._truth, self._next = r["data"], _truth(r), 0
         self._dwell, self._frequency, self._centre = (float(r["dwell"]), float(r["frequency"]),
                                                       float(r["centre"]))
+        self._ranges = {str(k): [float(lo), float(hi)] for k, lo, hi
+                        in zip(r["labels"], r["range_min"], r["range_max"])}
         self._drawn += 1
 
     #**********#
@@ -166,6 +265,146 @@ class Source(source.Source):
             components={k: v[part] for k, v in t.components.items()},
             parameters={k: v[part] for k, v in t.parameters.items()})
 
+    #***********#
+    #   basis   #
+    #***********#
+    @property
+    def basis(self) -> Dict[str, np.ndarray]:
+        """The config's basis functions by its names, read once (see ``basis``)."""
+        if "_basis" not in self.__dict__:
+            self._basis = basis(self.config)
+        return self._basis
+
+    #************#
+    #   recipe   #
+    #************#
+    def recipe(self) -> Dict[str, Any]:
+        """How the spectra are made: the MRSsynMRS report filled from the config and the
+        ranges MRS-Sim really sampled, plus the config and the seed."""
+        c, r = self.config, self._ranges
+        reference = [m.strip() for m in c["wrt_metab"].split(",")]
+        ratios = c.get("wrt_metab_ratio") or [1 / len(reference)] * len(reference)
+        background = [m for m in c["metabolites"]
+                      if "mm" in m.lower() or "lip" in m.lower() or "mac" in m.lower()]
+        _, header = _basis_mat(c)
+
+        report = recipe_.report()
+        report["Experiment"]["Nucleus"] = "1H"
+
+        software = report["Software"]
+        software["Basis Set Simulation"]["Name"] = str(header.get("notes", "")) or None
+        software["Signal Model"].update({
+            "Name": f"MRS-Sim ({version()})",
+            "Repository (Link, DOI, or RRID)": "https://github.com/JohnLaMaster/MRS-Sim"})
+        software["Additional Code"].update({
+            "Name": f"MRSuite {provenance.mrsuite_version()}",
+            "Repository (Link, DOI, or RRID)": "https://github.com/julianmer/MRSuite",
+            "Purpose": "training source (mrsuite.simulators.mrs_sim)"})
+
+        sequence = report["Pulse Sequence"]
+        sequence.update({"Field Strength [T]": round(float(header["B0"]), 3),
+                         "Localization": str(header.get("pulse_sequence", "")) or None,
+                         "Spectral Width [Hz]": self.acquisition["bandwidth"],
+                         "Number of Points": self.acquisition["points"]})
+        sequence["Sequence Timing(s)"].update({"Repetition Time(s) [ms]": "not modelled",
+                                               "Echo Time(s) [ms]": c.get("TE")})
+        sequence["Water Suppression"]["Method"] = "none (see Artifacts - Residual Water)"
+
+        metabolites = report["Metabolites"]
+        metabolites.update({
+            "Distribution": "uniform within each range",
+            "Component dropout probability": c.get("drop_prob", 0.0),
+            "Units": f"amplitudes of the basis functions, relative to "
+                     f"{' + '.join(reference)} fixed at {ratios}",
+            "Concentration Ranges": {
+                m: (f"fixed at {ratios[reference.index(m)]:g} (reference)"
+                    if m in reference else r[m.lower()]) for m in c["metabolites"]},
+            "T2 Relaxation Ranges": ("not applied (Gaussian lineshape)"
+                                     if c["lineshape"] == "gaussian" else
+                                     {m: r[f"d:{m}"] for m in c["metabolites"]}),
+            "Metabolite-Level Frequency Shifts": ({m: r[f"f_shifts:{m}"]
+                                                   for m in c["metabolites"]}
+                                                  if c["fshift_i"] else "not applied")})
+        metabolites["Sources of Parameter Values"].update({
+            "Concentration Ranges (Link or DOI)":
+                "the config's 'parameters'; MRS-Sim's metabolites_database.json otherwise",
+            "T2 Relaxation Ranges (Link or DOI)":
+                "MRS-Sim's lineshape decay 'd' in exp(-(d + g*t)*t), not a T2 in ms",
+            "T1 Relaxation Ranges (Link or DOI)": "not modelled (fully relaxed)"})
+
+        components = report["Components"]
+        components.update({"Number Spectral Averages": 1,
+                           "Number of Acquisitions per Excitation": 1})
+        components["Macromolecule"].update({
+            "Available in Isolation": self.components,
+            "Simulated, Modeled, Experimental, or Mixture":
+                "basis functions, sampled like the metabolites" if background
+                else "none in the basis",
+            "Description": ", ".join(background) or None})
+        components["Spectral Baseline - nonMMBG"].update({
+            "Model Used (Equation, Description, or DOI)":
+                "MRS-Sim sample_baselines: bounded smoothed random splines (src/aux.py)",
+            "Available in Isolation": self.components,
+            "Applied": bool(c.get("baseline_cfg"))})
+        components["Noise"].update({
+            "Available in Isolation": self.components,
+            "Distribution": "additive circular Gaussian in the time domain",
+            "Amplitude Scaling": "set by the SNR range (see Data Quality)"})
+        components["B0 Map"].update({"B0 Map Model Used":
+                                     "MRS-Sim B0 inhomogeneities" if c["b0"] else None,
+                                     "Applied": bool(c["b0"])})
+        components["Tissue Segmentation"]["Applied"] = False
+
+        artifacts = report["Artifacts"]
+        artifacts["Zero-Order Phase"].update({"Phase Range": r["phi0"],
+                                              "Applied": bool(c["phi0"])})
+        artifacts["First-Order Phase"].update({"Phase Range": r["phi1"],
+                                               "PPM Reference [ppm]": c.get("ppm_ref"),
+                                               "Applied": bool(c["phi1"])})
+        artifacts["Frequency Shifts - Global"].update({"Frequency Shift Range": r["f_shift"],
+                                                       "Applied": bool(c["fshift_g"])})
+        water = c.get("resWater_cfg")
+        artifacts["Residual Water"].update({
+            "Model Used (Equation, Description, or DOI)":
+                "MRS-Sim sample_resWater: bounded random spline around the water (src/aux.py)",
+            "If Analytical, Parameter Ranges": copy.deepcopy(water),
+            "Available in Isolation": self.components,
+            "Applied": bool(water),
+            "Chemical Shift [ppm]": (water or {}).get("ppm_range"),
+            "Amplitude Scaling [a.u.]": (water or {}).get("scale")})
+        artifacts["Unsuppressed Water"]["Applied"] = False
+        artifacts["Lipid"]["Applied"] = bool(c.get("mm_lip"))
+        artifacts["Eddy Currents"].update({
+            "Model Used (Equation, Description, or DOI)":
+                "MRS-Sim first_order_eddy_currents (amplitude, time constant)",
+            "If Analytical, Parameter Ranges": {"Amplitude": r.get("ecc0"),
+                                                "Time Constant": r.get("ecc1")},
+            "Applied": bool(c["eddy"])})
+        artifacts["Out-of-Voxel"]["Applied"] = False
+        artifacts["Motion"]["Applied"] = False
+
+        quality = report["Data Quality"]
+        quality["Signal Noise Ratio Range [a.u.]"].update({
+            "Range": r["snr"],
+            "Metabolite-level SNRs recorded": "per spectrum: 'snr' in the truth parameters",
+            "Definition of SNR used": f"MRS-Sim's, on {c.get('snr_metab', c['wrt_metab'])}"})
+        quality["Linewidths"].update({
+            "Metabolite-level Linewidths recorded":
+                "per spectrum: 'd:<name>' and 'g:<name>' in the truth parameters",
+            "Reference Metabolite and Moiety": c["wrt_metab"]})
+
+        path = Path(c["PM_basis_set"])
+        if not path.is_absolute():
+            path = ROOT / "src" / "basis_sets" / path
+        return {"MRSsynMRS": report,
+                "generation": {"simulator": {"name": "MRS-Sim", "version": version(),
+                                             "repository":
+                                                 "https://github.com/JohnLaMaster/MRS-Sim"},
+                               "config": copy.deepcopy(c), "seed": self.seed,
+                               "chunk": self.chunk, "components": self.components,
+                               "basis": provenance.file_checksum(path),
+                               "sampled_ranges": dict(r)}}
+
 
 #*********#
 #   run   #
@@ -176,6 +415,10 @@ def _run(config: Dict[str, Any], n: int, seed: int, components: bool) -> Dict[st
         raise ValueError(f"MRS-Sim ({version()}) fails on several coils inside its own noise "
                          f"model (physics_model.py, generate_noise); simulate combined spectra, "
                          f"num_coils 1")
+    if os.path.isabs(config.get("PM_basis_set", "")):
+        # MRS-Sim resolves the basis inside its checkout ('./src/basis_sets/' + name)
+        config = {**config, "PM_basis_set": os.path.relpath(config["PM_basis_set"],
+                                                            ROOT / "src" / "basis_sets")}
     # MRS-Sim's baseline smoothing squeezes a batch of one away (aux.batch_smooth), so a
     # single spectrum is simulated as two and the second dropped
     count = max(n, 2)

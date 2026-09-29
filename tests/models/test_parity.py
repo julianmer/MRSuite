@@ -18,6 +18,10 @@
 #   imports   #
 #*************#
 import os
+
+os.environ.setdefault("KERAS_BACKEND", "torch")         # the loss parity runs keras.ops
+os.environ.setdefault("KERAS_TORCH_DEVICE", "cpu")      # MPS has no float64
+
 from pathlib import Path
 
 import numpy as np
@@ -103,6 +107,40 @@ def test_same_output_as_the_original(kind):
 
     assert ours.shape == theirs.shape
     np.testing.assert_allclose(ours, theirs, rtol=1e-5, atol=1e-6 * np.abs(theirs).max())
+
+
+#******************#
+#   spectra loss   #
+#******************#
+@needs_reference
+def test_same_spectra_loss_as_the_original():
+    """The 'spectra' objective is the original's self-supervised 'mse_specs',
+    re-expressed: the same basis and axes give the same number."""
+    x = spectra(_spectra(8).list())
+    theta = 0.1 * np.random.default_rng(0).standard_normal((8, len(MLP_METABOLITES) + 11))
+    folder = Path(scratch("mrsuite_parity_"))
+    np.save(folder / "input.npy", x)
+    np.save(folder / "theta.npy", theta)
+    convert.run_reference(MLP, {**JOBS["mlp"], "task": "loss", "loss": "mse_specs",
+                                "input": str(folder / "input.npy"),
+                                "theta": str(folder / "theta.npy"),
+                                "output": str(folder / "out.npz")})
+    with np.load(folder / "out.npz") as result:
+        theirs = {key: result[key] for key in result.files}
+
+    names = [str(name) for name in theirs["names"]]
+    mlp = MLP(names, int(theirs["first"]), int(theirs["last"]), MLP_ACQUISITION)
+
+    class Stub:
+        basis = dict(zip(names, theirs["basis"].T))
+
+    mlp._voigt = mlp._signal_model(Stub())
+    np.testing.assert_allclose(mlp._voigt.t.numpy(), theirs["t"], rtol=1e-12)
+    np.testing.assert_allclose(mlp._voigt.f.numpy(), theirs["f"], rtol=1e-12)
+
+    ours = mlp.loss(torch.from_numpy(x), torch.from_numpy(theta), "spectra")
+
+    np.testing.assert_allclose(float(ours), float(theirs["loss"].mean()), rtol=1e-6)
 
 
 #***************#

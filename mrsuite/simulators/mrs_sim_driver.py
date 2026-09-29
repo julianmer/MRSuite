@@ -37,7 +37,7 @@ from src.mainFcns import prepare
 #************#
 #   sample   #
 #************#
-def sample(cfg, pm, ind, names, n):
+def sample(cfg, pm, ind, columns, names, n):
     """Every parameter drawn uniformly within the config's ranges, as MRS-Sim scales them.
 
     The reference metabolites are fixed at their ratios, since MRS-Sim states every
@@ -51,7 +51,7 @@ def sample(cfg, pm, ind, names, n):
     reference = cfg.wrt_metab.split(",")
     ratios = getattr(cfg, "wrt_metab_ratio", None) or [1 / len(reference)] * len(reference)
     for name, ratio in zip(reference, ratios):
-        params[:, ind[name.lower()]] = ratio
+        params[:, columns[name.lower()]] = ratio
 
     background = [i for i, m in enumerate(names) if "mm" in m.lower() or "lip" in m.lower()]
     metabolites = [i for i in range(len(names)) if i not in background]
@@ -66,7 +66,7 @@ def sample(cfg, pm, ind, names, n):
 
     for i, name in enumerate(names):
         if name not in reference:
-            params[torch.rand(n) < cfg.drop_prob, ind[name.lower()]] = 0
+            params[torch.rand(n) < cfg.drop_prob, columns[name.lower()]] = 0
 
     off = {"b0": ["b0", "b0_dir"], "eddy": ["ecc"], "fshift_g": ["f_shift"],
            "fshift_i": ["f_shifts"], "noise": ["snr"], "phi0": ["phi0"], "phi1": ["phi1"]}
@@ -87,13 +87,13 @@ def main(job):
     with open(path, "w") as fh:
         json.dump({**job["config"], "totalEntries": job["n"]}, fh)
     cfg, water_cfg, baseline_cfg, pm, l, ind, p, n = prepare(path)
-    # every basis function the model sums, in its order; prepare trims cfg.metabolites to
-    # the metabolites alone, but the macromolecules and lipids are simulated all the same
+    # every basis function the model sums, in its order, from the model itself: prepare
+    # adds 'mac' and 'lip' group keys to ind, which clobber a basis function of that name
     shown = {m.lower(): m for m in job["config"]["metabolites"]}
-    order = sorted((v, k) for k, v in ind.items() if isinstance(v, int) and v in ind["metabolites"])
-    names = [shown.get(k, k) for _, k in order]
+    names = [shown.get(m.lower(), m) for m in pm._metab[:len(ind["metabolites"])]]
+    columns = {m.lower(): i for m, i in zip(names, ind["metabolites"])}
 
-    params = sample(cfg, pm, ind, names, n)
+    params = sample(cfg, pm, ind, columns, names, n)
     original = params.clone()               # forward scales some in place
 
     kept = {}
@@ -159,13 +159,16 @@ def main(job):
         elif key in ("b0_dir", "ecc", "coil_snr", "coil_sens", "coil_fshift", "coil_phi0"):
             for j, i in enumerate(where):
                 labels[i] = f"{key}{j}"
+    for name, i in columns.items():
+        labels[i] = name                    # ind's 'mac'/'lip' keys may hide one
 
     np.savez(job["result"], data=noisy, names=np.array(list(components)),
              labels=np.array(labels),
              components=np.stack(list(components.values()), 1) if job["components"] else [],
              metabolites=np.array(names),
-             concentrations=original[:, [ind[m.lower()] for m in names]].numpy(),
+             concentrations=original[:, list(ind["metabolites"])].numpy(),
              parameters=original.numpy(), snr=original[:, ind["snr"]].numpy(),
+             range_min=pm.min_ranges.numpy().ravel(), range_max=pm.max_ranges.numpy().ravel(),
              dwell=float(np.asarray(pm.header["dwelltime"]).ravel()[0]),
              frequency=float(np.asarray(pm.header["carrier_frequency"]).ravel()[0]),
              centre=float(np.asarray(pm.header["centerFreq"]).ravel()[0]))

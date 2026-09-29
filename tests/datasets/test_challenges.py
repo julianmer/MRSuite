@@ -27,6 +27,7 @@ from mrsuite import r
 from mrsuite.core.pipeline import Pipeline
 from mrsuite.core.result import FitResult
 from mrsuite.datasets import challenge2016, mrsi_challenge
+from mrsuite.simulators import mrs_sim
 
 from tests.bridges.test_lcmodel import needs_lcmodel
 from tests.conftest import needs_octave
@@ -39,6 +40,8 @@ needs_2016 = pytest.mark.skipif(not challenge2016.BASIS.exists(),
 needs_mrsi = pytest.mark.skipif(
     not (mrsi_challenge.DATA_DIR / MRSI_SUBJECT / f"{MRSI_SUBJECT}_all.mat").exists(),
     reason=f"MRSI challenge {MRSI_SUBJECT} not downloaded")
+needs_sim = pytest.mark.skipif(not (mrs_sim.ROOT / "src").exists(),
+                               reason="MRS-Sim submodule not checked out")
 
 
 #***************#
@@ -166,6 +169,71 @@ def test_the_mrsi_basis_round_trips_to_the_release_basis(tmp_path):
         got = back.original_basis_array[:len(want), back.names.index(name)]
         gain = np.vdot(want, got) / np.vdot(want, want)
         assert np.linalg.norm(got - gain * want) / np.linalg.norm(got) < 1e-4, name
+
+
+#*********************#
+#   simulation grid   #
+#*********************#
+def _assert_simulates_the_challenge(config, points, bandwidth, frequency, centre):
+    """The config simulates on the challenge's own grid, in NIfTI-MRS' orientation, and
+    the truth stays within the stated ranges."""
+    quiet = {**config, "phi0": False, "phi1": False, "fshift_g": False, "fshift_i": False,
+             "b0": False, "eddy": False}
+    data, truth = mrs_sim.simulate(quiet, n=2, seed=0)
+    item = data.list()[0]
+
+    assert item.shape[3] == points
+    assert 1 / item.dwelltime == pytest.approx(bandwidth, rel=1e-6)
+    assert item.spectrometer_frequency[0] == pytest.approx(frequency, abs=0.01)
+    assert item.SpecFreqChemShift == pytest.approx(centre)
+    assert set(truth.concentrations) == set(config["metabolites"])
+
+    reference = config["wrt_metab"].split(",")
+    for name, values in truth.concentrations.items():
+        if name in reference:
+            assert np.allclose(values, config["wrt_metab_ratio"][reference.index(name)])
+        else:
+            low, high = config["parameters"][name.lower()]
+            assert (low <= values).all() and (values <= high).all(), name
+
+    from fsl_mrs.utils.misc import calculateAxes
+    spectrum = np.fft.fftshift(np.fft.fft(truth.components["NAA"][0]))
+    axis = calculateAxes(1 / item.dwelltime, item.spectrometer_frequency[0], points,
+                         item.SpecFreqChemShift)["ppmshift"]
+    assert axis[np.argmax(np.abs(spectrum))] == pytest.approx(2.01, abs=0.02)
+
+
+#*****************#
+#   config 2016   #
+#*****************#
+@needs_2016
+@needs_sim
+def test_the_2016_config_simulates_on_the_challenge_grid(tmp_path):
+    config = challenge2016.mrs_sim_config(folder=tmp_path)
+
+    assert len(config["metabolites"]) == 21 and "NAA" in config["metabolites"]
+    assert config["wrt_metab"] == "Cr,PCr"
+    assert 0 < config["parameters"]["naa"][1] < 5                     # from the ground truth
+
+    _assert_simulates_the_challenge(config, points=2048, bandwidth=4000.0,
+                                    frequency=123.26, centre=4.65)
+
+
+#*****************#
+#   config mrsi   #
+#*****************#
+@needs_mrsi
+@needs_sim
+def test_the_mrsi_config_simulates_on_the_challenge_grid(tmp_path):
+    config = mrsi_challenge.mrs_sim_config(folder=tmp_path, subjects=(MRSI_SUBJECT,))
+
+    assert set(config["metabolites"]) == (set(mrsi_challenge.NAMES.values())
+                                          | set(mrsi_challenge.MACROMOLECULES))
+    assert config["wrt_metab"] == "Cr,Cr39"
+    assert 1 < config["parameters"]["naa"][1] < 3                     # from the metabolite maps
+
+    _assert_simulates_the_challenge(config, points=384, bandwidth=1 / 0.00083,
+                                    frequency=123.24, centre=4.7)
 
 
 #**************#

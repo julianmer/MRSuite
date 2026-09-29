@@ -76,10 +76,15 @@ class Source:
             and 'centre' (ppm), as a model states what it was trained on.
         dim_tags (List[Optional[str]]): Tags of the dimensions after the points, as
             NIfTI-MRS names them (e.g. ['DIM_COIL']); empty for single spectra.
+        basis (Optional[Dict[str, np.ndarray]]): The basis the spectra are built from,
+            each metabolite's complex FID on the acquisition's grid - what a
+            self-supervised objective fits the spectra with. None if the source has none
+            to give.
     """
 
     acquisition: Dict[str, float] = {}
     dim_tags: List[Optional[str]] = []
+    basis: Optional[Dict[str, np.ndarray]] = None
 
     #**********#
     #   draw   #
@@ -87,6 +92,15 @@ class Source:
     def draw(self, n: int) -> Tuple[np.ndarray, Truth]:
         """The next ``n`` spectra as (n, points, *dims) complex FIDs, and their truth."""
         raise NotImplementedError
+
+    #************#
+    #   recipe   #
+    #************#
+    def recipe(self) -> Optional[Dict[str, Any]]:
+        """How the spectra are made, as the MRSsynMRS JSON sidecar (see
+        ``mrsuite.training.recipe``); a simulator source fills it, and ``learn`` writes it
+        beside every checkpoint. None if the source cannot describe itself."""
+        return None
 
     #***********#
     #   batch   #

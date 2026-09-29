@@ -135,6 +135,27 @@ def test_save_and_load_keep_the_model(mlp, tmp_path):
     assert [r.conc() for r in loaded(data)] == [r.conc() for r in mlp(data)]
 
 
+#**********#
+#   load   #
+#**********#
+def test_a_checkpoint_loads_by_name_alone(mlp, tmp_path):
+    """Every save records its class, so mrsuite.models.load needs only the name."""
+    import mrsuite.models
+
+    mlp.save_pretrained(tmp_path)
+    with open(tmp_path / "config.json") as fh:
+        assert json.load(fh)["model"] == "mrsuite.models.mlp.MLP"
+
+    loaded = mrsuite.models.load(tmp_path)
+    assert type(loaded) is MLP and loaded.fingerprint() == mlp.fingerprint()
+
+    stranger = tmp_path / "stranger"
+    stranger.mkdir()
+    (stranger / "config.json").write_text('{"model": "os.path.join"}')
+    with pytest.raises(ValueError, match="MRSuite model"):
+        mrsuite.models.load(stranger)
+
+
 #****************#
 #   decomposes   #
 #****************#

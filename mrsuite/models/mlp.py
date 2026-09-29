@@ -17,7 +17,7 @@
 #   imports   #
 #*************#
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import torch
@@ -58,7 +58,7 @@ class MLP(TorchModel):
     """
 
     repo = Path(__file__).resolve().parents[2] / "externals" / "ood-robust-mrs"
-    objectives = ("concentrations",)
+    objectives = ("concentrations", "spectra")
     signal_parameters = (["gamma", "sigma", "eps", "phi0", "phi1"]
                          + [f"baseline{i}" for i in range(6)])
 
@@ -110,11 +110,26 @@ class MLP(TorchModel):
                                      concentrations=concentrations, raw=parameters))
         return results
 
+    #***********#
+    #   learn   #
+    #***********#
+    def learn(self, source: Any, steps: int, objective: Optional[str] = None,
+              **kwargs) -> List[float]:
+        """See Model.learn. 'concentrations' is supervised; 'spectra' is the original's
+        self-supervised objective, which needs only the source's spectra and basis."""
+        objective = objective or self.objectives[0]
+        if objective == "spectra":
+            self._voigt = self._signal_model(source)
+        return super().learn(source, steps, objective=objective, **kwargs)
+
     #************#
     #   target   #
     #************#
     def target(self, truth, data, objective: str) -> np.ndarray:
-        """The concentrations of the model's metabolites, which its first outputs estimate."""
+        """What the output is held to: the concentrations of the model's metabolites, or
+        for 'spectra' the spectra themselves, which the output must rebuild."""
+        if objective == "spectra":
+            return spectra(data).astype(np.float32)
         missing = [m for m in self.metabolites if m not in truth.concentrations]
         if missing:
             raise KeyError(f"MLP learns concentrations; the source gives none for {missing}")
@@ -125,13 +140,52 @@ class MLP(TorchModel):
     #   loss   #
     #**********#
     def loss(self, target, out, objective: str):
-        """The original's concentration loss ('mae_conc'): the mean absolute error on
-        non-negative concentrations, macromolecules left out."""
+        """The original's losses: 'mae_conc', the mean absolute error on non-negative
+        concentrations with macromolecules left out, and for 'spectra' 'mse_specs', the
+        squared error between the spectrum and the signal model's spectrum for the
+        estimated parameters, over the model's window."""
         from keras import ops
+        if objective == "spectra":
+            if out.device.type == "meta":       # Keras' build pass carries no data, and
+                return ops.sum(out) * 0.0       # would strand the signal model on 'meta'
+            spec = self._voigt.forward(out)                     # complex (batch, points)
+            spec = torch.stack((spec.real, spec.imag), dim=1).to(target.dtype)
+            error = ops.square(spec[:, :, self.first:self.last]
+                               - target[:, :, self.first:self.last])
+            return ops.mean(ops.sum(error, axis=1))     # real + imaginary, as the original
         kept = ops.convert_to_tensor([0.0 if "mm" in m.lower() or "mac" in m.lower() else 1.0
                                       for m in self.metabolites])
         estimate = ops.maximum(out[:, :len(self.metabolites)], 0)
         return ops.mean(ops.abs(ops.maximum(target, 0) - estimate) * kept)
+
+    #******************#
+    #   signal model   #
+    #******************#
+    def _signal_model(self, source: Any) -> Any:
+        """The original VoigtModel over the source's basis, which 'spectra' fits.
+
+        The basis comes as the source gives it - NIfTI-MRS' orientation, no conjugation
+        heuristics - with the time and frequency axes built as the original's basis
+        object builds them.
+        """
+        if not source.basis:
+            raise ValueError("MLP learns 'spectra' by fitting the source's basis; this "
+                             "source gives none")
+        missing = [m for m in self.metabolites if m not in source.basis]
+        if missing:
+            raise KeyError(f"MLP fits its own metabolites; the source's basis lacks "
+                           f"{missing}")
+        basis = np.stack([np.asarray(source.basis[m], complex) for m in self.metabolites],
+                         axis=1)
+        points, bandwidth = int(self.acquisition["points"]), self.acquisition["bandwidth"]
+        if len(basis) != points:
+            raise ValueError(f"the source's basis has {len(basis)} points, the model's "
+                             f"spectra {points}")
+        dwell = 1 / bandwidth
+        t = np.arange(dwell, dwell * (points + 1), dwell)[:points]
+        f = np.arange(-bandwidth / 2, bandwidth / 2, bandwidth / points)[:points]
+        return load_file(self.repo / "simulation" / "sigModels.py").VoigtModel(
+            basis=basis, first=self.first, last=self.last, t=t, f=f)
 
     #*************#
     #   runtime   #

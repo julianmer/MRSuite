@@ -17,6 +17,7 @@
 #   imports   #
 #*************#
 import json
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -24,9 +25,13 @@ import pytest
 from fsl_mrs.utils.misc import calculateAxes
 
 from mrsuite.simulators import mrs_sim
+from mrsuite.training import recipe
 
 pytestmark = pytest.mark.skipif(not (mrs_sim.ROOT / "src").exists(),
                                 reason="MRS-Sim submodule not checked out")
+
+BASIS_2016 = (Path(__file__).resolve().parents[2] / "data" / "2016_fitting_challenge"
+              / "basisset_LCModel" / "press3T_30ms.BASIS")
 
 
 #***************#
@@ -107,6 +112,66 @@ def test_several_coils_are_refused_with_the_reason():
 
     with pytest.raises(ValueError, match="several coils"):
         mrs_sim.simulate(config, n=1)
+
+
+#**************#
+#   compiled   #
+#**************#
+@pytest.mark.skipif(not BASIS_2016.exists(), reason="challenge submodule not checked out")
+def test_a_dot_basis_compiles_to_mrs_sims_own_mat(tmp_path):
+    """A .BASIS becomes the basis .mat MRS-Sim reads: the same names as complex FIDs cut
+    to the data's grid, in NIfTI-MRS' orientation (NAA at 2.01 ppm), header included."""
+    mat = tmp_path / "challenge.mat"
+    mrs_sim.compile_basis(BASIS_2016, mat, te=30.0, centre=4.65, points=2048)
+
+    fids = mrs_sim.basis({"PM_basis_set": str(mat), "metabolites": ["NAA", "Cr"]})
+    assert set(fids) == {"NAA", "Cr"}
+    naa = fids["NAA"]
+    assert naa.shape == (2048,) and np.iscomplexobj(naa)
+
+    _, header = mrs_sim._basis_mat({"PM_basis_set": str(mat)})
+    assert int(header["Ns"]) == 2048 and float(header["centerFreq"]) == 4.65
+    axis = (np.fft.fftshift(np.fft.fftfreq(2048, 1 / float(header["spectralwidth"])))
+            / float(header["carrier_frequency"]) + 4.65)
+    peak = axis[np.argmax(np.abs(np.fft.fftshift(np.fft.fft(naa))))]
+    assert peak == pytest.approx(2.01, abs=0.02)
+
+    with pytest.raises(KeyError, match="has no"):
+        mrs_sim.basis({"PM_basis_set": str(mat), "metabolites": ["Nope"]})
+    with pytest.raises(ValueError, match="never padded"):
+        mrs_sim.compile_basis(BASIS_2016, tmp_path / "no.mat", te=30.0, points=1 << 20)
+
+
+#************#
+#   recipe   #
+#************#
+def test_a_source_states_its_recipe(tmp_path):
+    """The recipe is the filled MRSsynMRS report - the ranges MRS-Sim really sampled -
+    plus the config and the seed, and it renders as the model card's table."""
+    config = mrs_sim.config()
+    source = mrs_sim.Source(config, chunk=2)
+
+    filled = source.recipe()
+    report = filled["MRSsynMRS"]
+    assert list(report) == ["Experiment", "Software", "Pulse Sequence", "Metabolites",
+                            "Components", "Artifacts", "Data Quality"]
+    assert report["Pulse Sequence"]["Number of Points"] == source.acquisition["points"]
+    ranges = report["Metabolites"]["Concentration Ranges"]
+    assert set(ranges) == set(config["metabolites"])
+    assert ranges["NAA"] == config["parameters"]["naa"]        # what was set is what ran
+    assert "fixed" in ranges["Cr"] and "fixed" in ranges["PCr"]
+    assert report["Artifacts"]["Residual Water"]["Applied"] is True
+    snr = filled["generation"]["sampled_ranges"]["snr"]
+    assert len(snr) == 2 and snr[0] < snr[1]
+    assert filled["generation"]["seed"] == 0 and filled["generation"]["basis"]["sha256"]
+
+    assert set(config["metabolites"]) <= set(source.basis)
+    assert len(source.basis["NAA"]) == source.acquisition["points"]
+
+    text = recipe.table(filled)
+    assert "| **Data Quality** |" in text and "NAA" in text
+    path = recipe.save(filled, tmp_path / "recipe.json")
+    assert json.loads(Path(path).read_text())["generation"]["seed"] == 0
 
 
 #************#

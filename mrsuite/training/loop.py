@@ -17,12 +17,13 @@
 #*************#
 #   imports   #
 #*************#
+import copy
 import os
 import sys
 from pathlib import Path
 from typing import Any, List, Optional
 
-from mrsuite.training import recipe as recipe_
+from mrsuite.models.base import classpath
 
 
 #**************#
@@ -66,7 +67,13 @@ def learn(model: Any, source: Any, steps: int, objective: str, batch: int, lr: f
     every = every or steps
     if steps % every:
         raise ValueError(f"every={every} does not divide steps={steps}")
-    recipe = source.recipe() if to else None
+    made = copy.deepcopy(source.recipe() or {})
+    # where the weights start from: the model loaded, and how it was trained so far
+    before = {"source": getattr(model, "source", None),
+              "training": (model.recipe or {}).get("training")}
+    training = {"model": classpath(type(model)), "objective": objective, "steps": 0,
+                "batch": batch, "learning_rate": lr,
+                "from": before if any(before.values()) else None}
 
     class Stream(keras.utils.PyDataset):
         """Endless batches, prepared as the model prepares real data."""
@@ -80,21 +87,22 @@ def learn(model: Any, source: Any, steps: int, objective: str, batch: int, lr: f
             return model.prepare(data), model.target(truth, data, objective)
 
     class Keep(keras.callbacks.Callback):
-        """The model as it stands after every ``every`` steps, loadable by from_pretrained,
-        each with the recipe that made its data, when the source gives one."""
+        """The recipe kept up with every step learned, so it describes the weights even
+        when learning stops early, and with ``to`` the model as it stands after every
+        ``every`` steps, loadable by from_pretrained, recipe and all."""
+
+        def on_train_batch_end(self, index, logs=None):
+            if not training["steps"]:   # the weights are no longer the ones loaded
+                model.recipe, model.source = {**made, "training": training}, None
+            training["steps"] += 1
 
         def on_epoch_end(self, epoch, logs=None):
-            folder = Path(to) / f"step-{(epoch + 1) * every}"
-            model.save_pretrained(folder)
-            if recipe:
-                training = {"model": f"{type(model).__module__}.{type(model).__qualname__}",
-                            "objective": objective, "steps": (epoch + 1) * every,
-                            "batch": batch, "learning_rate": lr}
-                recipe_.save({**recipe, "training": training}, folder / "recipe.json")
+            if to:
+                model.save_pretrained(Path(to) / f"step-{training['steps']}")
 
     trainable = model.as_keras(keras)
     trainable.compile(optimizer=keras.optimizers.Adam(learning_rate=lr),
                       loss=lambda target, out: model.loss(target, out, objective))
     history = trainable.fit(Stream(), steps_per_epoch=every, epochs=steps // every,
-                            shuffle=False, callbacks=[Keep()] if to else [])
+                            shuffle=False, callbacks=[Keep()])
     return history.history["loss"]

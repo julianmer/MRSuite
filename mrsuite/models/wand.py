@@ -41,7 +41,7 @@ _SWAP = threading.Lock()
 # Decomposes a spectrum into its metabolites, baseline and artifacts in the wavelet domain.        #
 #                                                                                                  #
 #**************************************************************************************************#
-class WAND(TorchModel):
+class WAND(TorchModel, paper_url="https://doi.org/10.1002/nbm.70038"):
     """Decomposes a spectrum into its metabolites, baseline and artifacts in the wavelet domain.
 
     The spectrum's window from ``first`` to ``last`` is taken to scalograms of its real

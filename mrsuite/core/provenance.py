@@ -91,6 +91,24 @@ def file_checksum(path: Any) -> Dict[str, str]:
             "sha256": _sha256(os.path.abspath(path), stat.st_mtime_ns, stat.st_size)}
 
 
+#**************#
+#   portable   #
+#**************#
+def portable(path: Any) -> str:
+    """A path as it can be shared: relative to MRSuite's checkout when it lies inside it,
+    else the file's name alone - never where it lies on this machine."""
+    path = Path(os.path.abspath(path))
+    return path.relative_to(REPO).as_posix() if path.is_relative_to(REPO) else path.name
+
+
+#*******************#
+#   portable file   #
+#*******************#
+def portable_file(path: Any) -> Dict[str, str]:
+    """A file as a shared record gives it: its portable path and the SHA-256 of its bytes."""
+    return {**file_checksum(path), "path": portable(path)}
+
+
 #************#
 #   sha256   #
 #************#

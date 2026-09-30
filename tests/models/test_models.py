@@ -131,7 +131,7 @@ def test_save_and_load_keep_the_model(mlp, tmp_path):
 
     assert loaded.fingerprint() == mlp.fingerprint()
     assert loaded.metabolites == mlp.metabolites and loaded.acquisition == mlp.acquisition
-    assert loaded.source["name"] == str(tmp_path)
+    assert loaded.source["name"] == tmp_path.name       # a folder by its portable path
     data = _spectra(2)
     assert [r.conc() for r in loaded(data)] == [r.conc() for r in mlp(data)]
 
@@ -155,6 +155,76 @@ def test_a_checkpoint_loads_by_name_alone(mlp, tmp_path):
     (stranger / "config.json").write_text('{"model": "os.path.join"}')
     with pytest.raises(ValueError, match="MRSuite model"):
         mrsuite.models.load(stranger)
+
+
+#************#
+#   recipe   #
+#************#
+def test_the_recipe_and_its_card_travel_with_the_model(tmp_path):
+    """A save writes the recipe and a card with its MRSsynMRS table; a load reads it back."""
+    import mrsuite.models
+    from mrsuite.training import recipe
+
+    model = MLP(MLP_METABOLITES, 602, 957, MLP_ACQUISITION)
+    model.recipe = {"MRSsynMRS": {"Experiment": {"ID": "toy", "Nucleus": "1H"}},
+                    "training": {"objective": "concentrations", "steps": 3}}
+    model.save_pretrained(tmp_path / "trained")
+
+    files = {p.name for p in (tmp_path / "trained").iterdir()}
+    assert files == {"config.json", "model.safetensors", "recipe.json", "README.md"}
+    card = (tmp_path / "trained" / "README.md").read_text()
+    assert recipe.table(model.recipe) in card and '"steps": 3' in card
+    assert f'mrsuite.models.load("{tmp_path / "trained"}")' in card
+    assert model.fingerprint() in card and "https://arxiv.org/abs/2511.23135" in card
+    assert mrsuite.models.load(tmp_path / "trained").recipe == model.recipe
+
+    # saved again without one, into the same folder: nothing of the first save stays
+    model.recipe = None
+    model.save_pretrained(tmp_path / "trained")
+    assert not (tmp_path / "trained" / "recipe.json").exists()
+    assert "Not recorded." in (tmp_path / "trained" / "README.md").read_text()
+    assert mrsuite.models.load(tmp_path / "trained").recipe is None
+
+
+#**********#
+#   push   #
+#**********#
+def test_a_push_sends_config_weights_recipe_and_card(monkeypatch, tmp_path):
+    """One commit with all four, the card loading the model by the repo's full name, and
+    no recipe left behind from an earlier push."""
+    from types import SimpleNamespace
+
+    from huggingface_hub import HfApi, ModelCard
+
+    sent = {}
+
+    def create_repo(self, repo_id, **kwargs):          # the Hub adds the account's namespace
+        return SimpleNamespace(repo_id=repo_id if "/" in repo_id else f"someone/{repo_id}")
+
+    def upload_folder(self, *, repo_id, folder_path, delete_patterns=None, **kwargs):
+        sent.update(repo=repo_id, files={p.name for p in Path(folder_path).iterdir()},
+                    card=(Path(folder_path) / "README.md").read_text(), deleted=delete_patterns)
+        return "commit"
+
+    monkeypatch.setattr(HfApi, "create_repo", create_repo)
+    monkeypatch.setattr(HfApi, "upload_folder", upload_folder)
+    model = MLP(MLP_METABOLITES, 602, 957, MLP_ACQUISITION)
+    model.recipe = {"training": {"steps": 3}}
+    model.push_to_hub("mlp-test", model_card_kwargs={"license": "apache-2.0"})
+
+    assert sent["repo"] == "someone/mlp-test"
+    assert sent["files"] == {"config.json", "model.safetensors", "recipe.json", "README.md"}
+    assert 'mrsuite.models.load("someone/mlp-test")' in sent["card"]
+    assert not sent["deleted"]
+    # the licence is the weights', given with the push, never the class'
+    assert ModelCard(sent["card"]).data.license == "apache-2.0"
+
+    model.recipe = None
+    model.save_pretrained(tmp_path / "local", push_to_hub=True, repo_id="someone/other")
+    assert sent["repo"] == "someone/other"
+    assert 'mrsuite.models.load("someone/other")' in sent["card"]
+    assert sent["deleted"] == ["recipe.json"]       # none left from an earlier push
+    assert ModelCard(sent["card"]).data.license is None
 
 
 #**********************#
@@ -269,3 +339,5 @@ def test_any_framework_fits_the_interface(tmp_path):
 
     assert [r.metabolites for r in results] == [["A", "B"]] * 3
     assert json.loads(results[0].provenance[-1]["Details"])["weights"] == model.fingerprint()
+    # mrsuite.models.load takes MRSuite's own classes only, so the card uses the class
+    assert f'NumpyModel.from_pretrained("{tmp_path}")' in (tmp_path / "README.md").read_text()

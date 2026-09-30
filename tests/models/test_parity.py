@@ -22,12 +22,14 @@ import os
 os.environ.setdefault("KERAS_BACKEND", "torch")         # the loss parity runs keras.ops
 os.environ.setdefault("KERAS_TORCH_DEVICE", "cpu")      # MPS has no float64
 
+import hashlib
 from pathlib import Path
 
 import numpy as np
 import pytest
 import torch
 
+from mrsuite.core import provenance
 from mrsuite.datasets import challenge2016
 from mrsuite.models import MLP, WAND
 from mrsuite.models import convert
@@ -159,3 +161,10 @@ def test_same_output_with_the_published_weights(kind, checkpoint):
     ours, theirs = _parity(model, kind)
 
     np.testing.assert_allclose(ours, theirs, rtol=1e-5, atol=1e-6 * np.abs(theirs).max())
+    # the recipe says where the weights came from
+    training = model.recipe["training"]
+    assert training["checkpoint"] == {
+        "path": provenance.portable(CHECKPOINTS / checkpoint),
+        "sha256": hashlib.sha256((CHECKPOINTS / checkpoint).read_bytes()).hexdigest()}
+    assert training["job"] == {**JOBS[kind], "basis": provenance.portable(JOBS[kind]["basis"])}
+    assert training["converted with"][cls.repo.name]

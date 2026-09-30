@@ -208,6 +208,7 @@ BODIES = {
     "slate-orange":  ("#4E5C6E", ("#F2B33D", "#4FC3D9", "#E8703A")),
     "slate-blue":    ("#4E5C6E", ("#F2C14C", "#4FC3D9", "#2E5E8C")),
     "slate-cream":   ("#4E5C6E", ("#4C6FE0", "#12B3B8", "#F5F2E8")),
+    "slate-white":   ("#4E5C6E", ("#4C6FE0", "#12B3B8", "#FFFFFF")),
     "steel-teal":    ("#5A6673", ("#1FA8A0", "#2E5E8C", "#F2C14C")),
     "steel-lime":    ("#5A6673", ("#8CC63F", "#2E8B7A", "#F2B33D")),
     "denim-amber":   ("#41556E", ("#3FB6CE", "#7FB069", "#F2B33D")),

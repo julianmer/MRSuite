@@ -104,17 +104,17 @@ def fit(data: Any, basis: Optional[str] = None, water: Any = None, te: Optional[
         basis: An LCModel ``.basis``, as every fitter takes. TARQUIN does not resample:
             its sampling frequency must match the data's. By default TARQUIN rescales an
             LCModel basis to its sIns or Scyllo signal and stops if it has neither;
-            ``{"rescale_lcm_basis": False}`` turns that off. None uses TARQUIN's internal
-            basis ``1h_brain`` (TARQUIN's own default is ``1h_brain_glth``), simulated for
-            the sequence at the data's echo time.
+            ``{"rescale_lcm_basis": False}`` turns that off. None uses TARQUIN's default
+            internal basis, ``1h_brain_glth``, simulated for the sequence at the data's
+            echo time; ``{"int_basis": "1h_brain"}`` picks another.
         water: Unsuppressed reference, one per spectrum, enabling TARQUIN's water
             scaling. With it the concentrations are mM and filed under 'molarity';
             without it they are unreferenced and filed under 'raw'.
         te (Optional[float]): Echo time in seconds; read from the header when absent.
         opts (Optional[dict]): TARQUIN's command line options by name, e.g.
-            ``{"pul_seq": "slaser", "max_iters": 50}``. They override the defaults:
-            ``pul_seq`` press, and ``start_pnt`` 1, since these are processed FIDs with no
-            dead-time samples to skip.
+            ``{"pul_seq": "slaser", "max_iters": 50}``; anything not given is TARQUIN's
+            own default - PRESS, and a start point it picks itself, skipping about the
+            first 10 ms of the FID to keep broad baseline out of the fit.
         workers (int): Processes to spread a batch over (see ``mrsuite.core.parallel``).
 
     Returns:
@@ -136,8 +136,8 @@ def fit(data: Any, basis: Optional[str] = None, water: Any = None, te: Optional[
             inputs += ["--input_w", _dpt(water, echo, os.path.join(folder, "w.dpt"))]
         out = os.path.join(folder, "result.txt")
         cmd = [_executable(), *inputs, "--format", "dpt", "--output_txt", out]
-        cmd += ["--int_basis", "1h_brain"] if basis is None else ["--basis_lcm", str(basis)]
-        for key, value in {"pul_seq": "press", "start_pnt": 1, **(opts or {})}.items():
+        cmd += [] if basis is None else ["--basis_lcm", str(basis)]
+        for key, value in (opts or {}).items():
             # TARQUIN reads only the exact string 'true' as true
             cmd += [f"--{key}", str(value).lower() if isinstance(value, bool) else str(value)]
         proc = subprocess.run(cmd, capture_output=True, text=True)

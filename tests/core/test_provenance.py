@@ -17,6 +17,7 @@
 #   imports   #
 #*************#
 import json
+from pathlib import Path
 
 import numpy as np
 
@@ -68,6 +69,21 @@ def test_a_file_is_recorded_by_its_bytes(tmp_path):
 
     assert before["path"] == after["path"] == str(path)
     assert before["sha256"] != after["sha256"] == provenance.file_checksum(path)["sha256"]
+
+
+#**************#
+#   portable   #
+#**************#
+def test_a_shared_path_never_says_where_it_lies_on_this_machine(tmp_path):
+    """Inside the checkout relative to it, anywhere else by the file's name alone."""
+    inside = provenance.REPO / "data" / "basis_sets" / "some.BASIS"
+    (tmp_path / "some.BASIS").write_text("one")
+
+    assert provenance.portable(inside) == str(Path("data") / "basis_sets" / "some.BASIS")
+    assert provenance.portable(tmp_path / "some.BASIS") == "some.BASIS"
+    assert provenance.portable_file(tmp_path / "some.BASIS") == {
+        "path": "some.BASIS",
+        "sha256": provenance.file_checksum(tmp_path / "some.BASIS")["sha256"]}
 
 
 #****************#

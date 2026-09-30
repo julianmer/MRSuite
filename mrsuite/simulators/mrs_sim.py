@@ -491,15 +491,36 @@ class Source(source.Source):
         path = Path(c["PM_basis_set"])
         if not path.is_absolute():
             path = ROOT / "src" / "basis_sets" / path
+        # files as they can be shared, never where they lie on this machine
+        basis = _as_mrs_sim_reads(path)
+        config = {**copy.deepcopy(c), "PM_basis_set": basis}
+        if c.get("copula"):
+            config["copula"] = {k: provenance.portable_file(v) for k, v in c["copula"].items()}
+        mrs_sim_provenance = copy.deepcopy(self._provenance)
+        if "basis_set_name" in mrs_sim_provenance:          # as the driver handed it over
+            mrs_sim_provenance["basis_set_name"] = basis
         return {"MRSsynMRS": report,
                 "generation": {"simulator": {"name": "MRS-Sim", "version": version(),
                                              "repository":
                                                  "https://github.com/JohnLaMaster/MRS-Sim"},
-                               "config": copy.deepcopy(c), "seed": self.seed,
-                               "chunk": self.chunk, "components": self.components,
-                               "basis": provenance.file_checksum(path),
+                               "config": config, "seed": self.seed, "chunk": self.chunk,
+                               "components": self.components,
+                               "basis": provenance.portable_file(path),
                                "sampled_ranges": {**self._concentration_ranges, **r},
-                               "mrs_sim_provenance": copy.deepcopy(self._provenance)}}
+                               "mrs_sim_provenance": mrs_sim_provenance}}
+
+
+#**********************#
+#   as mrs-sim reads   #
+#**********************#
+def _as_mrs_sim_reads(path: Path) -> str:
+    """A basis as a recipe records it: as MRS-Sim reads it, relative to its own
+    src/basis_sets, when MRSuite's checkout holds it, so the config runs again from any
+    checkout; else by the file's name alone, never where it lies on this machine."""
+    path = os.path.abspath(path)
+    if not Path(path).is_relative_to(provenance.REPO):
+        return Path(path).name
+    return Path(os.path.relpath(path, ROOT / "src" / "basis_sets")).as_posix()
 
 
 #*********#

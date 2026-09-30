@@ -79,6 +79,33 @@ the rule broken. It checks that:
 Put the call in a test under `tests/`, as `tests/test_conformance.py` does for MRSuite's
 own methods.
 
+## Sharing a trained model
+
+A trained model goes on the Hugging Face Hub as a repo of its own: its config, its
+weights, the recipe it was trained with (`recipe.json`) and a model card generated from
+them, whose MRSsynMRS table reports how the training spectra were made.
+
+```python
+model.learn(source, steps=100_000)          # or MLP.from_pretrained(...) first, to fine-tune
+model.push_to_hub("your-name/my-model")     # after `hf auth login`
+```
+
+The weights' licence goes with the push, as any Hub licence id:
+`model.push_to_hub("your-name/my-model", model_card_kwargs={"license": "apache-2.0"})`.
+
+A model whose class is part of MRSuite then loads by name alone, and runs as a step in
+any pipeline:
+
+```python
+model = mrsuite.models.load("your-name/my-model")
+```
+
+`load` picks the class from the repo's config; a class of your own loads with its own
+`from_pretrained`, and the card says which. With its `acquisition` set, the model
+refuses spectra acquired unlike its training data. A source that describes itself fills
+the MRSsynMRS table (`mrsuite.simulators.mrs_sim` does); for your own source, return a
+filled `mrsuite.training.recipe.report()` from its `recipe`, as `{"MRSsynMRS": report}`.
+
 ## Style and tests
 
 Match the code around you: the file banner, class box and function box at the top of

@@ -35,7 +35,7 @@ from mrsuite.models.pytorch import TorchModel
 # A multi-layer perceptron that reads concentrations and signal parameters off a spectrum.         #
 #                                                                                                  #
 #**************************************************************************************************#
-class MLP(TorchModel):
+class MLP(TorchModel, paper_url="https://arxiv.org/abs/2511.23135"):
     """A multi-layer perceptron that reads concentrations and signal parameters off a spectrum.
 
     The spectrum is cut to the points ``first`` to ``last``, scaled to unit norm and

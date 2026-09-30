@@ -16,6 +16,7 @@
 #*************#
 #   imports   #
 #*************#
+import copy
 import json
 import os
 import shutil
@@ -25,6 +26,8 @@ from typing import Any, Dict, Type
 
 import torch
 
+from mrsuite.core.provenance import git_version, portable, portable_file
+from mrsuite.models.base import classpath
 from mrsuite.models.pytorch import TorchModel
 
 REFERENCE = Path(__file__).with_name("reference.py")
@@ -87,11 +90,18 @@ def convert(cls: Type[TorchModel], checkpoint: str, job: Dict[str, Any],
         **kwargs: Further constructor arguments, e.g. the MLP's width and depth.
 
     Returns:
-        TorchModel: With the checkpoint's network weights, loaded strictly.
+        TorchModel: With the checkpoint's network weights, loaded strictly, and a recipe
+        that says where they came from: the checkpoint and the job's basis by their
+        portable paths (see ``provenance.portable``), the checkpoint's SHA-256, the job,
+        and the original's version the config was read from.
     """
     config = run_reference(cls, {**job, "task": "config"}, python)
     model = cls(**config, **kwargs)
     state = torch.load(checkpoint, map_location="cpu", weights_only=False)["state_dict"]
     model.net.load_state_dict({k[len("net."):]: v for k, v in state.items()
                                if k.startswith("net.")})
+    model.recipe = {"training": {
+        "model": classpath(cls), "checkpoint": portable_file(checkpoint),
+        "job": {**copy.deepcopy(job), "basis": portable(Path(cls.repo, job["basis"]))},
+        "converted with": {cls.repo.name: git_version(str(cls.repo))}}}
     return model

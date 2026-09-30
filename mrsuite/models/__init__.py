@@ -21,7 +21,7 @@ import json
 import os
 from typing import Any, Optional
 
-from mrsuite.models.base import Model
+from mrsuite.models.base import DOWNLOAD, Model
 from mrsuite.models.mlp import MLP
 from mrsuite.models.pytorch import TorchModel
 from mrsuite.models.wand import WAND
@@ -55,7 +55,8 @@ def load(name: Any, revision: Optional[str] = None, **kwargs) -> Model:
         path = os.path.join(name, "config.json")
     else:
         from huggingface_hub import hf_hub_download
-        path = hf_hub_download(repo_id=str(name), filename="config.json", revision=revision)
+        path = hf_hub_download(repo_id=str(name), filename="config.json", revision=revision,
+                               **{k: kwargs[k] for k in DOWNLOAD if k in kwargs})
     with open(path) as fh:
         spec = json.load(fh).get("model", "")
     module, _, classname = str(spec).rpartition(".")

@@ -127,6 +127,20 @@ def test_a_model_learns_in_place(tmp_path):
     recipe = json.loads((tmp_path / "step-150" / "recipe.json").read_text())
     assert recipe["MRSsynMRS"]["Experiment"]["ID"] == "toy"
     assert recipe["training"]["steps"] == 150 and recipe["training"]["objective"]
+    assert json.loads((tmp_path / "step-50" / "recipe.json").read_text())["training"][
+        "steps"] == 50
+    assert mlp.recipe == recipe and recipe["training"]["from"] is None
+
+    # learning on says what the weights started from, however often it is done
+    tuned = MLP.from_pretrained(tmp_path / "step-150")
+    tuned.learn(source, steps=2)
+    tuned.learn(source, steps=3)
+    first = tuned.recipe["training"]["from"]["training"]
+    assert tuned.recipe["training"]["steps"] == 3 and first["steps"] == 2
+    # a folder outside the checkout by its name alone, never where it lies on this machine
+    assert first["from"] == {"source": {"name": "step-150", "revision": None},
+                             "training": recipe["training"]}
+    assert tuned.source is None             # the weights are no longer the ones loaded
 
 
 #***********************#

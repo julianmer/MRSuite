@@ -24,6 +24,7 @@ import pytest
 
 from fsl_mrs.utils.misc import calculateAxes
 
+from mrsuite.core import provenance
 from mrsuite.simulators import mrs_sim
 from mrsuite.training import recipe
 
@@ -195,6 +196,13 @@ def test_a_source_states_its_recipe(tmp_path):
     snr = filled["generation"]["sampled_ranges"]["snr"]
     assert len(snr) == 2 and snr[0] < snr[1]
     assert filled["generation"]["seed"] == 0 and filled["generation"]["basis"]["sha256"]
+    # shared as it is: no path says where anything lies on this machine
+    assert str(provenance.REPO) not in json.dumps(filled)
+    assert filled["generation"]["basis"]["path"] == provenance.portable(
+        mrs_sim.ROOT / "src" / "basis_sets" / config["PM_basis_set"])
+    # and the config as MRS-Sim reads it, so it runs again from any checkout
+    assert filled["generation"]["config"]["PM_basis_set"] == config["PM_basis_set"] == \
+        filled["generation"]["mrs_sim_provenance"]["basis_set_name"]
 
     assert set(config["metabolites"]) <= set(source.basis)
     assert len(source.basis["NAA"]) == source.acquisition["points"]

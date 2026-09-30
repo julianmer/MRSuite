@@ -7,7 +7,7 @@
 # Created: 2026-09-29                                                                              #
 #                                                                                                  #
 # Purpose: Training recipes as the MRS community reports synthetic data: the MRSsynMRS minimum     #
-#          reporting standard (LaMaster, Gudmundson et al., arXiv 2602.23463, section 6), whose    #
+#          reporting standard (LaMaster et al., arXiv 2602.23463, section 6), whose                #
 #          template spreadsheet has seven sections, stored as the JSON sidecar the working group   #
 #          recommends beside NIfTI-MRS data. A simulator source fills the report; save writes      #
 #          the sidecar; table renders it for a model card.                                         #

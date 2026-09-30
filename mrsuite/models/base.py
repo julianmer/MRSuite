@@ -97,8 +97,7 @@ Not recorded.
 ## Training data
 {% if table %}
 How the training spectra were made, reported as the MRSsynMRS minimum standard for synthetic
-MRS data asks (LaMaster, Gudmundson et al., arXiv 2602.23463). The full recipe is in
-`recipe.json`.
+MRS data asks (LaMaster et al., arXiv 2602.23463). The full recipe is in `recipe.json`.
 
 {{ table }}
 {%- else %}

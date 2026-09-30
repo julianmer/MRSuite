@@ -325,6 +325,49 @@ def test_water_scaling_adds_the_molar_concentrations(spectrum, basis):
     assert out.conc("molarity")["NAA"] > 0
 
 
+#*******************#
+#   fit collapsed   #
+#*******************#
+def test_a_fit_whose_reference_collapsed_keeps_its_raw_values(spectrum, basis, monkeypatch):
+    """A fit that drives Cr+PCr to zero cannot be scaled to it; FSL-MRS raises, and in a
+    batch that one fit took every other spectrum's result down with it. The fit comes
+    back with what it has, raw values and no scaling it could not compute."""
+    from fsl_mrs.utils.results import FitRes
+    internal_only = FitRes.calculateConcScaling
+
+    def collapsed(self, mrs, quant_info=None, **kwargs):
+        if quant_info is not None:          # FSL-MRS raises only when scaling to water
+            raise FitRes.QuantificationError("Metabolite reference ['Cr', 'PCr'] has not been fit")
+        return internal_only(self, mrs, **kwargs)
+
+    monkeypatch.setattr(FitRes, "calculateConcScaling", collapsed)
+    with pytest.warns(UserWarning, match="raw values"):
+        out = fsl_mrs.fit(spectrum, basis, water=spectrum, te=0.030, tr=2.0)
+
+    assert out.conc("raw")["NAA"] > 0
+    assert "molarity" not in out.concentrations
+
+
+#*****************#
+#   empty water   #
+#*****************#
+def test_a_water_reference_without_signal_stays_an_error(spectrum, basis, monkeypatch):
+    """FSL-MRS raises the same error for a water reference with no integral, which is
+    broken input, not a failed fit: it must not pass as raw values."""
+    from fsl_mrs.utils.results import FitRes
+    internal_only = FitRes.calculateConcScaling
+
+    def empty(self, mrs, quant_info=None, **kwargs):
+        if quant_info is not None:
+            raise FitRes.QuantificationError("Water reference has zero integral. Please check "
+                                             "water reference data.")
+        return internal_only(self, mrs, **kwargs)
+
+    monkeypatch.setattr(FitRes, "calculateConcScaling", empty)
+    with pytest.raises(FitRes.QuantificationError, match="zero integral"):
+        fsl_mrs.fit(spectrum, basis, water=spectrum, te=0.030, tr=2.0)
+
+
 #**************#
 #   fit refs   #
 #**************#

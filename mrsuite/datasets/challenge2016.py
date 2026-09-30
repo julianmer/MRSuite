@@ -120,8 +120,9 @@ def snr(data: NIfTI_MRS_Plus) -> np.ndarray:
     """
     Each spectrum's SNR as the challenge defines it (Marjanska et al., MRM 2022): the
     largest value of the real spectrum over 0-4 ppm divided by the RMS noise over
-    -10.6 to -7.5 ppm. On the released data it gives the paper's own values (86 for
-    dataset 1, 20, 30, 43 and 158 for datasets 12, 15, 18 and 21).
+    -10.6 to -7.5 ppm. On the released data it gives the paper's own values within a few
+    percent (86 for dataset 1; 20, 30, 43 and 158 for datasets 12, 15, 18 and 21, which
+    the paper states as 161).
 
     Args:
         data (NIfTI_MRS_Plus): Spectra on the challenge's grid.
@@ -156,7 +157,9 @@ def mrs_sim_config(folder: Path = DATA / 'basis_sets') -> Dict:
       ground truth's range across datasets 1-24;
     - linewidths of 6-12 Hz from a basis already 2 Hz wide: Lorentzian datasets add
       pi*(4..10) per s (MRS-Sim's d, less its own fixed 1 per s), Voigt ones a Gaussian
-      of up to 10.9 Hz FWHM (g up to 422 per s^2), so d spans 0-30.4 and g 0-422;
+      of up to 10.9 Hz FWHM (g up to 422 per s^2), so d spans 0-30.4 and g 0-422, one
+      of each per spectrum ('share_lorentzian'), as each dataset had one linewidth; the
+      MMBL takes the metabolites' ranges, since MRS-Sim has no separate ones;
     - SNR 20-161 as the challenge defines it (see ``snr``), converted to MRS-Sim's
       definition by simulating this config at a known SNR and measuring it the
       challenge's way;
@@ -199,13 +202,14 @@ def mrs_sim_config(folder: Path = DATA / 'basis_sets') -> Dict:
         'lineshape': 'voigt', 'num_coils': 1, 'drop_prob': 0.0,
         'b0': False, 'eddy': False, 'fshift_g': False, 'fshift_i': False,
         'phi0': False, 'phi1': False, 'noise': True, 'apodize': False, 'mm_lip': False,
+        'share_lorentzian': True,
         'notes': 'ISMRM 2016 fitting challenge, brain-like datasets 1-24: basis compiled '
                  'from basisset_LCModel/press3T_30ms.BASIS, cut to the data grid; '
                  'concentrations over the ground truth range relative to Cr+PCr, '
                  'linewidths 6-12 Hz Lorentzian or Voigt, SNR 20-161 as the challenge '
                  'defines it; no phase, shift, eddy currents, baseline or water.'})
     config['parameters'] = {'d': [0.0, round(np.pi * 10 - 1, 2)], 'g': [0.0, 422.0],
-                            'dmm': [10, 100], 'gmm': [5, 20], **ranges}
+                            **ranges}
 
     # MRS-Sim's SNR per unit of the challenge's, measured on this config itself
     probe = {**config, 'parameters': {**config['parameters'], 'snr': [1000, 1000]}}

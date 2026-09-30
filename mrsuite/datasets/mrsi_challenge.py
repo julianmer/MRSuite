@@ -198,13 +198,14 @@ def truth_parameters(subjects: Tuple[str, ...] = ('Sub1', 'Sub2'), voxels: int =
         data_dir (Path): Where the release lives.
 
     Returns:
-        Dict[str, np.ndarray]: (voxels,) values in MRS-Sim's terms, as
-        ``mrs_sim.distributions`` takes them: each metabolite's amplitude relative to
+        Dict[str, np.ndarray]: One value per voxel (``voxels`` rounded up to a multiple
+        of the subjects) in MRS-Sim's terms: each metabolite's amplitude relative to
         creatine (Lac and Lac41, zero throughout the release, and the reference left
         out), each metabolite's Lorentzian width '<name>.d' in 1/s less MRS-Sim's own
         1/s, 'snr' (the peak of Cr + Cr39's real spectrum over the time-domain noise
         SD, at the training noise level times 0.6-1.4, which the testing subjects span),
-        'f_shift' in ppm, and 'TG' in s (MRS-Sim samples its Gaussian width uniformly).
+        'f_shift' in ppm, and 'TG' in s. All but 'TG' are as ``mrs_sim.distributions``
+        takes them; MRS-Sim's Gaussian width is g = 1/TG^2.
     """
     import h5py
 
@@ -267,14 +268,15 @@ def mrs_sim_config(folder: Optional[Path] = None,
     Every parameter is drawn uniformly, and independently, over the 1st-99th percentile
     of the training subjects' own ground truth (``truth_parameters``): each metabolite's
     amplitude relative to Cr + Cr39 (both fixed at 1, the two moieties of the one
-    creatine map), the Lorentzian widths (one range for all lines, as MRS-Sim takes it),
+    creatine map), the Lorentzian width (one per spectrum, shared by its lines, since the
+    voxel's T2' dominates; the metabolites' own T2 differences are left out),
     the Gaussian width 1/TG^2, SNR and shift. Independent amplitudes also keep a model
     from learning the release's two fixed tissue compositions (the paper's own warning).
     MRS-Sim's fitted distributions (``mrs_sim.distributions``) are not used here: at
     MRS-Sim dffb5ed they give these bounded values heavy tails, a third of the Asp, GABA
     and Gln amplitudes far outside the release's. What the training truth does not give
     keeps a range: Lac and Lac41 (zero in the release) 0 to 0.5, the macromolecules 0 to
-    2 at the basis' own scale; baseline and residual water follow MRS-Sim's published
+    2 at the basis' own scale, with the metabolites' width ranges; baseline and residual water follow MRS-Sim's published
     config. The release has no phase errors or eddy currents, so neither is simulated.
 
     Args:
@@ -324,14 +326,13 @@ def mrs_sim_config(folder: Optional[Path] = None,
         'lineshape': 'voigt', 'num_coils': 1, 'drop_prob': 0.0,
         'b0': False, 'eddy': False, 'fshift_g': True, 'fshift_i': False,
         'phi0': False, 'phi1': False, 'noise': True, 'apodize': False, 'mm_lip': False,
-        'snr': span(samples['snr']),
+        'snr': span(samples['snr']), 'share_lorentzian': True,
         'notes': '2024 MRSI challenge: the release\'s basis (VtMeta and VtMM) on the '
                  'data grid; amplitudes, Lorentzian and Gaussian widths, SNR and shift '
                  'sampled uniformly over the 1st-99th percentile of the ground truth of '
                  f'{", ".join(subjects)} ({voxels} brain voxels); SNR covers 0.6-1.4x '
                  'the training noise level.'})
     config['parameters'] = {'d': span(widths), 'g': span(1 / samples['TG'] ** 2),
-                            'dmm': [10, 100], 'gmm': [5, 20],
                             'f_shift': span(samples['f_shift']),
                             'snr': span(samples['snr']), **ranges}
     return config

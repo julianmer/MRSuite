@@ -47,7 +47,9 @@ def sample(cfg, pm, ind, columns, names, n, sampler):
 
     The reference metabolites are fixed at their ratios, since MRS-Sim states every
     amplitude relative to them; one Gaussian width is shared by the metabolites and one
-    by the macromolecules and lipids, as MRS-Sim's line shape model has it; each other
+    by the macromolecules and lipids, as MRS-Sim's line shape model has it, and so is the
+    Lorentzian width when the config sets 'share_lorentzian' (a spectrum with one
+    linewidth, as the challenges were made); each other
     basis function is left out with the config's dropout probability; and what the
     config switches off is zero, so the truth does not report it. MRS-Sim leaves these
     to the caller, as per-dataset choices.
@@ -61,10 +63,13 @@ def sample(cfg, pm, ind, columns, names, n, sampler):
 
     background = [i for i, m in enumerate(names) if "mm" in m.lower() or "lip" in m.lower()]
     metabolites = [i for i in range(len(names)) if i not in background]
+    shared = ["g"] + (["d"] if getattr(cfg, "share_lorentzian", False) else [])
+    for key in shared:
+        widths = ind[key]
+        for group in (metabolites, background):
+            if group:
+                params[:, [widths[i] for i in group]] = params[:, [widths[group[0]]]]
     widths = ind["g"]
-    for group in (metabolites, background):
-        if group:
-            params[:, [widths[i] for i in group]] = params[:, [widths[group[0]]]]
     if cfg.lineshape == "lorentzian":
         params[:, list(widths)] = 0
     if cfg.lineshape == "gaussian":

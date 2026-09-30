@@ -206,7 +206,8 @@ def distributions(samples: Dict[str, np.ndarray], folder: Union[str, Path],
     if len(n) != 1:
         raise ValueError(f"every parameter needs the same number of samples, not {sorted(n)}")
     folder = Path(folder)
-    shutil.rmtree(folder, ignore_errors=True)
+    for own in ("parameters", "fits"):                  # only what an earlier call wrote
+        shutil.rmtree(folder / own, ignore_errors=True)
     for i in range(n.pop()):
         spectrum = folder / "parameters" / f"{i:06d}"
         spectrum.mkdir(parents=True)
@@ -241,13 +242,17 @@ def distributions(samples: Dict[str, np.ndarray], folder: Union[str, Path],
 #****************#
 def _osprey_key(name: str) -> str:
     """A parameter's name as findParamDist.py reads Osprey's export, and back as
-    CopulaInVivoSampler resolves it (see the driver's maps)."""
+    CopulaInVivoSampler resolves it (see the driver's maps): 'snr', 'f_shift',
+    '<name>.d' or a basis function's name."""
     if name == "snr":
         return "SNR"
     if name == "f_shift":
         return "global_freqShift"
     if name.endswith(".d"):
         return f"{name[:-2]}_lorentzLB"
+    if "." in name:
+        raise ValueError(f"MRS-Sim's fitted distributions take amplitudes, '<name>.d', 'snr' "
+                         f"and 'f_shift', not {name!r}")
     return f"{name}_ampl"
 
 
@@ -414,6 +419,13 @@ class Source(source.Source):
         metabolites["Concentration Ranges"] = ranges
         metabolites["Metabolite-Level Frequency Shifts"] = (
             {m: r[f"{m}.f_shifts"] for m in names} if c["fshift_i"] else "not applied")
+        # MRS-Sim's table gives its database T2s, but the config's 'd' is what simulates
+        metabolites["T2 Relaxation Ranges"] = (
+            "not applied (Gaussian lineshape)" if c["lineshape"] == "gaussian"
+            else {m: r[f"{m}.d"] for m in names})
+        metabolites.setdefault("Sources of Parameter Values", {})["T2 relaxation ranges"] = (
+            "the config's 'd': MRS-Sim's Lorentzian decay rate in 1/s, exp(-(d + 1) t), "
+            "not a T2 in ms")
 
         components = report["Components"]
         components.update({"Number Spectral Averages": 1,

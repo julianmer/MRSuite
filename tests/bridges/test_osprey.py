@@ -185,6 +185,32 @@ def test_loading_a_basis_adds_the_spectra_and_axis():
     assert np.asarray(basis["fids"]).shape[1] == int(basis["nMets"]) + int(basis["nMM"])
 
 
+#********************#
+#   basis selected   #
+#********************#
+MEGA_BASIS = (OSPREY_ROOT / "fit" / "basissets" / "3T" / "ge" / "mega" / "press" / "gaba68"
+              / "basis_ge_megapress_gaba68.mat")
+
+
+@needs_octave
+@pytest.mark.skipif(not MEGA_BASIS.exists(), reason="osprey submodule not checked out")
+def test_a_basis_narrows_to_the_components_and_sub_spectrum_asked_for():
+    """An edited basis holds every sub-spectrum and every simulated metabolite; an
+    edit-OFF fit wants one sub-spectrum and Osprey's list, metabolites before MM/Lip."""
+    from mrsuite.bridges.osprey import bridge
+
+    names = ["Cr", "NAA", "PCr", "MM09", "Lip13"]
+    basis = bridge.basis(str(MEGA_BASIS), names=names, subspectrum=0)
+
+    fids = np.asarray(basis["fids"])
+    assert fids.shape[1:] == (len(names),), f"shape {fids.shape}"
+    assert [str(n) for n in np.asarray(basis["name"]).ravel()] == names
+    assert (int(basis["nMets"]), int(basis["nMM"])) == (3, 2)
+    assert "ppm" in basis and np.asarray(basis["specs"]).shape == fids.shape
+    # the data are scaled as osp_fitInitialise scales them: against every sub-spectrum
+    assert float(basis["specs_max"]) > np.max(np.real(np.asarray(basis["specs"])))
+
+
 #*******************#
 #   lcmodel basis   #
 #*******************#

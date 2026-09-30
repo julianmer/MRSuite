@@ -171,18 +171,22 @@ def _rows(items: Dict[str, Any], depth: int) -> List[str]:
 #   value   #
 #***********#
 def _value(value: Any) -> str:
-    """A cell: '—' for unreported, 'low – high' for a pair, plain text otherwise."""
+    """A cell: '—' for unreported, 'low – high' for a pair, 'key: value' for an entry of
+    several fields (a list of them separated by ';'), plain text otherwise."""
     if value is None:
         return "—"
     if isinstance(value, bool):
         return "yes" if value else "no"
     if isinstance(value, float):
         return f"{value:.6g}"
+    if isinstance(value, dict):
+        return ", ".join(f"{_text(str(k))}: {_value(v)}" for k, v in value.items())
     if isinstance(value, (list, tuple)):
         if len(value) == 2 and all(isinstance(v, (int, float)) and not isinstance(v, bool)
                                    for v in value):
             return f"{_value(value[0])} – {_value(value[1])}"
-        return ", ".join(_value(v) for v in value)
+        return ("; " if any(isinstance(v, dict) for v in value) else ", ").join(
+            _value(v) for v in value)
     return _text(str(value))
 
 

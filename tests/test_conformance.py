@@ -25,6 +25,9 @@ from mrsuite.models import MLP, WAND
 from mrsuite.testing import check
 
 from tests.bridges.test_lcmodel import needs_lcmodel
+from tests.bridges.test_pyamares import SINGLETS as AMARES_SINGLETS, needs_pyamares
+from tests.bridges.test_tarquin import needs_tarquin
+from tests.bridges.test_vespa import SINGLETS as VESPA_SINGLETS, needs_vespa
 from tests.conftest import needs_octave
 from tests.models.test_models import (MLP_ACQUISITION, MLP_METABOLITES, WAND_ACQUISITION,
                                       WAND_METABOLITES, _spectra)
@@ -97,9 +100,32 @@ def test_spant_processing(challenge):
     pytest.param("lcmodel", id="lcmodel", marks=needs_lcmodel),
     pytest.param("osprey", id="osprey", marks=needs_octave),
     pytest.param("spant", id="spant", marks=needs_r),
+    pytest.param("tarquin", id="tarquin", marks=needs_tarquin),
 ])
 def test_fits(name, challenge):
     check(importlib.import_module(f"mrsuite.bridges.{name}").fit, challenge[0], BASIS)
+
+
+#******************#
+#   pyamares fit   #
+#******************#
+@needs_pyamares
+def test_pyamares_fit(challenge, tmp_path):
+    """pyAMARES takes a prior-knowledge file rather than a basis."""
+    from mrsuite import pyamares
+    prior = tmp_path / "prior.csv"
+    prior.write_text(AMARES_SINGLETS)
+    check(pyamares.fit, challenge[0], str(prior))
+
+
+#***************#
+#   vespa fit   #
+#***************#
+@needs_vespa
+def test_vespa_fit(challenge):
+    """Vespa takes metabolite line lists rather than a basis."""
+    from mrsuite import vespa
+    check(vespa.fit, challenge[0], VESPA_SINGLETS)
 
 
 #***********#
@@ -121,13 +147,17 @@ def test_a_quantifying_model():
 #*******************#
 #   decomposition   #
 #*******************#
+# WAND's default normalises with the batch's statistics, as its paper ran it and
+# reproduces exactly; that makes a spectrum's result depend on its batch by design, so
+# the contract is checked with the stored averages, where it holds
 def test_a_decomposing_model(challenge):
-    check(WAND(WAND_METABOLITES, 1792, 2036, WAND_ACQUISITION), challenge[0])
+    check(WAND(WAND_METABOLITES, 1792, 2036, WAND_ACQUISITION, batch_statistics=False),
+          challenge[0])
 
 
 #*********************#
 #   processing step   #
 #*********************#
 def test_a_decomposing_model_as_a_processing_step(challenge):
-    check(WAND(WAND_METABOLITES, 1792, 2036, WAND_ACQUISITION), challenge[0],
-          remove=["artifacts"])
+    check(WAND(WAND_METABOLITES, 1792, 2036, WAND_ACQUISITION, batch_statistics=False),
+          challenge[0], remove=["artifacts"])

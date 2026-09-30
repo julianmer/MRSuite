@@ -19,6 +19,7 @@
 #*************#
 import inspect
 import os
+import warnings
 from functools import lru_cache
 from typing import Any, Callable, List, Optional
 
@@ -200,8 +201,15 @@ def fit(data: Any, basis: Any, water: Any = None, ppmlim: tuple = (0.2, 4.2),
                 "water scaling needs an echo and repetition time; the header has "
                 f"EchoTime={header('EchoTime')} and "
                 f"RepetitionTime={header('RepetitionTime')}. Pass te= and tr=.")
-        res.calculateConcScaling(mrs, quant_info=quantify.QuantificationInfo(
-            echo, rep, mrs.names, mrs.centralFrequency / 1e6))
+        try:
+            res.calculateConcScaling(mrs, quant_info=quantify.QuantificationInfo(
+                echo, rep, mrs.names, mrs.centralFrequency / 1e6))
+        except res.QuantificationError as err:
+            # the reference metabolite fitted to zero: a failed fit keeps its raw values;
+            # the same error for a water reference with no integral stays an error
+            if "Metabolite reference" not in str(err):
+                raise
+            warnings.warn(f"FSL-MRS could not scale this fit ({err}); it keeps its raw values")
 
     return to_result(res)
 

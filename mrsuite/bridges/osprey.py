@@ -250,22 +250,51 @@ class OspreyBridge(FIDABridge):
     #***********#
     #   basis   #
     #***********#
-    def basis(self, path: str) -> Any:
+    def basis(self, path: str, names: Optional[List[str]] = None,
+              subspectrum: Optional[int] = None) -> Any:
         """
         Load one of Osprey's basis sets, ready for ``fit_runFit``.
 
         The shipped ``.mat`` files hold only FIDs; Osprey adds the spectra and the ppm
         axis on load, which ``osp_fitInitialise`` does through this same call. Skipping
-        it leaves fit_resampleBasis reading a field that is not there.
+        it leaves fit_resampleBasis reading a field that is not there. They also hold
+        every metabolite simulated and, for edited sequences, every sub-spectrum, which
+        ``osp_fitInitialise`` narrows to what a fit uses before fitting; ``names`` and
+        ``subspectrum`` do the same here.
 
         Args:
             path (str): Path to a basis ``.mat``, absolute or relative to the repo.
+            names (Optional[List[str]]): Components to keep, e.g. Osprey's default
+                metabolites and its macromolecules; the file's order is kept, which
+                puts the metabolites before the MM/Lip as osp_recalculate_basis_specs
+                assumes. None keeps all.
+            subspectrum (Optional[int]): One sub-spectrum of an edited basis, 0-based
+                along its third dimension, e.g. the edit-OFF one for fitting edit-OFF
+                spectra. None keeps all.
 
         Returns:
             The basis set container, as an Octave struct.
         """
-        self.octave.eval(f"mrsuite_b = load('{path}'); "
-                         f"mrsuite_basis = osp_recalculate_basis_specs(mrsuite_b.BASIS);")
+        select = ""
+        if names is not None:
+            cell = "{" + ", ".join(f"'{n}'" for n in names) + "}"
+            select += (f"keep = ismember(mrsuite_B.name, {cell}); "
+                       f"mrsuite_B.fids = mrsuite_B.fids(:, keep, :); "
+                       f"mrsuite_B.name = mrsuite_B.name(keep); "
+                       f"mrsuite_B.nMM = sum(strncmp(mrsuite_B.name, 'MM', 2) | "
+                       f"strncmp(mrsuite_B.name, 'Lip', 3)); "
+                       f"mrsuite_B.nMets = numel(mrsuite_B.name) - mrsuite_B.nMM; ")
+        # osp_fitInitialise scales the data against the basis' maximum over every
+        # sub-spectrum of the metabolites it keeps, so that is taken before the cut
+        select += ("mrsuite_B.sz = size(mrsuite_B.fids); "
+                   "mrsuite_all = osp_recalculate_basis_specs(mrsuite_B); "
+                   "mrsuite_max = max(real(mrsuite_all.specs(:))); ")
+        if subspectrum is not None:
+            select += f"mrsuite_B.fids = mrsuite_B.fids(:, :, {subspectrum + 1}); "
+        self.octave.eval(f"mrsuite_b = load('{path}'); mrsuite_B = mrsuite_b.BASIS; {select}"
+                         f"mrsuite_B.sz = size(mrsuite_B.fids); "
+                         f"mrsuite_basis = osp_recalculate_basis_specs(mrsuite_B); "
+                         f"mrsuite_basis.specs_max = mrsuite_max;")
         return self.octave.pull("mrsuite_basis")
 
     #************************#
@@ -439,8 +468,9 @@ def fit(data: Any, basis: Any, fit_opts: Optional[dict] = None,
     opts = bridge.fit_options(**(fit_opts or {}))
 
     struct = bridge.codec.nifti2fida(data)
-    scale = (float(np.max(np.real(np.asarray(struct["specs"]))))
-             / float(np.max(np.real(np.asarray(basis["specs"])))))
+    reference = basis["specs_max"] if "specs_max" in basis else np.max(np.real(
+        np.asarray(basis["specs"])))
+    scale = float(np.max(np.real(np.asarray(struct["specs"])))) / float(np.asarray(reference))
     struct["fids"] = np.asarray(struct["fids"]) / scale
     struct["specs"] = np.asarray(struct["specs"]) / scale
 

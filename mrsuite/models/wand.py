@@ -16,6 +16,7 @@
 #*************#
 #   imports   #
 #*************#
+import threading
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -27,6 +28,10 @@ from nifti_mrs.create_nmrs import gen_nifti_mrs
 from mrsuite.core.provenance import git_version
 from mrsuite.models.base import load_file, spectra
 from mrsuite.models.pytorch import TorchModel
+
+# one at a time through WAND.predict's swap of the running averages; module-level, as a
+# lock on the model would stop it pickling for worker processes
+_SWAP = threading.Lock()
 
 
 #**************************************************************************************************#
@@ -111,15 +116,17 @@ class WAND(TorchModel):
         weights stay exactly as they were."""
         if not self.batch_statistics:
             return super().predict(x)
-        norms = [m for m in self.modules() if isinstance(m, torch.nn.modules.batchnorm._BatchNorm)]
-        kept = [(m.running_mean, m.running_var) for m in norms]
-        for m in norms:
-            m.running_mean = m.running_var = None
-        try:
-            return super().predict(x)
-        finally:
-            for m, (mean, var) in zip(norms, kept):
-                m.running_mean, m.running_var = mean, var
+        with _SWAP:                     # a second thread would keep the Nones for good
+            norms = [m for m in self.modules()
+                     if isinstance(m, torch.nn.modules.batchnorm._BatchNorm)]
+            kept = [(m.running_mean, m.running_var) for m in norms]
+            for m in norms:
+                m.running_mean = m.running_var = None
+            try:
+                return super().predict(x)
+            finally:
+                for m, (mean, var) in zip(norms, kept):
+                    m.running_mean, m.running_var = mean, var
 
     #*************#
     #   forward   #

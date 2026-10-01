@@ -6,9 +6,9 @@
 #                                                                                                  #
 # Created: 2026-09-28                                                                              #
 #                                                                                                  #
-# Purpose: Fitting with TARQUIN. TARQUIN is an external binary, so fits skip when none is          #
-#          resolvable; the parser is asserted on results laid out as TARQUIN's ExportTxtResults    #
-#          writes them, and what is refused is refused before the binary is needed.                #
+# Purpose: Fitting with TARQUIN, through PyTARQUIN. TARQUIN is an external binary, so fits skip    #
+#          when none is resolvable; the mapping is asserted on results laid out as TARQUIN's       #
+#          ExportTxtResults writes them, and what is refused is refused before the binary runs.    #
 #                                                                                                  #
 ####################################################################################################
 
@@ -56,25 +56,28 @@ Max iters    : 100
 #   ready   #
 #***********#
 def _available():
+    """Whether a TARQUIN binary can be resolved without downloading or a container."""
     try:
-        tarquin._executable()
+        from tarquin_wrapper import binaries
+        binaries.resolve_executable(allow_download=False, allow_docker=False)
         return True
-    except FileNotFoundError:
+    except Exception:                          # noqa: BLE001 - any failure means absent
         return False
 
 
 needs_tarquin = pytest.mark.skipif(not _available(), reason="no TARQUIN binary")
 
 
-#***********#
-#   parse   #
-#***********#
-def test_parse_maps_a_results_file(tmp_path):
+#***************#
+#   to result   #
+#***************#
+def test_a_report_maps_onto_the_result(tmp_path):
     """Concentrations, both uncertainty kinds and the fit quality block should all land."""
     path = tmp_path / "result.txt"
     path.write_text(RESULTS_TXT)
 
-    out = tarquin._parse(str(path))
+    from tarquin_wrapper import read_results   # here: conformance imports this module
+    out = tarquin.to_result(read_results(path))
 
     assert isinstance(out, FitResult) and out.method == "tarquin:TARQUIN"
     assert out.conc("raw")["NAA"] == 8.33 and "TCr" in out.metabolites
@@ -83,6 +86,7 @@ def test_parse_maps_a_results_file(tmp_path):
     assert out.crlb("raw")["NAA"] == 0.25
     assert out.qc == {"metab_fwhm_ppm": 0.041, "metab_fwhm_hz": 5.24, "snr_residual": 25.3,
                       "snr_max": 35.0, "q": 1.23}
+    assert out.raw.sections["fitting_parameters"]["max_iters"] == 100   # the whole report
 
 
 #**************#
@@ -94,86 +98,11 @@ def test_water_scaled_results_are_filed_as_molarity(tmp_path):
     path = tmp_path / "result.txt"
     path.write_text(RESULTS_TXT.replace("Conc (au)", "Conc (mM)").replace("SD (au)", "SD (mM)"))
 
-    out = tarquin._parse(str(path))
+    from tarquin_wrapper import read_results
+    out = tarquin.to_result(read_results(path))
 
     assert "molarity" in out.concentrations and "raw" not in out.concentrations
     assert out.crlb("molarity")["NAA"] == 0.25
-
-
-#***********#
-#   empty   #
-#***********#
-def test_results_without_signals_are_refused(tmp_path):
-    path = tmp_path / "result.txt"
-    path.write_text(RESULTS_TXT.split("NAA")[0])
-
-    with pytest.raises(ValueError, match="no signals"):
-        tarquin._parse(str(path))
-
-
-#****************#
-#   unreadable   #
-#****************#
-def test_a_row_run_together_is_refused(tmp_path):
-    """TARQUIN's columns are fixed-width: a value that fills its column runs into the
-    next, and such a row must not silently drop its metabolite."""
-    path = tmp_path / "result.txt"
-    path.write_text(RESULTS_TXT.replace("NAA          8.330     3.000    0.2500",
-                                        "Ins       -0.0001234-4.052e+04   0.05000"))
-
-    with pytest.raises(ValueError, match="cannot be read"):
-        tarquin._parse(str(path))
-
-
-#*************#
-#   version   #
-#*************#
-def test_the_release_is_read_from_the_splash():
-    """TARQUIN prints 'TARQUIN Version X' once data is loaded; --help prints only usage."""
-    assert tarquin._banner("\nTARQUIN Version 4.3.11\nLoading data...\n") == "4.3.11"
-    assert tarquin._banner("Usage: tarquin --input ...") is None
-
-
-#*********#
-#   dpt   #
-#*********#
-def test_the_dpt_puts_naa_where_tarquin_reads_it(tmp_path):
-    """TARQUIN reads the samples with a forward FFT and ppm = ref - f/ft: a singlet made
-    at 2.008 ppm in NIfTI-MRS must land there."""
-    n, dwell, f0, ref = 2048, 1 / 2500.0, 127.7, 4.65
-    t = np.arange(n) * dwell
-    fid = np.exp((2j * np.pi * (2.008 - ref) * f0 - 8.0) * t)
-    item = gen_nifti_mrs(fid.reshape(1, 1, 1, -1).astype(np.complex64), dwell, f0)
-
-    lines = open(tarquin._dpt(item, 0.03, str(tmp_path / "in.dpt"))).read().splitlines()
-    header = dict(line.split("\t")[:2] for line in lines if "\t" in line and
-                  not line.startswith("Real_FID"))
-    samples = np.array([complex(*map(float, line.split())) for line in lines[9:]])
-    spectrum = np.fft.fftshift(np.fft.fft(samples))
-    f = np.fft.fftshift(np.fft.fftfreq(n, 1 / float(header["Sampling_frequency"])))
-    ppm = float(header["PPM_reference"]) - f / float(header["Transmitter_frequency"]) * 1e6
-
-    assert ppm[np.argmax(np.abs(spectrum))] == pytest.approx(2.008, abs=0.01)
-
-
-#*************#
-#   options   #
-#*************#
-def test_options_reach_the_command_line_as_tarquin_reads_them(spectrum, monkeypatch):
-    """TARQUIN reads only the exact string 'true' as true; a Python True must arrive so."""
-    import subprocess
-    calls = []
-    monkeypatch.setattr(tarquin, "_executable", lambda: "tarquin")
-    monkeypatch.setattr(subprocess, "run",
-                        lambda cmd, **kw: calls.append(cmd) or subprocess.CompletedProcess(cmd, 1, "", ""))
-
-    with pytest.raises(RuntimeError, match="no result"):
-        tarquin.fit.__wrapped__(spectrum, str(CHALLENGE_BASIS),
-                                opts={"rescale_lcm_basis": True, "auto_phase": False})
-
-    cmd = calls[-1]
-    assert cmd[cmd.index("--rescale_lcm_basis") + 1] == "true"
-    assert cmd[cmd.index("--auto_phase") + 1] == "false"
 
 
 #*************#
@@ -189,6 +118,9 @@ def test_what_cannot_be_fitted_is_refused_before_the_binary_runs(spectrum):
                           dim_tags=["DIM_COIL", None, None])
     with pytest.raises(ValueError, match="single spectra"):
         tarquin.fit(coils, te=0.03)
+    single = gen_nifti_mrs(np.ones((1, 1, 1, 64), complex), 1 / 2000, 123.2)
+    with pytest.raises(ValueError, match="single spectra"):           # averages in the water
+        tarquin.fit(single, te=0.03, water=coils)
 
 
 #*********#

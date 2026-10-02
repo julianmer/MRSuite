@@ -19,8 +19,10 @@ function [x, resid, J, iter, exitflag] = mrsuite_lm(resfun, x0, lb, ub, maxiter,
 
     x = x0(:);
     n = numel(x);
-    if isempty(lb), lb = -inf(n, 1); else, lb = lb(:); end
-    if isempty(ub), ub =  inf(n, 1); else, ub = ub(:); end
+    % as MATLAB: missing bounds are unbounded and extra ones ignored (op_creChoFit passes
+    % three bounds for seven parameters)
+    lb = [lb(:); -inf(n, 1)];  lb = lb(1:n);
+    ub = [ub(:);  inf(n, 1)];  ub = ub(1:n);
     lb(~isfinite(lb)) = -inf;
     ub(~isfinite(ub)) =  inf;
 

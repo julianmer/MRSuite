@@ -55,6 +55,16 @@ LSQCURVEFIT_CASE = LORENTZ + """
                  'inbounds', all(x >= lo - 1e-9) && all(x <= hi + 1e-9));
 """
 
+# fewer lower bounds than parameters, as op_creChoFit passes them, and more upper ones:
+# MATLAB leaves the missing free and ignores the extra. The offset puts the free
+# parameter's optimum below zero, so a bound wrongly filled in would show.
+SHORT_BOUNDS_CASE = LORENTZ + """
+    o = optimset(optimset('lsqnonlin'), 'Display', 'off', 'Algorithm', 'levenberg-marquardt');
+    [x, resnorm] = lsqcurvefit(@(p, x) L(p, x) + 0.5, [1, 1/pi, 0.0, 0], ppm, y, ...
+                               [1 0 -1], [10 2 1 1 9], o);
+    out = struct('beta', [x(1) abs(x(2)) x(3) x(4)], 'resnorm', resnorm);
+"""
+
 # deterministic input, so no seeded RNG has to agree across the two engines. The shapes
 # cover every branch the shim has: even and odd length, several columns, a row vector,
 # and an explicit n that both pads and truncates.
@@ -161,6 +171,20 @@ def test_lsqcurvefit_shim_matches_matlab_with_bounds(lorentz_data):
     mat_out = run_matlab(LSQCURVEFIT_CASE, lorentz_data)
 
     assert oct_out["inbounds"] and mat_out["inbounds"], "a solver left the box"
+    worst = _worst(oct_out["beta"], mat_out["beta"])
+    assert worst < 1e-5, (f"lsqcurvefit diverges by {worst:.2e}\n"
+                          f"  octave: {oct_out['beta']}\n  matlab: {mat_out['beta']}")
+
+
+#******************#
+#   short bounds   #
+#******************#
+@needs_matlab
+@needs_octave
+def test_lsqcurvefit_shim_takes_short_bounds_as_matlab(lorentz_data):
+    oct_out = run_octave(SHORT_BOUNDS_CASE, lorentz_data)
+    mat_out = run_matlab(SHORT_BOUNDS_CASE, lorentz_data)
+
     worst = _worst(oct_out["beta"], mat_out["beta"])
     assert worst < 1e-5, (f"lsqcurvefit diverges by {worst:.2e}\n"
                           f"  octave: {oct_out['beta']}\n  matlab: {mat_out['beta']}")

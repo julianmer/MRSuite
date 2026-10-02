@@ -29,6 +29,7 @@ dependencies = [
     "openpyxl",       # pandas needs it to read the challenge ground-truth .xlsx files
     "nifti-mrs",
     "nifti-mrs-plus>=0.1.0",   # the shared batched NIfTI-MRS wrapper
+    "spec2nii",       # mrsuite.io: raw scanner data to NIfTI-MRS
     "fsl_mrs",
     "oct2py",         # bridges to the FID-A Octave sources in externals/fid-a
     "lcmodel-wrapper>=0.2",   # drives the LCModel binary; 0.2 for the coord parser

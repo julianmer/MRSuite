@@ -30,6 +30,7 @@ from mrsuite.datasets import challenge2016, mrsi_challenge
 from mrsuite.simulators import mrs_sim
 
 from tests.bridges.test_lcmodel import needs_lcmodel
+from tests.bridges.test_tarquin import needs_tarquin
 from tests.conftest import needs_octave
 
 MRSI_SUBJECT = "Sub1"
@@ -283,6 +284,33 @@ def test_the_mrsi_config_simulates_on_the_challenge_grid(tmp_path):
 def test_every_fitter_covers_the_2016_ground_truth(fitter, ismrm2016):
     data, truth, path = ismrm2016
     _assert_covers_truth(_fit(fitter, data, path), truth, path)
+
+
+#*****************#
+#   water scale   #
+#*****************#
+@needs_2016
+@pytest.mark.parametrize("fitter, extra, tolerance", [
+    pytest.param("fsl_mrs", {}, 0.01, id="fsl_mrs"),
+    pytest.param("tarquin", {}, 0.02, id="tarquin", marks=needs_tarquin),
+    # LCModel needs its referencing shift kept small on a creatine-only spectrum, and
+    # its Lorentzian bias put the challenge's 10.83 mM at 10 (Marjanska et al., 2022)
+    pytest.param("lcmodel", {"params": {"shifmn(2)": -0.05, "shifmx(2)": 0.05}}, 0.10,
+                 id="lcmodel", marks=needs_lcmodel)])
+def test_the_challenges_water_scaling_gets_its_creatine_phantom_right(fitter, extra, tolerance):
+    """The challenge's 10 mM creatine test, really 10.83 mM (Marjanska et al., MRM 2022),
+    through each fitter's own water scaling on the challenge's settings."""
+    from fsl_mrs.utils import mrs_io
+
+    folder = challenge2016.ROOT / "Cr_water_scaling_JMRUI"
+    data, water = (mrs_io.read_FID(str(folder / f"Cr_10mM_test_water_scaling_{s}.txt"))
+                   for s in ("WS", "nWS"))
+    options = challenge2016.WATER[fitter]
+    options = {**options, **{k: {**options.get(k, {}), **v} for k, v in extra.items()}}
+    module = importlib.import_module(f"mrsuite.bridges.{fitter}")
+    result = module.fit(data, str(challenge2016.BASIS), water=water, **options)
+
+    assert result.conc("molarity")["Cr"] == pytest.approx(10.83, rel=tolerance)
 
 
 #**************#

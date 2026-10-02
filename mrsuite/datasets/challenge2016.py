@@ -34,6 +34,27 @@ ROOT = DATA / "2016_fitting_challenge"
 TRUTH = DATA / "2016_fitting_challenge_gts"
 BASIS = ROOT / "basisset_LCModel" / "press3T_30ms.BASIS"
 
+# The challenge's water scaling (its README, "Water scaling information"): water at 1 mol
+# per 18.015 g in 60% GM (0.78 g/ml, T2 110 ms) and 40% WM (0.65 g/ml, T2 80 ms) at TE 30 ms,
+# 29697 mM, and metabolites corrected for their T2 of 160 ms, x 1.206; TR >> T1, so no T1 term.
+TE = 0.030
+WATER_MM = 1e6 / 18.015 * (0.6 * 0.78 * np.exp(-30 / 110) + 0.4 * 0.65 * np.exp(-30 / 80))
+METAB_T2 = np.exp(30 / 160)
+
+# Each water-scaling fitter's own options that put it on that convention, for its fit. On
+# its defaults a tool measures its own constants, not its fit: LCModel and TARQUIN come
+# out at 0.70x the truth, FSL-MRS at 1.24x.
+WATER = {
+    "lcmodel": {"params": {"wconc": WATER_MM * METAB_T2, "atth2o": 1.0}},
+    "tarquin": {"opts": {"w_conc": WATER_MM * METAB_T2, "w_att": 1.0}},
+    "fsl_mrs": {"te": TE, "tr": 10.0, "quant": {      # the spectra's files carry no TE or TR
+        "t1": dict.fromkeys(("H2O_GM", "H2O_WM", "H2O_CSF", "METAB"), 1e-9),   # TR >> T1
+        "t2": {"H2O_GM": 0.110, "H2O_WM": 0.080, "H2O_CSF": 2.55, "METAB": 0.160},
+        "fractions": {"GM": 0.6, "WM": 0.4, "CSF": 0.0},
+        "densities": {"GM": 0.78, "WM": 0.65, "CSF": 0.97},
+        "add_corr": 1e6 / 18.015 / 55010}},    # FSL-MRS takes water as 55.01 M
+}
+
 
 #*************#
 #   listing   #

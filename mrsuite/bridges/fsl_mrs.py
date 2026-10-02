@@ -31,6 +31,9 @@ from mrsuite.bridges.base import Bridge
 from mrsuite.core.method import method
 from mrsuite.core.result import FitResult
 
+# QuantificationInfo's water scaling options that are set after it is built, not passed in
+SET_AFTER = ("fractions", "densities", "add_corr", "h2o_limits")
+
 
 #**************************************************************************************************#
 #                                        Class FSLMRSBridge                                        #
@@ -146,7 +149,8 @@ def _fsl(data: Any) -> Any:
 @method("FSL-MRS", version=lambda: bridge.version(), name="fit_FSLModel", parallel=True)
 def fit(data: Any, basis: Any, water: Any = None, ppmlim: tuple = (0.2, 4.2),
         baseline_order: int = 2, method: str = "Newton",
-        te: Optional[float] = None, tr: Optional[float] = None, **kwargs) -> Any:
+        te: Optional[float] = None, tr: Optional[float] = None,
+        quant: Optional[dict] = None, **kwargs) -> Any:
     """
     Fit with FSL-MRS, as MRSuite's uniform result.
 
@@ -167,6 +171,11 @@ def fit(data: Any, basis: Any, water: Any = None, ppmlim: tuple = (0.2, 4.2),
         te (Optional[float]): Echo time in seconds, for water scaling. Read from the
             header when absent.
         tr (Optional[float]): Repetition time in seconds, likewise.
+        quant (Optional[dict]): FSL-MRS's own water scaling options, by the names of
+            ``QuantificationInfo``: its keywords (``t1``, ``t2``, ``fa``,
+            ``water_ref_metab``, ...) and what it sets (``fractions``, ``densities``,
+            ``add_corr``, ``h2o_limits``). Anything not given is FSL-MRS's default.
+            Used only with ``water``, as are ``te`` and ``tr``.
         **kwargs: Passed through to ``fit_FSLModel``.
         workers (int): Processes to spread a batch over (see ``mrsuite.core.parallel``).
 
@@ -201,9 +210,17 @@ def fit(data: Any, basis: Any, water: Any = None, ppmlim: tuple = (0.2, 4.2),
                 "water scaling needs an echo and repetition time; the header has "
                 f"EchoTime={header('EchoTime')} and "
                 f"RepetitionTime={header('RepetitionTime')}. Pass te= and tr=.")
+        quant = dict(quant or {})
+        set_after = {k: quant.pop(k) for k in SET_AFTER if k in quant}
+        info = quantify.QuantificationInfo(echo, rep, mrs.names, mrs.centralFrequency / 1e6,
+                                           **quant)
+        for name, value in set_after.items():
+            if name in ("fractions", "densities"):   # validated by their own setters
+                getattr(info, f"set_{name}")(value)
+            else:
+                setattr(info, name, value)
         try:
-            res.calculateConcScaling(mrs, quant_info=quantify.QuantificationInfo(
-                echo, rep, mrs.names, mrs.centralFrequency / 1e6))
+            res.calculateConcScaling(mrs, quant_info=info)
         except res.QuantificationError as err:
             # the reference metabolite fitted to zero: a failed fit keeps its raw values;
             # the same error for a water reference with no integral stays an error

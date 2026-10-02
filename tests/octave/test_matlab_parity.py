@@ -65,6 +65,13 @@ SHORT_BOUNDS_CASE = LORENTZ + """
     out = struct('beta', [x(1) abs(x(2)) x(3) x(4)], 'resnorm', resnorm);
 """
 
+# as op_robustSpecReg calls it, on a matrix by columns, and the other shapes it accepts
+NANMEDIAN_CASE = """
+    D = [1 NaN 3; 4 5 NaN; 2 8 6; NaN 7 9];
+    out = struct('cols', nanmedian(D), 'rows', nanmedian(D, 2)', ...
+                 'vec', nanmedian([3 NaN 1 2]), 'allnan', isnan(nanmedian([NaN; NaN])));
+"""
+
 # deterministic input, so no seeded RNG has to agree across the two engines. The shapes
 # cover every branch the shim has: even and odd length, several columns, a row vector,
 # and an explicit n that both pads and truncates.
@@ -188,6 +195,18 @@ def test_lsqcurvefit_shim_takes_short_bounds_as_matlab(lorentz_data):
     worst = _worst(oct_out["beta"], mat_out["beta"])
     assert worst < 1e-5, (f"lsqcurvefit diverges by {worst:.2e}\n"
                           f"  octave: {oct_out['beta']}\n  matlab: {mat_out['beta']}")
+
+
+#***************#
+#   nanmedian   #
+#***************#
+@needs_matlab
+@needs_octave
+def test_nanmedian_shim_matches_matlab():
+    oct_out = run_octave(NANMEDIAN_CASE)
+    mat_out = run_matlab(NANMEDIAN_CASE)
+
+    assert oct_out == mat_out
 
 
 #*************#

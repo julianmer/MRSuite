@@ -508,7 +508,9 @@ class FIDABridge(Bridge):
 
         def target(*args, **kwargs):
             nout = kwargs.pop("nout", self.nout)
-            return self.octave.feval(func, *args, nout=nout, **kwargs)
+            out = self.octave.feval(func, *args, nout=nout, **kwargs)
+            # several outputs: oct2py hands back a list, MATLAB's runtime a tuple
+            return tuple(out) if nout > 1 else out
 
         return target
 

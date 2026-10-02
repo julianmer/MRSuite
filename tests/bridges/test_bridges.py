@@ -21,6 +21,7 @@ import json
 import numpy as np
 import pytest
 
+from nifti_mrs.nifti_mrs import NIFTI_MRS
 from nifti_mrs_plus import NIfTI_MRS_Plus
 from mrsuite import fid_a, fsl_mrs
 from mrsuite.bridges import describe
@@ -135,6 +136,19 @@ def test_fid_a_addphase_changes_phase_but_not_magnitude(spectrum):
     a, b = np.asarray(spectrum[:]).squeeze(), np.asarray(out[:]).squeeze()
     assert np.allclose(np.abs(a), np.abs(b), rtol=1e-6), "magnitude should be preserved"
     assert not np.allclose(a, b, rtol=1e-6), "phase should have changed"
+
+
+#*************#
+#   outputs   #
+#*************#
+@needs_octave
+def test_fid_a_converts_the_spectra_among_several_outputs(spectrum):
+    """A function with more outputs than the spectra still hands the spectra back as
+    NIfTI-MRS, and the rest as they are."""
+    out, filt = fid_a.op_filter(spectrum, 5.0, nout=2)
+
+    assert isinstance(out, NIFTI_MRS)
+    assert np.size(filt) == spectrum.shape[3]   # the filter itself, one value per point
 
 
 #*******************#

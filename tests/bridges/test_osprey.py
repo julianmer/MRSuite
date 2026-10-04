@@ -391,3 +391,36 @@ def test_without_creatine_only_raw_is_reported():
 
     assert "raw" in out.concentrations
     assert "internal" not in out.concentrations
+
+
+#***********#
+#   chain   #
+#***********#
+def assert_a_chain_keeps_the_history(runtime, spectrum):
+    """Osprey appends its record of a step as a column; a history of several entries
+    handed over as a row made that a 2-D cell MATLAB cannot return. A chain keeps the
+    input's history and adds one entry per step."""
+    import copy
+
+    from mrsuite.bridges.osprey import OspreyBridge
+    from mrsuite.core import provenance
+
+    start = copy.deepcopy(spectrum)
+    provenance.append(start, provenance.entry("test", "1", "earlier", {}))
+    before = provenance.history(start)
+    bridge = OspreyBridge(runtime=runtime)
+    try:
+        out = start
+        for _ in range(3):
+            out = bridge.op_eccKlose(out, spectrum, nout=2)[0]
+    finally:
+        bridge.octave.exit()
+
+    history = provenance.history(out)
+    assert history[:len(before)] == before
+    assert [e["Method"] for e in history[len(before):]] == ["op_eccKlose"] * 3
+
+
+@needs_octave
+def test_osprey_steps_chain(spectrum):
+    assert_a_chain_keeps_the_history("local", spectrum)

@@ -133,6 +133,11 @@ class OspreyCodec(FIDACodec):
         hdr_ext = nii["hdr_ext"]
         hdr_ext = hdr_ext.to_dict() if hasattr(hdr_ext, "to_dict") else dict(hdr_ext)
         hdr_ext.setdefault("ProcessingSoftwareVersion", f"MRSuite {__version__}")
+        # It appends there with ProcessingApplied{end+1,1}, assuming a column, but both
+        # runtimes hand a list over as a 1xN row: from two entries on that makes a 2-D cell,
+        # which MATLAB cannot return. Osprey starts its own instead, fida2nifti drops it,
+        # and the method keeps the input's history and records the step itself.
+        hdr_ext.pop("ProcessingApplied", None)
         nii["hdr_ext"] = hdr_ext
         return out
 
@@ -153,6 +158,11 @@ class OspreyCodec(FIDACodec):
         # dialect never applied, so put it back before handing over
         fida = dict(fida)
         fida["fids"] = np.conj(np.asarray(fida["fids"]))
+        # Osprey's own record of the step (see nifti2fida), so the input's history carries over
+        nii = dict(fida["nii_mrs"])
+        nii["hdr_ext"] = {k: v for k, v in dict(nii["hdr_ext"]).items()
+                          if k != "ProcessingApplied"}
+        fida["nii_mrs"] = nii
         return super().fida2nifti(fida)
 
 

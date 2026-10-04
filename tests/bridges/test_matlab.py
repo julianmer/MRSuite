@@ -70,6 +70,14 @@ def test_a_fid_a_step_runs_in_matlab(spectrum):
     bridge.octave.exit()
 
 
+#***********#
+#   chain   #
+#***********#
+def test_osprey_steps_chain_in_matlab(spectrum):
+    from tests.bridges.test_osprey import assert_a_chain_keeps_the_history
+    assert_a_chain_keeps_the_history("matlab", spectrum)
+
+
 #*************#
 #   osprey    #
 #*************#

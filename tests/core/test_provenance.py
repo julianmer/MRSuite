@@ -56,6 +56,19 @@ def test_small_arguments_are_values_and_large_ones_checksums():
     assert large["array"]["sha256"] != provenance.checksum(np.arange(1000.0) + 1)
 
 
+#***************#
+#   byteorder   #
+#***************#
+def test_the_same_values_read_back_from_a_file_keep_their_checksum():
+    """Native and explicitly little-endian complex arrays hold the same bytes; only the
+    dtype's repr differs ('complex128' vs '<c16')."""
+    values = np.arange(4.0) + 1j
+    read = values.astype(np.dtype("c16").newbyteorder("<"))   # as nibabel hands it out
+    assert repr(read.dtype) != repr(values.dtype)
+    assert provenance.checksum(values) == provenance.checksum(read)
+    assert provenance.checksum(values) != provenance.checksum(values.astype("<c8"))
+
+
 #************#
 #   a file   #
 #************#
@@ -128,3 +141,12 @@ def test_every_fitter_is_a_step_under_the_same_name():
 
     for module in (fsl_mrs, lcmodel, osprey):
         assert module.step.fit("basis.BASIS").__name__ == "fit"
+
+
+#****************#
+#   byte order   #
+#****************#
+def test_a_checksum_is_the_values_whatever_their_byte_order():
+    values = np.arange(6, dtype=complex).reshape(2, 3) * (1 + 2j)
+    assert provenance.checksum(values) == provenance.checksum(values.astype(">c16"))
+    assert provenance.checksum(values) != provenance.checksum(values.astype("<c8"))

@@ -76,9 +76,13 @@ def mrsuite_version() -> str:
 #   checksum   #
 #**************#
 def checksum(array: Any) -> str:
-    """SHA-256 of an array's values, independent of how it is laid out in memory."""
+    """SHA-256 of an array's values, independent of how it is laid out in memory and of
+    its byte order."""
     array = np.ascontiguousarray(array)
-    return hashlib.sha256(array.tobytes() + str((array.dtype, array.shape)).encode()).hexdigest()
+    array = array.astype(array.dtype.newbyteorder("<"), copy=False)
+    # dtype.str, not the dtype: its repr says 'complex128' natively but '<c16' once read
+    # from a file, for the same bytes
+    return hashlib.sha256(array.tobytes() + str((array.dtype.str, array.shape)).encode()).hexdigest()
 
 
 #*******************#
@@ -123,7 +127,7 @@ def _sha256(path: str, mtime: int, size: int) -> str:
 #**************#
 #   describe   #
 #**************#
-def describe(value: Any) -> Any:
+def describe(value: Any, portable: bool = False) -> Any:
     """
     A JSON-serialisable record of an argument, faithful enough to replay the call.
 
@@ -133,35 +137,37 @@ def describe(value: Any) -> Any:
 
     Args:
         value: Any argument a step was given.
+        portable (bool): Files by their portable path (see ``portable``), as a record
+            shared beyond this machine gives them.
 
     Returns:
         A structure json.dumps accepts.
     """
     if isinstance(value, (str, os.PathLike)) and os.path.isfile(value):
-        return file_checksum(value)
+        return portable_file(value) if portable else file_checksum(value)
     if value is None or isinstance(value, (bool, int, float, str)):
         return value
     if isinstance(value, complex):
         return {"real": value.real, "imag": value.imag}
     if isinstance(value, np.generic):
-        return describe(value.item())
+        return describe(value.item(), portable)
     if isinstance(value, NIFTI_MRS):
         return {"nifti_mrs": {"sha256": checksum(value[:]), "shape": list(value.shape),
                               "ProcessingApplied": history(value)}}
     # by type, not by attribute: oct2py's Struct answers every attribute it is asked for
     if isinstance(value, NIfTI_MRS_Plus):
-        return {"nifti_mrs_plus": [describe(item) for item in value.list()]}
+        return {"nifti_mrs_plus": [describe(item, portable) for item in value.list()]}
     if isinstance(value, np.ndarray):
         if value.size <= _INLINE and not np.iscomplexobj(value):
             return value.tolist()
         return {"array": {"sha256": checksum(value), "shape": list(value.shape),
                           "dtype": str(value.dtype)}}
     if isinstance(value, dict):
-        return {str(k): describe(v) for k, v in value.items()}
+        return {str(k): describe(v, portable) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
-        return [describe(v) for v in value]
+        return [describe(v, portable) for v in value]
     if isinstance(value, Path):
-        return describe(str(value))
+        return describe(str(value), portable)
     return {"type": f"{type(value).__module__}.{type(value).__qualname__}"}
 
 

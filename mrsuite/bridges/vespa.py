@@ -55,9 +55,15 @@ def fit(data: Any, prior: Dict[str, Any], opts: Optional[Dict[str, Any]] = None)
             spectrum.
         prior: Vespa's analogue of a basis: line lists by metabolite name,
             ``{"NAA": {"ppms": [2.008], "areas": [3.0], "phases": [0.0]}, ...}``, e.g.
-            from a density-matrix simulation's transition table. Optional per-metabolite
-            keys steer the initial peak search: ``peak_ppm`` (defaults to the strongest
-            line) and ``search_ppm`` (default 0.1).
+            from a density-matrix simulation's transition table. A metabolite may
+            instead be a sampled basis function, ``{"fid": array}`` on the data's time
+            points and orientation, as Vespa's own macromolecule model takes an acquired
+            one: line lists carry no linewidth of their own, so a basis function with
+            lines closer than the FID resolves, or a broad one, has no exact line list.
+            Its lines, for Vespa's local weighting and the noise window, are the peaks of
+            its spectrum above a tenth of its maximum. Optional per-metabolite keys
+            steer the initial peak search: ``peak_ppm`` (defaults to the strongest line,
+            or the spectrum's maximum) and ``search_ppm`` (default 0.1).
         opts (Optional[dict]): Any fit-block setting by its Vespa name, applied onto the
             block's defaults, e.g. ``{"baseline_method": "", "optimize_max_iterations":
             500}``. Two defaults deviate from Vespa's, both traps for headless runs: the
@@ -65,9 +71,9 @@ def fit(data: Any, prior: Dict[str, Any], opts: Optional[Dict[str, Any]] = None)
             effectively non-negative (Vespa's own source keeps that variant; its
             initial search misjudges J-coupled multiplets by more than 20x, and a
             clamped area is silently wrong, which the GUI user would see and a batch
-            would not), and the Cramer-Rao noise
-            window is placed in the spectrum's upfield tail instead of at -8..-6 ppm,
-            which lies outside a typical sweep width.
+            would not), and the Cramer-Rao noise window, at -8..-6 ppm outside a
+            typical sweep width, is placed 0.5-2 ppm in from whichever spectral edge
+            lies farther from the prior's lines and the water (the reference ppm).
         workers (int): Processes to spread a batch over (see ``mrsuite.core.parallel``).
 
     Returns:
@@ -76,8 +82,13 @@ def fit(data: Any, prior: Dict[str, Any], opts: Optional[Dict[str, Any]] = None)
         'percentage' holds the area Cramer-Rao bounds relative to the areas.
 
     Raises:
-        ValueError: If a spectrum is not a single FID, or an option is not a fit-block
-            setting.
+        ValueError: If a spectrum is not a single FID, an option is not a fit-block
+            setting, a sampled basis function is not on the data's points, the noise
+            window would hold signal, or the wavelet baseline (Vespa's default) is
+            asked of a spectrum whose length is not a power of 2: Vespa's filter
+            returns the largest power of 2 below it and the fit then fails to
+            broadcast, and its zero fill multiplies by powers of 2 only, so choose
+            ``"bspline_fixed_knot"`` or ``""`` (none) for such data.
         ImportError: If Vespa is not installed.
     """
     if np.prod(data.shape) != data.shape[3]:
@@ -86,6 +97,8 @@ def fit(data: Any, prior: Dict[str, Any], opts: Optional[Dict[str, Any]] = None)
     try:
         import vespa.analysis.mrs_dataset as mrs_dataset
         import vespa.common.mrs_data_raw as mrs_data_raw
+        from vespa.analysis.constants import FitBaselineMethod
+        from vespa.common.mrs_prior import BasisSetItem
         from vespa.common.mrs_prior_metabolite import PriorMetabolite
     except ImportError as err:
         raise ImportError("Vespa is not installed: pip install from "
@@ -106,9 +119,13 @@ def fit(data: Any, prior: Dict[str, Any], opts: Optional[Dict[str, Any]] = None)
     dataset = mrs_dataset.dataset_from_raw(raw)
     block = dataset.add_voigt()
 
+    ppm = resppm + np.fft.fftfreq(fid.size, data.dwelltime) / f0
+    prior = {m: _sampled(prior[m], ppm) if "fid" in prior[m] else prior[m] for m in prior}
     names = list(prior)
     block.set.prior.metabolites = collections.OrderedDict()
     for name in names:
+        if "fid" in prior[name]:
+            continue
         lines = prior[name]
         met = PriorMetabolite()
         met.dims = [name, 1, 1, 1]
@@ -126,20 +143,44 @@ def fit(data: Any, prior: Dict[str, Any], opts: Optional[Dict[str, Any]] = None)
     block.set.prior_search_ph0 = [0.0] * len(names)
     block.set.optimize_bounds_area_min = 1e-6
     block.set.optimize_bounds_area_max = 1e5
-    edge = resppm - sw / (2.0 * f0)                 # noise window in the upfield tail
-    block.set.cramer_rao_ppm_start = edge + 0.5
-    block.set.cramer_rao_ppm_end = edge + 2.0
+
+    # the noise window 0.5-2 ppm in from the edge farther from all signal: the prior's
+    # lines and the water at the reference ppm
+    lowest = min(min(prior[m]["ppms"]) for m in names)
+    highest = max([resppm] + [max(prior[m]["ppms"]) for m in names])
+    edges = resppm - sw / (2.0 * f0), resppm + sw / (2.0 * f0)
+    upfield, downfield = (edges[0] + 0.5, edges[0] + 2.0), (edges[1] - 2.0, edges[1] - 0.5)
+    window = upfield if lowest - upfield[1] >= downfield[0] - highest else downfield
+    block.set.cramer_rao_ppm_start, block.set.cramer_rao_ppm_end = window
     for key, value in (opts or {}).items():
         if not hasattr(block.set, key):
             raise ValueError(f"'{key}' is not a Vespa fit-block setting")
         setattr(block.set, key, value)
-    lowest = min(min(prior[m]["ppms"]) for m in names)
-    if block.set.cramer_rao_flag and block.set.cramer_rao_ppm_end > lowest:
-        raise ValueError(f"Vespa's Cramer-Rao noise window ends at "
-                         f"{block.set.cramer_rao_ppm_end:.2f} ppm, above the prior's lowest "
-                         f"line at {lowest:.2f} ppm: at this sweep width the tail holds "
-                         f"signal; set cramer_rao_ppm_start and _end in opts")
+    start, end = block.set.cramer_rao_ppm_start, block.set.cramer_rao_ppm_end
+    if block.set.cramer_rao_flag and start < highest and end > lowest:
+        raise ValueError(f"Vespa's Cramer-Rao noise window, {start:.2f}-{end:.2f} ppm, "
+                         f"overlaps the signal at {lowest:.2f}-{highest:.2f} ppm (the prior's "
+                         f"lines and the water): at this sweep width neither tail is free; "
+                         f"set cramer_rao_ppm_start and _end in opts to a stretch without "
+                         f"signal, or cramer_rao_flag to False for no bounds")
+    points = dataset.spectral_dims[0]
+    if block.set.baseline_method == FitBaselineMethod.WAVELET_FILTER_BASIC and points & (points - 1):
+        raise ValueError(f"Vespa's wavelet baseline needs a spectrum of a power of 2 points, "
+                         f"not {points}; set baseline_method to 'bspline_fixed_knot' or '' "
+                         f"in opts")
     block.set.prior.calculate_full_basis_set(None, None, dataset)
+    # sampled functions go into the basis set as Vespa builds one from lines: in its
+    # orientation, and at its frequencies, which run from the spectrum's edge (a line at
+    # the reference ppm sits at +sw/2, so the function is chopped, as its macromolecule
+    # dataset is)
+    chop = np.where(np.arange(fid.size) % 2, -1.0, 1.0)
+    for name in names:
+        if "fid" in prior[name]:
+            item = BasisSetItem()
+            item.fid = np.conj(prior[name]["fid"]) * chop
+            item.peak_ppm = prior[name]["peak_ppm"]
+            item.all_ppms = list(prior[name]["ppms"])
+            block.set.prior.basis_set[name] = item
 
     voxel = (0, 0, 0)
     dataset.blocks["spectral"].chain.run([voxel], entry="all")
@@ -148,6 +189,26 @@ def fit(data: Any, prior: Dict[str, Any], opts: Optional[Dict[str, Any]] = None)
     dataset.blocks["spectral"].chain.run([voxel], entry="all")
     dataset.blocks["fit"].chain.run([voxel], entry="full_fit", do_init=True)
     return _result(names, block.fit_results[:, 0, 0, 0], block.cramer_rao[:, 0, 0, 0], scale)
+
+
+#*************#
+#   sampled   #
+#*************#
+def _sampled(entry: Dict[str, Any], ppm: np.ndarray) -> Dict[str, Any]:
+    """A sampled basis function with the lines Vespa needs of it: the peaks of its
+    spectrum above a tenth of its maximum (not its extent, which a truncated FID's
+    ringing spreads over the whole sweep), and the peak search at the real spectrum's
+    maximum (as Vespa places a line list's), unless given."""
+    fid = np.asarray(entry["fid"], complex)
+    if fid.size != ppm.size:
+        raise ValueError(f"a sampled basis function needs the data's {ppm.size} points, "
+                         f"not {fid.size}")
+    spectrum = np.fft.fft(fid)
+    size = np.abs(spectrum)
+    peaks = (size >= np.roll(size, 1)) & (size >= np.roll(size, -1)) & (size >= 0.1 * size.max())
+    lines = ppm[peaks]
+    return {"ppms": list(lines), "peak_ppm": float(ppm[np.argmax(spectrum.real)]),
+            **entry, "fid": fid}
 
 
 #***************#

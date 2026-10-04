@@ -123,3 +123,84 @@ def test_a_fit_finds_naa_where_naa_is(tmp_path):
         assert again.conc("internal")["NAA"] == pytest.approx(2.0, rel=0.05), scale
         assert again.conc("raw")["NAA"] == pytest.approx(scale * out.conc("raw")["NAA"],
                                                          rel=0.02), scale
+
+
+#***********#
+#   prior   #
+#***********#
+@needs_pyamares
+def test_a_prior_from_basis_functions_returns_their_amplitudes(tmp_path):
+    """Basis functions become peak groups with one amplitude each, divided back to unit
+    concentration: a doublet comes back as one metabolite, a name with digits (which
+    pyAMARES reads as a multiplet suffix) under its own name, each at its amplitude."""
+    n, dwell, f0, shift = 2048, 1 / 2500.0, 127.7, 4.65
+    t = np.arange(n) * dwell
+
+    def line(ppm):
+        return np.exp((2j * np.pi * (ppm - shift) * f0 - 6.0) * t)
+
+    basis = {"NAA": line(2.008), "Cr39": line(3.927), "Glx": line(2.34) + line(2.37)}
+    amps = {"NAA": 2.0, "Cr39": 1.0, "Glx": 3.0}
+    fid = sum(a * basis[m] for m, a in amps.items()) * np.exp(-4.0 * t)
+    fid += 0.001 * (np.random.default_rng(0).normal(size=n)
+                    + 1j * np.random.default_rng(1).normal(size=n))
+    data = gen_nifti_mrs(fid.reshape(1, 1, 1, -1).astype(np.complex64), dwell, f0,
+                         nucleus="1H")
+
+    path = pyamares.prior(str(tmp_path / "prior.csv"), basis, dwell, f0, shift)
+    out = pyamares.fit(data, path)
+
+    assert set(out.conc("raw")) == set(amps)
+    for name, amp in amps.items():
+        assert out.conc("raw")[name] == pytest.approx(amp, rel=0.05), name
+
+
+#********************#
+#   reconstruction   #
+#********************#
+@needs_pyamares
+def test_a_prior_as_pyamares_reads_it_is_the_basis(tmp_path):
+    """Components of distinct phases and dampings, simulated by pyAMARES itself from the
+    file at unit concentration: the basis back, one global phase apart at most."""
+    import pyAMARES
+    from pyAMARES.kernel.fid import multieq6, uninterleave
+
+    n, dwell, f0, shift = 2048, 1 / 2500.0, 127.7, 4.65
+    t = np.arange(n) * dwell
+
+    def line(ppm, phase, rate):
+        return np.exp((2j * np.pi * (ppm - shift) * f0 - rate) * t + 1j * phase)
+
+    basis = {"A": line(2.0, 0.0, 6.0) + 0.6 * line(2.1, 0.9, 11.0),
+             "B": line(3.0, -0.4, 8.0) + 0.5 * line(3.2, -1.3, 5.0)}
+    path = pyamares.prior(str(tmp_path / "prior.csv"), basis, dwell, f0, shift)
+    params = pyAMARES.initialize_FID(np.ones(n, complex), priorknowledgefile=path, MHz=f0,
+                                     sw=1 / dwell, deadtime=0.0, carrier=shift, g_global=False)
+    initial = params.initialParams.copy()
+    for name, p in initial.items():
+        if name.startswith("dk_") and p.expr is None:
+            p.set(value=p.min)                  # no extra broadening: the functions' own
+    initial.update_constraints()
+
+    model = uninterleave(multieq6(initial, params.timeaxis))
+    want = sum(basis.values()) * np.exp(2j * np.pi * shift * f0 * t)
+    gain = np.vdot(model, want) / np.vdot(model, model)
+    assert abs(gain) == pytest.approx(1.0, rel=0.01)
+    assert np.linalg.norm(want - gain * model) < 0.01 * np.linalg.norm(want)
+
+
+#***********#
+#   names   #
+#***********#
+def test_names_are_spelt_as_pyamares_reads_them(tmp_path):
+    """Digits as letters, anything else as an underscore; names spelt alike refused."""
+    t = np.arange(256) / 2500.0
+    fid = np.exp((2j * np.pi * 100.0 - 8.0) * t)
+
+    path = pyamares.prior(str(tmp_path / "p.csv"), {"MM0.9": fid, "GPC+PCh": 2 * fid},
+                          1 / 2500.0, 127.7, 4.65)
+    assert pyamares._metabolites(path)[0] == {"MMa_j": "MM0.9", "GPC_PCh": "GPC+PCh"}
+
+    with pytest.raises(ValueError, match="alike"):
+        pyamares.prior(str(tmp_path / "q.csv"), {"A+B": fid, "A-B": fid}, 1 / 2500.0, 127.7,
+                       4.65)

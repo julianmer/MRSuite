@@ -239,3 +239,73 @@ def mrs_sim_config(folder: Path = DATA / 'basis_sets') -> Dict:
     config['snr'] = [round(20 * factor, 1), round(161 * factor, 1)]
     config['parameters']['snr'] = config['snr']
     return config
+
+
+#****************#
+#   basis fids   #
+#****************#
+def basis_fids() -> Dict[str, np.ndarray]:
+    """
+    The challenge's basis functions as FIDs on the data's 2048 points, in NIfTI-MRS
+    orientation and on the ground truth's scale.
+
+    The text release (``basisset_text``, the conjugate orientation) holds the same
+    functions as the .BASIS, which is them at 1/64 and zero-filled, Ace included, which
+    the truth has and the .BASIS lacks. Every function there carries a reference peak at
+    0 ppm that the data do not; the release without it (``basisset_text_noTMS``) differs
+    from the other by exactly that peak, except for Mac, whose version there is another
+    function altogether, one the data fit worse. So the reference is taken as that
+    difference for Cr and removed from every function.
+
+    Returns:
+        Dict[str, np.ndarray]: (2048,) FIDs by the truth's names.
+    """
+    def read(folder, name):
+        columns = np.loadtxt(ROOT / folder / f'{name}.txt')
+        return np.conj(columns[:, 0] + 1j * columns[:, 1])
+
+    reference = read('basisset_text', 'Cr') - read('basisset_text_noTMS', 'Cr')
+    return {f.stem: read('basisset_text', f.stem) - reference
+            for f in sorted((ROOT / 'basisset_text').glob('*.txt'))}
+
+
+#*****************#
+#   vespa prior   #
+#*****************#
+def vespa_prior() -> Dict[str, Dict[str, np.ndarray]]:
+    """
+    Vespa's prior for the challenge: its basis functions, sampled (see
+    ``mrsuite.bridges.vespa.fit``). Line lists cannot hold them: the functions carry the
+    challenge's 2 Hz Lorentzian, and lines of J-coupled metabolites closer than the
+    0.512 s FID resolves leave HSVD only components of other widths, which a line list,
+    one width for all, misses by 2-30% of the function (Glu, Gln, Glc, GSH, GABA, Ins).
+
+    Returns:
+        Dict[str, Dict[str, np.ndarray]]: ``{name: {"fid": fid}}`` for every function.
+    """
+    return {name: {'fid': fid} for name, fid in basis_fids().items()}
+
+
+#********************#
+#   pyamares prior   #
+#********************#
+def pyamares_prior(folder: Path = DATA / 'basis_sets') -> str:
+    """
+    pyAMARES' prior knowledge for the challenge, written from its basis functions into
+    ``folder`` (see ``mrsuite.bridges.pyamares.prior``), afresh each time: seconds, and
+    never a file from older code.
+
+    Args:
+        folder (Path): Where the prior lives.
+
+    Returns:
+        str: The prior-knowledge file.
+    """
+    from mrsuite.bridges import pyamares
+
+    path = Path(folder) / 'challenge_2016_pyamares.csv'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    spectrum = load(1)[0].list()[0]          # the prior in ppm as the fit will read it
+    return pyamares.prior(str(path), basis_fids(), dwell=spectrum.dwelltime,
+                          frequency=spectrum.spectrometer_frequency[0],
+                          centre=spectrum.SpecFreqChemShift)

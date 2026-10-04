@@ -152,22 +152,13 @@ def basis(path: str, subject: str = 'Sub1', data_dir: Path = DATA_DIR) -> str:
     Returns:
         str: The path written.
     """
-    import h5py
     from lcmodel_wrapper.convert import write_basis
 
-    module = _module(data_dir)
-    acquisition = module.read_acquisition(subject)
-    skip = int(round(acquisition['echo_time_s'] / acquisition['dwell_time_s']))
-
-    with h5py.File(module.mat_path(subject, need_truth=False), 'r') as f:
-        def columns(name):
-            raw = f[name][()]
-            return (raw['real'] + 1j * raw['imag'])[skip:skip + acquisition['n_points']]
-        fids = np.concatenate([columns('VtMeta'), columns('VtMM')[:, :len(MACROMOLECULES)]],
-                              axis=1)
+    acquisition = _module(data_dir).read_acquisition(subject)
+    fids = basis_fids(subject, data_dir)
 
     # write_basis takes LCModel's .RAW orientation, the conjugate of NIfTI-MRS'
-    return write_basis(path, list(NAMES.values()) + list(MACROMOLECULES), list(np.conj(fids.T)),
+    return write_basis(path, list(fids), [np.conj(fid) for fid in fids.values()],
                        dwell=acquisition['dwell_time_s'],
                        central_freq=acquisition['spectrometer_frequency_mhz'],
                        centre_ppm=acquisition['ppm_offset'])
@@ -336,3 +327,86 @@ def mrs_sim_config(folder: Optional[Path] = None,
                             'f_shift': span(samples['f_shift']),
                             'snr': span(samples['snr']), **ranges}
     return config
+
+
+#****************#
+#   basis fids   #
+#****************#
+def basis_fids(subject: str = 'Sub1', data_dir: Path = DATA_DIR) -> Dict[str, np.ndarray]:
+    """
+    The release's basis functions as FIDs on the data's time points, in NIfTI-MRS
+    orientation and on the ground truth's scale: VtMeta and the first nine VtMM columns,
+    from TE on (see ``basis``).
+
+    Args:
+        subject (str): Whose .mat to read the basis from; every subject shares it.
+        data_dir (Path): Where the release lives.
+
+    Returns:
+        Dict[str, np.ndarray]: (384,) FIDs by the names in NAMES, then MACROMOLECULES.
+    """
+    import h5py
+
+    module = _module(data_dir)
+    acquisition = module.read_acquisition(subject)
+    skip = int(round(acquisition['echo_time_s'] / acquisition['dwell_time_s']))
+    with h5py.File(module.mat_path(subject, need_truth=False), 'r') as f:
+        def columns(name):
+            raw = f[name][()]
+            return (raw['real'] + 1j * raw['imag'])[skip:skip + acquisition['n_points']]
+        fids = np.concatenate([columns('VtMeta'), columns('VtMM')[:, :len(MACROMOLECULES)]],
+                              axis=1)
+    return dict(zip(list(NAMES.values()) + list(MACROMOLECULES), fids.T))
+
+
+#*****************#
+#   vespa prior   #
+#*****************#
+def vespa_prior(subject: str = 'Sub1',
+                data_dir: Path = DATA_DIR) -> Dict[str, Dict[str, np.ndarray]]:
+    """
+    Vespa's prior for the release: its basis functions, sampled (see
+    ``mrsuite.bridges.vespa.fit``), the macromolecules among them. Vespa's own
+    macromolecule model takes one acquired function with one area, while the release has
+    nine, whose amplitudes vary apart from voxel to voxel; and line lists cannot hold
+    the broad ones, nor the J-coupled metabolites' lines closer than the 0.32 s FID
+    resolves.
+
+    Args:
+        subject (str): Whose .mat to read the basis from.
+        data_dir (Path): Where the release lives.
+
+    Returns:
+        Dict[str, Dict[str, np.ndarray]]: ``{name: {"fid": fid}}`` for every function.
+    """
+    return {name: {'fid': fid} for name, fid in basis_fids(subject, data_dir).items()}
+
+
+#********************#
+#   pyamares prior   #
+#********************#
+def pyamares_prior(folder: Optional[Path] = None, subject: str = 'Sub1',
+                   data_dir: Path = DATA_DIR) -> str:
+    """
+    pyAMARES' prior knowledge for the release, written from its basis functions into
+    ``folder`` (see ``mrsuite.bridges.pyamares.prior``), afresh each time: seconds, and
+    never a file from older code or another subject.
+
+    Args:
+        folder (Optional[Path]): Where the prior lives; ``data/basis_sets`` by default.
+        subject (str): Whose .mat to read the basis from.
+        data_dir (Path): Where the release lives.
+
+    Returns:
+        str: The prior-knowledge file.
+    """
+    from mrsuite.bridges import pyamares
+
+    folder = Path(folder) if folder else data_dir.parent / 'basis_sets'
+    path = folder / 'mrsi_challenge_2024_pyamares.csv'
+    folder.mkdir(parents=True, exist_ok=True)
+    acquisition = _module(data_dir).read_acquisition(subject)
+    return pyamares.prior(str(path), basis_fids(subject, data_dir),
+                          dwell=acquisition['dwell_time_s'],
+                          frequency=acquisition['spectrometer_frequency_mhz'],
+                          centre=acquisition['ppm_offset'])

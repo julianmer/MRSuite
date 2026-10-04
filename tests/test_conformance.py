@@ -25,6 +25,7 @@ from mrsuite.models import MLP, WAND
 from mrsuite.testing import check
 
 from tests.bridges.test_lcmodel import needs_lcmodel
+from tests.bridges.test_mrspeclab import needs_mrspeclab
 from tests.bridges.test_pyamares import SINGLETS as AMARES_SINGLETS, needs_pyamares
 from tests.bridges.test_tarquin import needs_tarquin
 from tests.bridges.test_vespa import SINGLETS as VESPA_SINGLETS, needs_vespa
@@ -90,6 +91,15 @@ def test_osprey_processing(challenge):
 def test_spant_processing(challenge):
     from mrsuite import spant
     check(spant.lb, challenge[0], 5)
+
+
+#***************#
+#   mrspeclab   #
+#***************#
+@needs_mrspeclab
+def test_mrspeclab_processing(challenge):
+    from mrsuite import mrspeclab
+    check(mrspeclab.LineBroadening, challenge[0], factor=3)
 
 
 #**********#

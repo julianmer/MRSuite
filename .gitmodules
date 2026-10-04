@@ -19,3 +19,6 @@
 [submodule "externals/mrs-sim"]
 	path = externals/mrs-sim
 	url = https://github.com/JohnLaMaster/MRS-Sim.git
+[submodule "externals/mrspeclab"]
+	path = externals/mrspeclab
+	url = https://github.com/MRSEPFL/MRSpecLAB.git

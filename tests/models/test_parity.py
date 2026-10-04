@@ -39,7 +39,8 @@ from tests.models.test_models import (MLP_ACQUISITION, MLP_METABOLITES, WAND_ACQ
                                       WAND_METABOLITES, _spectra)
 
 CHECKPOINTS = Path(os.environ.get("MRSUITE_CHECKPOINTS", "/nonexistent"))
-BASIS_7T = Path.home() / "Desktop/Augmentrum/data/BasisSets/7T_sLASER_OIT_TE34.basis"
+BASIS_7T = Path(os.environ.get("MRSUITE_BASIS_7T", Path.home() / "Desktop/Augmentrum/data/"
+                                                  "BasisSets/7T_sLASER_OIT_TE34.basis"))
 
 # as the originals' test scripts and run configs build them
 JOBS = {

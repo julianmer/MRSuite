@@ -107,6 +107,37 @@ def test_a_batch_takes_any_shape_nifti_mrs_allows():
     assert truth.components["NAA"].shape == (3, 1024, 2)
 
 
+#**************#
+#   recycled   #
+#**************#
+def test_a_recycled_batch_holds_the_next_spectra_in_the_same_objects():
+    source, again = (ToySource(MLP_METABOLITES, MLP_ACQUISITION, seed=3) for _ in range(2))
+    first, _ = source.batch(4, recycle=True)
+    second, _ = source.batch(4, recycle=True)
+    again.batch(4)
+    expected, _ = again.batch(4)
+
+    assert all(a is b for a, b in zip(first.nifti_list, second.nifti_list))
+    assert np.array_equal(second.numpy(), expected.numpy())
+    assert np.array_equal(spectra(second), spectra(second.list()))
+    assert not any(a is b for a, b in zip(again.batch(4)[0].nifti_list,
+                                          again.batch(4)[0].nifti_list))
+
+
+#*************#
+#   in turn   #
+#*************#
+def test_learning_draws_its_batches_in_turn_and_no_more():
+    """Prepared ahead by a thread, the batches are the ones drawn in turn: Keras asks for
+    one more than the steps, and the source stands there afterwards, as without it."""
+    source, again = (ToySource(MLP_METABOLITES, MLP_ACQUISITION, seed=5) for _ in range(2))
+    MLP(MLP_METABOLITES, 602, 957, MLP_ACQUISITION).learn(source, steps=6, every=3, batch=4)
+    for _ in range(7):
+        again.draw(4)
+
+    assert np.array_equal(source.draw(4)[0], again.draw(4)[0])
+
+
 #************#
 #   learns   #
 #************#

@@ -19,11 +19,16 @@
 #*************#
 import copy
 import os
+import queue
 import sys
+import threading
 from pathlib import Path
 from typing import Any, List, Optional
 
 from mrsuite.models.base import classpath
+
+# batches prepared ahead of the one being learned from
+AHEAD = 16
 
 
 #**************#
@@ -76,15 +81,37 @@ def learn(model: Any, source: Any, steps: int, objective: str, batch: int, lr: f
                 "from": before if any(before.values()) else None}
 
     class Stream(keras.utils.PyDataset):
-        """Endless batches, prepared as the model prepares real data."""
+        """Endless batches, prepared as the model prepares real data, by one thread of
+        their own while the model learns from the last: one thread, so they are drawn in
+        the order they would be in turn. Keras asks for one batch more than it learns
+        from (the first, for the data's shape), so that many are made, and the source
+        stands where it would without the thread."""
+
+        def __init__(self):
+            super().__init__()
+            self.ready = queue.Queue(maxsize=AHEAD)
+            threading.Thread(target=self.make, daemon=True).start()
+
+        def make(self):
+            for _ in range(steps + 1):
+                try:
+                    data, truth = source.batch(batch, recycle=True)
+                    made = model.prepare(data), model.target(truth, data, objective)
+                except BaseException as err:        # raised where Keras asked for it
+                    made = err
+                self.ready.put(made)
+                if isinstance(made, BaseException):
+                    return
 
         @property
         def num_batches(self):
             return None
 
         def __getitem__(self, index):
-            data, truth = source.batch(batch)
-            return model.prepare(data), model.target(truth, data, objective)
+            made = self.ready.get()
+            if isinstance(made, BaseException):
+                raise made
+            return made
 
     class Keep(keras.callbacks.Callback):
         """The recipe kept up with every step learned, so it describes the weights even

@@ -24,10 +24,12 @@
 #*************#
 import argparse
 import copy
+import os
 from pathlib import Path
 from typing import Any, Dict, Optional, Sequence, Tuple
 
 import numpy as np
+import torch
 
 from mrsuite.datasets import challenge2016, mrsi_challenge
 from mrsuite.models import MLP, WAND
@@ -210,7 +212,7 @@ def train(name: str, steps: Optional[int] = None, every: Optional[int] = None,
             or the whole run where a sixteenth does not divide it.
         to (Path): Where the run's folder goes.
         batch (int): Spectra per step.
-        seed (int): Seeds the training data.
+        seed (int): Seeds the training data and the initial weights.
         chunk (Optional[int]): Spectra per MRS-Sim start; CHUNK by default.
         ahead (int): MRS-Sim chunks simulated in the background (see mrs_sim.Source).
         voxels (int): Brain voxels the MRSI config's ranges are read from.
@@ -229,6 +231,7 @@ def train(name: str, steps: Optional[int] = None, every: Optional[int] = None,
     try:
         data = simulator
         first, last = window(data.acquisition, *WINDOW[kind])
+        torch.manual_seed(seed)                 # the initial weights, so a run replays
         if kind == "mlp":
             model = MLP(simulation["metabolites"], first, last, data.acquisition)
         else:
@@ -255,5 +258,8 @@ if __name__ == "__main__":
     parser.add_argument("--ahead", type=int, default=0,
                         help="MRS-Sim chunks simulated in the background, in parallel")
     args = parser.parse_args()
+    # deterministic kernels, so a run on a GPU replays bit for bit (about 5% slower)
+    os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+    torch.use_deterministic_algorithms(True)
     train(args.name, steps=args.steps, every=args.every, to=args.to, seed=args.seed,
           ahead=args.ahead)

@@ -316,7 +316,9 @@ class Source(source.Source):
         ahead (int): Chunks simulated in the background while the current one is handed
             out, each in an MRS-Sim process of its own, so learning need not wait for
             the simulator; the spectra are the same either way. 0 by default, each chunk
-            simulated when it is needed. ``close`` cancels those not yet needed.
+            simulated when it is needed. ``close`` cancels those not yet needed. The
+            processes share the cores, each with its part as threads, rather than each
+            starting a thread per core: MRS-Sim's spectra do not depend on its threads.
     """
 
     #**********#
@@ -371,7 +373,8 @@ class Source(source.Source):
     def _simulate(self, k: int) -> Dict[str, np.ndarray]:
         """Chunk ``k``, seeded from the source's seed and ``k`` alone."""
         seed = int(np.random.SeedSequence([self.seed, k]).generate_state(1)[0])
-        return _run(self.config, self.chunk, seed, self.components)
+        threads = max(1, (os.cpu_count() or 1) // (self.ahead + 1)) if self.ahead else None
+        return _run(self.config, self.chunk, seed, self.components, threads)
 
     #**********#
     #   draw   #
@@ -556,8 +559,10 @@ def _as_mrs_sim_reads(path: Path) -> str:
 #*********#
 #   run   #
 #*********#
-def _run(config: Dict[str, Any], n: int, seed: int, components: bool) -> Dict[str, np.ndarray]:
-    """One MRS-Sim job, in its own process, with the MRS-Sim checkout as its working folder."""
+def _run(config: Dict[str, Any], n: int, seed: int, components: bool,
+         threads: Optional[int] = None) -> Dict[str, np.ndarray]:
+    """One MRS-Sim job, in its own process, with the MRS-Sim checkout as its working folder,
+    and ``threads`` threads (PyTorch's default, one per core, when None)."""
     if config.get("num_coils", 1) > 1:
         raise ValueError("MRSuite's MRS-Sim driver does not yet take several coils apart into "
                          "their truth; simulate combined spectra, num_coils 1")
@@ -575,7 +580,10 @@ def _run(config: Dict[str, Any], n: int, seed: int, components: bool) -> Dict[st
             json.dump({"config": config, "n": count, "seed": seed, "components": components,
                        "folder": folder, "result": result}, fh)
         proc = subprocess.run([PYTHON, str(DRIVER), path], cwd=ROOT, capture_output=True,
-                              text=True, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+                              text=True, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1",
+                                              **({"OMP_NUM_THREADS": str(threads),
+                                                  "MKL_NUM_THREADS": str(threads)}
+                                                 if threads else {})})
         if proc.returncode != 0 or not os.path.exists(result):
             raise RuntimeError(f"MRS-Sim failed:\n{proc.stderr[-3000:]}")
         with np.load(result) as r:

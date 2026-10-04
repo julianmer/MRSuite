@@ -105,20 +105,29 @@ class Source:
     #***********#
     #   batch   #
     #***********#
-    def batch(self, n: int) -> Tuple[NIfTI_MRS_Plus, Truth]:
+    def batch(self, n: int, recycle: bool = False) -> Tuple[NIfTI_MRS_Plus, Truth]:
         """
         The next ``n`` spectra as NIfTI-MRS+, and their truth.
 
         Args:
             n (int): Spectra in the batch.
+            recycle (bool): Hold the spectra in the previous batch's NIfTI-MRS objects
+                rather than new copies, so the previous batch must not be used again: as
+                a training loop uses each batch once, for which copying the headers would
+                cost more than learning from it.
 
         Returns:
             Tuple[NIfTI_MRS_Plus, Truth]: The spectra, held as one array, and the truth.
         """
         fids, truth = self.draw(n)
         fids = fids.reshape(n, 1, 1, 1, *fids.shape[1:])
-        item = self._template(fids.shape[1:])
-        return NIfTI_MRS_Plus([item.copy() for _ in range(n)]).set_data(fids), truth
+        items = self.__dict__.get("_recycled") if recycle else None
+        if items is None or len(items) != n or items[0].shape != fids.shape[1:]:
+            item = self._template(fids.shape[1:])
+            items = [item.copy() for _ in range(n)]
+            if recycle:
+                self._recycled = items
+        return NIfTI_MRS_Plus(items).set_data(fids), truth
 
     #**************#
     #   template   #

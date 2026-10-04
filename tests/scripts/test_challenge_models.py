@@ -59,6 +59,15 @@ def test_any_number_of_steps_checkpoints(tmp_path):
         "step-33"]
 
 
+@pytest.mark.skipif(not challenge_models.challenge2016.BASIS.exists(),
+                    reason="challenge submodule not checked out")
+def test_a_seed_replays_the_run(tmp_path):
+    """Same data and same initial weights: the same weights after training."""
+    runs = [challenge_models.train("mlp-supervised-ismrm2016", steps=2, to=tmp_path / str(k),
+                                   batch=2, chunk=4, seed=7) for k in range(2)]
+    assert runs[0].fingerprint() == runs[1].fingerprint()
+
+
 #************#
 #   trains   #
 #************#

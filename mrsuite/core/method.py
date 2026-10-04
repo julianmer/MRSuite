@@ -186,17 +186,22 @@ class Method:
         """Keep each spectrum's header on what came of it, and record the call there.
 
         The arguments recorded are the spectrum's own, so a water reference is recorded
-        with the spectrum it scaled.
+        with the spectrum it scaled. Only the first output of a tuple came of the spectrum;
+        a further one (a processed water reference, say) came of another input and keeps
+        the header its method gave it, with the call recorded on it too. An input handed
+        back as it was is a declined no-op, and left as it is.
         """
         version, runtime, label = self.version(), self.runtime(), self._label()
         for item, out, (args, kwargs) in zip(items, outs, calls):
             entry = provenance.entry(self.program, version, label,
                                      {"args": args, "kwargs": kwargs, **runtime})
-            for one in out if isinstance(out, tuple) else (out,):
+            inputs = (item, *args, *kwargs.values())
+            for k, one in enumerate(out if isinstance(out, tuple) else (out,)):
                 if isinstance(one, FitResult):
                     one.provenance = provenance.history(item) + [entry]
-                elif isinstance(one, NIFTI_MRS) and one is not item:   # not a declined no-op
-                    _keep_header(item, one)
+                elif isinstance(one, NIFTI_MRS) and not any(one is x for x in inputs):
+                    if k == 0:
+                        _keep_header(item, one)
                     if self.records:
                         provenance.append(one, entry)
 

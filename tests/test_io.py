@@ -92,6 +92,34 @@ def test_a_failed_conversion_says_why():
         io.load(__file__, format="ge")
 
 
+#*********#
+#   voi   #
+#*********#
+def test_an_output_that_is_not_spectra_comes_back_as_an_image(monkeypatch):
+    """DICOM's voi=True also writes a mask of where the voxel sits, a NIfTI that is not
+    NIfTI-MRS. No DICOM data is at hand, so spec2nii is stood in for by its outputs."""
+    import subprocess
+
+    import nibabel as nib
+    from nifti_mrs.create_nmrs import gen_nifti_mrs
+    from nifti_mrs_plus import NIfTI_MRS_Plus
+
+    def spec2nii(args, **kwargs):
+        folder = Path(args[args.index("-o") + 1])
+        gen_nifti_mrs(np.ones((1, 1, 1, 64), complex), 2.5e-4, 123.2,
+                      nucleus="1H").save(str(folder / "svs.nii.gz"))
+        nib.save(nib.Nifti1Image(np.ones((1, 1, 1), np.uint8), np.eye(4)),
+                 folder / "svs_voi.nii.gz")
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(io.subprocess, "run", spec2nii)
+    scans = io.load("scan", format="dicom", voi=True)
+
+    assert isinstance(scans["svs"], NIfTI_MRS_Plus)
+    assert isinstance(scans["svs_voi"], nib.Nifti1Image)
+    assert np.asarray(scans["svs_voi"].dataobj).sum() == 1   # read before the folder went
+
+
 #*************#
 #   nothing   #
 #*************#

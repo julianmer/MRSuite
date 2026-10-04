@@ -19,9 +19,11 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Union
 
-from nifti_mrs.nifti_mrs import NIFTI_MRS
+import nibabel as nib
+import numpy as np
+from nifti_mrs.nifti_mrs import NIFTI_MRS, NotNIFTI_MRS
 from nifti_mrs_plus import NIfTI_MRS_Plus
 
 from mrsuite.core import provenance
@@ -30,13 +32,16 @@ from mrsuite.core import provenance
 #**********#
 #   load   #
 #**********#
-def load(*files: Any, format: str = "auto", **options: Any) -> Dict[str, NIfTI_MRS_Plus]:
+def load(*files: Any, format: str = "auto",
+         **options: Any) -> Dict[str, Union[NIfTI_MRS_Plus, nib.Nifti1Image]]:
     """
     Raw scanner data as NIfTI-MRS+, converted by spec2nii.
 
     One acquisition can give several outputs - a GE P-file holds the water-suppressed
     spectra and their water reference - so each comes back under spec2nii's name for it,
-    as a batch of one with all its dimensions (coils, averages, ...) as acquired.
+    as a batch of one with all its dimensions (coils, averages, ...) as acquired. What is
+    not spectra, such as DICOM's ``voi=True`` mask of where the voxel sits, comes back as
+    a plain NIfTI image.
 
     Args:
         *files: The raw files as spec2nii takes them for the format: a P-file, a Twix or
@@ -48,8 +53,8 @@ def load(*files: Any, format: str = "auto", **options: Any) -> Dict[str, NIfTI_M
             Twix; True for a flag, a list for an option taking several values.
 
     Returns:
-        Dict[str, NIfTI_MRS_Plus]: Output name -> the data, its processing history
-        starting with the conversion.
+        Dict[str, Union[NIfTI_MRS_Plus, nib.Nifti1Image]]: Output name -> the data, its
+        processing history starting with the conversion, or the image.
 
     Raises:
         RuntimeError: If spec2nii fails or writes nothing, with its own message.
@@ -76,11 +81,17 @@ def load(*files: Any, format: str = "auto", **options: Any) -> Dict[str, NIfTI_M
 
         out = {}
         for path in sorted(Path(folder).glob("*.nii.gz")):   # its only output, nifti1 too
-            nifti = NIFTI_MRS(str(path)).copy()   # read now: the folder goes
+            name = path.name.removesuffix(".nii.gz")
+            try:
+                nifti = NIFTI_MRS(str(path)).copy()   # read now: the folder goes
+            except NotNIFTI_MRS:
+                image = nib.load(path)
+                out[name] = type(image)(np.asarray(image.dataobj), image.affine, image.header)
+                continue
             provenance.append(nifti, provenance.entry(
                 "spec2nii", spec2nii.__version__, f"spec2nii {format}",
                 {"files": [Path(f) for f in files], "options": options}))
-            out[path.name.removesuffix(".nii.gz")] = NIfTI_MRS_Plus([nifti])
+            out[name] = NIfTI_MRS_Plus([nifti])
     if not out:   # some modes only list what is there, some find nothing to convert
         said = "\n".join(text.strip() for text in (run.stdout, run.stderr) if text.strip())
         raise RuntimeError(f"spec2nii {format} wrote nothing for {list(map(str, files))}"

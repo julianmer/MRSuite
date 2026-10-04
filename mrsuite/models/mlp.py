@@ -58,7 +58,7 @@ class MLP(TorchModel, paper_url="https://arxiv.org/abs/2511.23135"):
     """
 
     repo = Path(__file__).resolve().parents[2] / "externals" / "ood-robust-mrs"
-    objectives = ("concentrations", "spectra")
+    objectives = ("concentrations", "spectra", "scaled")
     signal_parameters = (["gamma", "sigma", "eps", "phi0", "phi1"]
                          + [f"baseline{i}" for i in range(6)])
 
@@ -115,11 +115,15 @@ class MLP(TorchModel, paper_url="https://arxiv.org/abs/2511.23135"):
     #***********#
     def learn(self, source: Any, steps: int, objective: Optional[str] = None,
               **kwargs) -> List[float]:
-        """See Model.learn. 'concentrations' is supervised; 'spectra' is the original's
-        self-supervised objective, which needs only the source's spectra and basis."""
+        """See Model.learn. 'concentrations' and 'scaled' are supervised, the latter
+        weighing each metabolite's error by the range the source draws it from; 'spectra'
+        is the original's self-supervised objective, which needs only the source's spectra
+        and basis."""
         objective = objective or self.objectives[0]
         if objective == "spectra":
             self._voigt = self._signal_model(source)
+        if objective == "scaled":
+            self._widths = self._range_widths(source)
         return super().learn(source, steps, objective=objective, **kwargs)
 
     #************#
@@ -141,7 +145,10 @@ class MLP(TorchModel, paper_url="https://arxiv.org/abs/2511.23135"):
     #**********#
     def loss(self, target, out, objective: str):
         """The original's losses: 'mae_conc', the mean absolute error on non-negative
-        concentrations with macromolecules left out, and for 'spectra' 'mse_specs', the
+        concentrations with macromolecules left out; for 'scaled' its 'mae_all_scale' on
+        the concentrations, each error over the width of the metabolite's range, as the
+        original min-max scales each output by its prior (its signal parameters have no
+        counterpart in another simulator's truth); and for 'spectra' 'mse_specs', the
         squared error between the spectrum and the signal model's spectrum for the
         estimated parameters, over the model's window."""
         from keras import ops
@@ -153,10 +160,30 @@ class MLP(TorchModel, paper_url="https://arxiv.org/abs/2511.23135"):
             error = ops.square(spec[:, :, self.first:self.last]
                                - target[:, :, self.first:self.last])
             return ops.mean(ops.sum(error, axis=1))     # real + imaginary, as the original
+        if objective == "scaled":
+            widths = ops.convert_to_tensor(self._widths)
+            return ops.mean(ops.abs(out[:, :len(self.metabolites)] - target) / widths)
         kept = ops.convert_to_tensor([0.0 if "mm" in m.lower() or "mac" in m.lower() else 1.0
                                       for m in self.metabolites])
         estimate = ops.maximum(out[:, :len(self.metabolites)], 0)
         return ops.mean(ops.abs(ops.maximum(target, 0) - estimate) * kept)
+
+    #******************#
+    #   range widths   #
+    #******************#
+    def _range_widths(self, source: Any) -> np.ndarray:
+        """The width of each metabolite's range in the source; 1 for one held fixed, whose
+        error has no range to be measured against and stays as it is."""
+        if not source.ranges:
+            raise ValueError("MLP learns 'scaled' by the ranges the source draws its "
+                             "concentrations from; this source states none")
+        missing = [m for m in self.metabolites if m not in source.ranges]
+        if missing:
+            raise KeyError(f"MLP weighs its own metabolites; the source's ranges lack "
+                           f"{missing}")
+        widths = np.array([source.ranges[m][1] - source.ranges[m][0] for m in self.metabolites],
+                          np.float32)
+        return np.where(widths > 0, widths, 1.0).astype(np.float32)
 
     #******************#
     #   signal model   #

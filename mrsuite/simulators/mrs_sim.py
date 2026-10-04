@@ -392,6 +392,20 @@ class Source(source.Source):
             components={k: v[part] for k, v in t.components.items()},
             parameters={k: v[part] for k, v in t.parameters.items()})
 
+    #************#
+    #   ranges   #
+    #************#
+    @property
+    def ranges(self) -> Dict[str, Tuple[float, float]]:
+        """Each metabolite's sampling range from the config, the reference metabolites
+        (wrt_metab) fixed at their ratios, as MRS-Sim states every amplitude relative to
+        them."""
+        reference = self.config["wrt_metab"].split(",")
+        ratios = self.config.get("wrt_metab_ratio") or [1 / len(reference)] * len(reference)
+        fixed = {m: (float(r), float(r)) for m, r in zip(reference, ratios)}
+        return {m: fixed.get(m) or tuple(map(float, self.config["parameters"][m.lower()]))
+                for m in self.config["metabolites"]}
+
     #***********#
     #   basis   #
     #***********#

@@ -80,11 +80,15 @@ class Source:
             each metabolite's complex FID on the acquisition's grid - what a
             self-supervised objective fits the spectra with. None if the source has none
             to give.
+        ranges (Optional[Dict[str, Tuple[float, float]]]): The range each metabolite's
+            concentration is drawn from, (low, high), the same twice for one held fixed -
+            what a scaled objective weighs each error by. None if the source cannot tell.
     """
 
     acquisition: Dict[str, float] = {}
     dim_tags: List[Optional[str]] = []
     basis: Optional[Dict[str, np.ndarray]] = None
+    ranges: Optional[Dict[str, Tuple[float, float]]] = None
 
     #**********#
     #   draw   #

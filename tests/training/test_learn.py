@@ -107,6 +107,26 @@ def test_a_batch_takes_any_shape_nifti_mrs_allows():
     assert truth.components["NAA"].shape == (3, 1024, 2)
 
 
+#************#
+#   scaled   #
+#************#
+def test_the_scaled_objective_weighs_each_error_by_its_range():
+    """Each metabolite's error over the width of its range; one held fixed, unscaled."""
+    import torch
+
+    source = ToySource(MLP_METABOLITES, MLP_ACQUISITION)
+    source.ranges = {m: (0.0, 2.0) for m in MLP_METABOLITES}
+    source.ranges[MLP_METABOLITES[0]] = (0.5, 0.5)
+    mlp = MLP(MLP_METABOLITES, 602, 957, MLP_ACQUISITION)
+    mlp.learn(source, steps=2, batch=4, objective="scaled")
+
+    n = len(MLP_METABOLITES)
+    loss = mlp.loss(torch.ones(2, n), torch.zeros(2, n + 11), "scaled")
+    assert float(loss) == pytest.approx((1.0 + (n - 1) * 0.5) / n)
+    with pytest.raises(ValueError, match="states none"):
+        mlp.learn(ToySource(MLP_METABOLITES, MLP_ACQUISITION), steps=1, objective="scaled")
+
+
 #**************#
 #   recycled   #
 #**************#

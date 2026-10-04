@@ -276,3 +276,17 @@ def test_chunks_simulated_ahead_are_the_chunks_simulated_in_turn():
     assert sorted(ahead._coming) == [2, 3]          # the next two on their way
     ahead.close()
     assert not ahead._coming
+
+
+#************#
+#   ranges   #
+#************#
+def test_a_source_states_its_ranges_and_the_references_fixed():
+    from mrsuite.datasets import challenge2016
+
+    config = challenge2016.mrs_sim_config()
+    ranges = mrs_sim.Source(config, chunk=2).ranges
+
+    assert set(ranges) == set(config["metabolites"])
+    assert ranges["NAA"] == tuple(config["parameters"]["naa"])
+    assert ranges["Cr"] == ranges["PCr"] == (0.5, 0.5)

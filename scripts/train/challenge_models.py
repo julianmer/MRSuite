@@ -10,9 +10,9 @@
 #          the supervised and self-supervised MLPs of the out-of-distribution paper for the 2016   #
 #          fitting challenge and the 2024 MRSI challenge, and WAND for the MRSI challenge with     #
 #          its water and lipids as a component of their own, to take out before fitting. Settings  #
-#          as the published runs (batch 16, Adam 1e-4, the steps of their checkpoints), but the    #
-#          supervised loss is MRSuite's (see MODELS); each run writes loadable checkpoints with    #
-#          their recipe.json to data/runs/<name>.                                                  #
+#          as the published runs (batch 16, Adam 1e-4, the steps of their checkpoints, their       #
+#          losses as far as MRS-Sim's truth carries them; see MODELS); each run writes loadable    #
+#          checkpoints with their recipe.json to data/runs/<name>.                                 #
 #                                                                                                  #
 #          Usage: python scripts/train/challenge_models.py <name> [--steps N] [--ahead K]          #
 #                                                                                                  #
@@ -42,13 +42,14 @@ RUNS = Path(__file__).resolve().parents[2] / "data" / "runs"
 # checkpoints, as Lightning counts them: one optimiser step on one batch of 16 (no
 # gradient accumulation), which is one step of Model.learn. Supervised MLP: wyoo5p40,
 # step 7537664; self-supervised: 48ke5d6u, step 3572224; WAND: t1axv47a, step 465664.
-# The losses: self-supervised and WAND as their runs (mse_specs, mse); the supervised
-# MLPs MRSuite's 'concentrations' (MAE of the concentrations, macromolecules left out),
-# not wyoo5p40's 'mae_all_scale' (all outputs min-max scaled).
+# The losses as their runs: self-supervised mse_specs, WAND mse, and the supervised MLPs
+# wyoo5p40's mae_all_scale as far as MRS-Sim's truth carries it ('scaled': the
+# concentrations, each over its sampling range; the original's signal parameters have no
+# counterpart in MRS-Sim's).
 MODELS = {
-    "mlp-supervised-ismrm2016": ("2016", "mlp", "concentrations", 7_537_664),
+    "mlp-supervised-ismrm2016": ("2016", "mlp", "scaled", 7_537_664),
     "mlp-selfsupervised-ismrm2016": ("2016", "mlp", "spectra", 3_572_224),
-    "mlp-supervised-mrsi2024": ("mrsi", "mlp", "concentrations", 7_537_664),
+    "mlp-supervised-mrsi2024": ("mrsi", "mlp", "scaled", 7_537_664),
     "mlp-selfsupervised-mrsi2024": ("mrsi", "mlp", "spectra", 3_572_224),
     "wand-mrsi2024": ("mrsi", "wand", "components", 465_664),
 }

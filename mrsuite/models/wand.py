@@ -51,8 +51,9 @@ class WAND(TorchModel, paper_url="https://doi.org/10.1002/nbm.70038"):
     masks, and the artifacts as what the other masks leave.
 
     Each spectrum comes back as a NIfTI-MRS with the components along a fifth dimension,
-    named in its header - the metabolites, then 'baseline', then 'artifacts' - each
-    extended to the full length by repeating its edge values, as the original's scripts do.
+    named in its header - the metabolites, any nuisance, then 'baseline', then
+    'artifacts' - each extended to the full length by repeating its edge values, as the
+    original's scripts do.
 
     As a processing step it hands back an ordinary spectrum of the input's shape instead:
 
@@ -63,8 +64,10 @@ class WAND(TorchModel, paper_url="https://doi.org/10.1002/nbm.70038"):
     ``remove`` subtracts the components from the data, so outside the network's window
     the data is untouched; ``keep`` adds the components up, zero outside the window.
 
-    It learns the components from any source that gives each metabolite's signal and the
-    baseline: the artifacts are what the data holds beyond them.
+    It learns the components from any source that gives each metabolite's signal, the
+    baseline and each nuisance it names: the artifacts are what the data holds beyond them.
+    A nuisance is a signal to take out on its own, such as water and lipids, which
+    'metabolites' in ``keep`` does not include.
 
     Its batch normalisation uses the statistics of the spectra decomposed together, as
     the paper's own evaluation ran it, which quantifies the 2016 challenge better than the
@@ -77,6 +80,8 @@ class WAND(TorchModel, paper_url="https://doi.org/10.1002/nbm.70038"):
         last (int): The point after it.
         acquisition (Dict[str, float]): What it was trained on; see Model.
         batch_statistics (bool): Normalise with each batch's own statistics.
+        nuisance (List[str]): Further components, between the metabolites and the baseline,
+            e.g. ['nuisance'] for the MRSI challenge's water and lipids. Empty by default.
 
     Attributes:
         repo (Path): The original repository, which the network and transform are loaded from.
@@ -89,17 +94,19 @@ class WAND(TorchModel, paper_url="https://doi.org/10.1002/nbm.70038"):
     #   init   #
     #**********#
     def __init__(self, metabolites: List[str], first: int, last: int,
-                 acquisition: Dict[str, float], batch_statistics: bool = True) -> None:
+                 acquisition: Dict[str, float], batch_statistics: bool = True,
+                 nuisance: List[str] = ()) -> None:
         super().__init__()
         self.metabolites, self.first, self.last = list(metabolites), first, last
         self.acquisition = dict(acquisition)
         self.batch_statistics = batch_statistics
-        self.components = self.metabolites + ["baseline", "artifacts"]
+        self.nuisance = list(nuisance)
+        self.components = self.metabolites + self.nuisance + ["baseline", "artifacts"]
         self.cwt = load_file(self.repo / "utils" / "wavelets.py").CWT(
             last - first, wavelet=("morlet", {"mu": 14}), scales="log-piecewise", nv=32,
             padtype=None)
         self.net = load_file(self.repo / "frameworks" / "nnModels.py").UNet(
-            n_channels=2, n_classes=2 * (len(metabolites) + 1))
+            n_channels=2, n_classes=2 * (len(self.components) - 1))
 
     #*************#
     #   prepare   #
@@ -136,7 +143,7 @@ class WAND(TorchModel, paper_url="https://doi.org/10.1002/nbm.70038"):
         x = x - x[:, :, self.first:self.last].mean(dim=-1, keepdim=True)
         cwtmatr = self.cwt(x[:, :, self.first:self.last])
         masks = self.net(cwtmatr.abs().float())
-        masks = masks.view(masks.shape[0], len(self.metabolites) + 1, 2, *masks.shape[-2:])
+        masks = masks.view(masks.shape[0], len(self.components) - 1, 2, *masks.shape[-2:])
         artifacts = torch.stack((1 - masks[:, :, 0].sum(dim=1, keepdim=True),
                                  1 - masks[:, :, 1].sum(dim=1, keepdim=True)), dim=2)
         masks = torch.softmax(torch.cat((masks, artifacts), dim=1), dim=1)
@@ -161,7 +168,8 @@ class WAND(TorchModel, paper_url="https://doi.org/10.1002/nbm.70038"):
                                    dim_tags=["DIM_USER_0", None, None])
             result.set_dim_tag("DIM_USER_0", "DIM_USER_0", info="WAND components", header={
                 "Component": {"Value": self.components,
-                              "Description": "The metabolites, then baseline and artifacts"}})
+                              "Description": "The metabolites, any nuisance, then baseline "
+                                             "and artifacts"}})
             results.append(result)
         return results
 

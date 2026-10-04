@@ -23,6 +23,7 @@ import os
 import shutil
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, Union
 
@@ -301,7 +302,7 @@ class Source(source.Source):
     Starting MRS-Sim costs seconds, so it simulates ``chunk`` spectra per start and hands
     them out batch by batch. The first chunk is simulated when the source is made, which
     is also how it knows its acquisition. Chunk ``k`` is seeded from ``seed`` and ``k``,
-    so a source replays exactly.
+    so a source replays exactly, however many chunks are simulated ahead.
 
         source = mrs_sim.Source(mrs_sim.config(), components=True)
         wand.learn(source, steps=10_000)
@@ -312,15 +313,20 @@ class Source(source.Source):
         chunk (int): Spectra per MRS-Sim start.
         components (bool): Give each signal on its own, as a model learning components
             needs.
+        ahead (int): Chunks simulated in the background while the current one is handed
+            out, each in an MRS-Sim process of its own, so learning need not wait for
+            the simulator; the spectra are the same either way. 0 by default, each chunk
+            simulated when it is needed. ``close`` cancels those not yet needed.
     """
 
     #**********#
     #   init   #
     #**********#
     def __init__(self, config: Dict[str, Any], seed: int = 0, chunk: int = 128,
-                 components: bool = False) -> None:
+                 components: bool = False, ahead: int = 0) -> None:
         self.config, self.seed, self.chunk, self.components = config, seed, chunk, components
-        self._drawn, self._next = 0, 0
+        self.ahead = ahead
+        self._drawn, self._next, self._coming = 0, 0, {}
         self._fill()
         self.acquisition = {"points": self._data.shape[1], "bandwidth": 1 / self._dwell,
                             "frequency": self._frequency, "centre": self._centre}
@@ -329,9 +335,15 @@ class Source(source.Source):
     #   fill   #
     #**********#
     def _fill(self) -> None:
-        """The next chunk, simulated."""
-        seed = int(np.random.SeedSequence([self.seed, self._drawn]).generate_state(1)[0])
-        r = _run(self.config, self.chunk, seed, self.components)
+        """The next chunk, simulated, then the ``ahead`` after it set going: never more
+        than ``ahead`` MRS-Sim processes at once."""
+        coming = self._coming.pop(self._drawn, None)
+        r = coming.result() if coming else self._simulate(self._drawn)
+        if self.ahead and "_pool" not in self.__dict__:
+            self._pool = ThreadPoolExecutor(self.ahead)     # each thread waits on a process
+        for k in range(self._drawn + 1, self._drawn + 1 + self.ahead):
+            if k not in self._coming:
+                self._coming[k] = self._pool.submit(self._simulate, k)
         self._data, self._truth, self._next = r["data"], _truth(r), 0
         self._dwell, self._frequency, self._centre = (float(r["dwell"]), float(r["frequency"]),
                                                       float(r["centre"]))
@@ -342,6 +354,24 @@ class Source(source.Source):
         self._table, self._provenance = (json.loads(str(r["mrssynmrs"])),
                                          json.loads(str(r["provenance"])))
         self._drawn += 1
+
+    #***********#
+    #   close   #
+    #***********#
+    def close(self) -> None:
+        """Cancel the chunks simulated ahead that have not started; a running one ends on
+        its own."""
+        if "_pool" in self.__dict__:
+            self._pool.shutdown(wait=False, cancel_futures=True)
+        self._coming.clear()
+
+    #**************#
+    #   simulate   #
+    #**************#
+    def _simulate(self, k: int) -> Dict[str, np.ndarray]:
+        """Chunk ``k``, seeded from the source's seed and ``k`` alone."""
+        seed = int(np.random.SeedSequence([self.seed, k]).generate_state(1)[0])
+        return _run(self.config, self.chunk, seed, self.components)
 
     #**********#
     #   draw   #

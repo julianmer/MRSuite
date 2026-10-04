@@ -288,6 +288,27 @@ def test_wand_as_a_processing_step_removes_or_keeps_components():
         wand(data, keep=["NAA"], remove=["baseline"])
 
 
+#**************#
+#   nuisance   #
+#**************#
+@pytest.mark.skipif(not challenge2016.BASIS.exists(), reason="challenge submodule not checked out")
+def test_a_nuisance_is_a_component_of_its_own_and_no_metabolite():
+    """Water and lipids, say: separated beside the metabolites, taken out on their own,
+    and never kept as one of the metabolites."""
+    data, _, _ = challenge2016.load(2)
+    wand = WAND(WAND_METABOLITES, 1792, 2036, WAND_ACQUISITION, nuisance=["nuisance"])
+
+    item = wand(data).list()[0]
+    assert item.hdr_ext["dim_5_header"]["Component"]["Value"][-3:] == [
+        "nuisance", "baseline", "artifacts"]
+
+    assert np.allclose(wand(data, keep=["metabolites"])[0][:],
+                       wand(data, keep=WAND_METABOLITES)[0][:])
+    nuisance = wand(data, keep=["nuisance"])[0][:]
+    assert np.abs(nuisance).max() > 0
+    assert np.allclose(wand(data, remove=["nuisance"])[0][:], data[0][:] - nuisance)
+
+
 #**************************************************************************************************#
 #                                        Class NumpyModel                                          #
 #**************************************************************************************************#

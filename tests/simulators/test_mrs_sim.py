@@ -257,3 +257,22 @@ def test_a_source_hands_out_batches_across_its_chunks():
     assert not np.allclose(first.numpy(), second.numpy())
     assert set(source.acquisition) == {"points", "bandwidth", "frequency", "centre"}
     assert len(truth.components["NAA"]) == 3
+
+
+#***********#
+#   ahead   #
+#***********#
+def test_chunks_simulated_ahead_are_the_chunks_simulated_in_turn():
+    """Simulating ahead, in parallel, changes when a chunk is made, never what it holds."""
+    in_turn = mrs_sim.Source(mrs_sim.config(), seed=3, chunk=2)
+    ahead = mrs_sim.Source(mrs_sim.config(), seed=3, chunk=2, ahead=2)
+
+    for _ in range(2):                              # into the second chunk
+        expected, truth = in_turn.draw(2)
+        found, found_truth = ahead.draw(2)
+        assert np.array_equal(found, expected)
+        assert all(np.array_equal(found_truth.concentrations[m], c)
+                   for m, c in truth.concentrations.items())
+    assert sorted(ahead._coming) == [2, 3]          # the next two on their way
+    ahead.close()
+    assert not ahead._coming

@@ -211,6 +211,39 @@ def test_a_basis_set_block_gives_a_fit_its_basis(tmp_path, monkeypatch):
     assert said["kwargs"]["basis"]["basis"]["sha256"] == made.checksum()
 
 
+#************#
+#   folder   #
+#************#
+def test_a_folder_block_loads_a_study_and_shows_the_roles_it_found(study):
+    graph = Graph()
+    folder, fit = graph.add("folder"), graph.add("lcm-fit")
+    graph.set(folder, "folder", str(study))
+    assert graph.ports(folder)[1] == [], "its outputs are known once it ran"
+
+    with pytest.warns(UserWarning, match="do not line up"):
+        assert graph.run(folder)
+
+    assert [p.name for p in graph.ports(folder)[1]] == ["svs", "mrsref", "mm"]
+    assert len(graph.output(folder, "mrsref").list()) == 3
+    graph.connect(folder, "svs", fit, "data")
+    graph.ask(fit)
+    graph.show(fit, "water")                        # a port once put on the block
+    graph.connect(folder, "mrsref", fit, "water")
+    assert f"collect.load({str(study)!r})" in graph.script()
+    assert f"{graph.nodes[folder].name}['mrsref']" in graph.script()
+
+
+def test_what_the_window_put_right_goes_into_the_script(study):
+    graph = Graph()
+    folder = graph.add("folder")
+    graph.set(folder, "folder", str(study))
+    graph.set(folder, "roles", {"extra/press_mm_PFL.nii.gz": ""})      # left out
+
+    assert graph.run(folder)
+    assert [p.name for p in graph.ports(folder)[1]] == ["svs", "mrsref"]
+    assert "roles={'extra/press_mm_PFL.nii.gz': ''}" in graph.script()
+
+
 #***********#
 #   files   #
 #***********#
@@ -594,6 +627,33 @@ def test_a_spectrum_is_drawn_about_its_nucleus_own_centre():
     ppm, ys, _ = traces(spectrum)
 
     assert ppm[np.argmax(ys[0])] == pytest.approx(0.0, abs=0.1)
+
+
+def test_coils_and_averages_are_drawn_apart_one_dimension_at_a_time_and_stacked():
+    """Spread by coil, each trace is that coil's mean over its averages; by average, coil 0's
+    averages; stacked, each sits a share of the largest amplitude above the one before."""
+    from nifti_mrs.create_nmrs import gen_nifti_mrs
+
+    t = np.arange(512) * 2.5e-4
+    base = np.exp(2j * np.pi * (2.0 - 4.65) * 123.2 * t - t / 0.05)
+    fids = np.stack([np.stack([(c + 1) * (a + 1) * base for a in range(3)], -1)   # coil, avg
+                     for c in range(2)], -1).reshape(1, 1, 1, -1, 3, 2)
+    fids = np.moveaxis(fids, 4, 5)                                          # (coil, average)
+    spectrum = gen_nifti_mrs(fids, 2.5e-4, 123.2, dim_tags=["DIM_COIL", "DIM_DYN", None])
+    one = lambda fid: np.fft.fftshift(np.fft.fft(fid)).real
+
+    ppm, ys, labels = traces(spectrum)
+    assert labels == ["coil 0", "coil 1"]
+    assert np.allclose(ys[1], one(2 * 2 * base)), "coil 1, averaged over (1+2+3)/3 = 2"
+
+    _, ys, labels = traces(spectrum, spread="DIM_DYN")
+    assert labels == ["dyn 0", "dyn 1", "dyn 2"]
+    assert np.allclose(ys[2], one(3 * base)), "average 2 of coil 0"
+
+    _, flat, _ = traces(spectrum, spread="DIM_DYN")
+    _, stacked, _ = traces(spectrum, spread="DIM_DYN", stack=0.5)
+    step = 0.5 * max(np.abs(y).max() for y in flat)
+    assert np.allclose(stacked[2] - flat[2], 2 * step) and np.allclose(stacked[0], flat[0])
 
 
 def test_a_thumbnail_shows_from_half_a_ppm():

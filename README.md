@@ -52,7 +52,8 @@ A suite of tools for benchmarking MRS processing and analysis methods, including
 - **Visualization**: Visualize performance metrics and results.
 
 ### Graphical Interface
-Build an analysis from blocks wired on a canvas: read data in, preprocess, fit, check quality and
+Build an analysis from blocks wired on a canvas: read data in, a file or a whole study folder,
+preprocess, fit, check quality and
 score against ground truth, with each block offering every toolbox that does its step (grouped
 after Near et al. and Kreis et al., NMR Biomed 2021) and every function of every toolbox besides.
 Each block shows what it made and exports it, and the whole graph is written out as the Python

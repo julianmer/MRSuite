@@ -18,6 +18,7 @@
 import asyncio
 import pickle
 
+import numpy as np
 import pytest
 
 pytest.importorskip("nicegui")
@@ -226,6 +227,57 @@ def test_a_block_gone_before_its_toolbox_answered_is_let_go(caplog):
     assert "KeyError" not in caplog.text
 
 
+def test_a_folder_chosen_for_a_load_folder_block_is_set_and_loaded(tmp_path):
+    graph = Graph()
+
+    async def script(user, app):
+        asked, runs = [], []
+
+        async def pick(title="Open data", formats=True, folder=False):
+            asked.append((formats, folder))
+            return [tmp_path], "auto"
+
+        async def run(*args):
+            runs.append(args)
+        app._pick, app.run = pick, run
+        with app.client:
+            id = app.add("folder")
+        await until(lambda: runs)
+        assert graph.nodes[id].values == {"folder": str(tmp_path)}
+        assert asked == [(False, True)] and runs == [(id,)]
+        await user.should_see("Choose folder…")
+        await user.should_not_see(marker="field-folder")
+
+    simulate(graph, script)
+
+
+def test_the_collect_window_puts_a_files_role_right_and_loads(study):
+    graph = Graph()
+    folder = graph.add("folder")
+    graph.set(folder, "folder", str(study))
+
+    async def script(user, app):
+        runs = []
+
+        async def run(*args):
+            runs.append(args)
+        app.run = run
+
+        async def opened():
+            with app.client:
+                await app.collect(folder)
+        task = asyncio.create_task(opened())
+        await user.should_see("extra/press_mm_PFL.nii.gz")
+        user.find(marker="role-2").elements.pop().set_value("")        # the mm file: left out
+        user.find(marker="collect-load").click()
+        await task
+
+        assert graph.nodes[folder].values["roles"] == {"extra/press_mm_PFL.nii.gz": ""}
+        assert "groups" not in graph.nodes[folder].values and runs == [(folder,)]
+
+    simulate(graph, script)
+
+
 def test_blocks_and_wires_deleted_on_the_canvas_leave_the_graph():
     graph = Graph()
     data, one, two = graph.add("ismrm2016"), graph.add("averaging"), graph.add("averaging")
@@ -291,6 +343,58 @@ def test_the_figure_exported_is_the_spectrum_shown(tmp_path):
     first, = export(graph.output(data), tmp_path / "ref", "first", "figure")
     line = lambda p: max(re.findall(r' d="([^"]*)"', p.read_text()), key=len)   # the spectrum
     assert line(tmp_path / "ismrm2016.svg") == line(shown) != line(first)
+
+
+#*********#
+#   eye   #
+#*********#
+@needs_challenge
+def test_the_eye_opens_the_preview_and_closes_it_again():
+    graph = Graph()
+    data = graph.add("ismrm2016")
+    graph.set(data, "n", 1)
+
+    async def script(user, app):
+        await app.run()
+        with app.client:
+            await app.act(data, "preview")
+            assert app.previewed == data
+            await app.act(data, "preview")
+            assert app.previewed is None
+            await user.should_see("Press the eye on a block")
+            await app.act(data, "preview")
+            assert app.previewed == data
+
+    simulate(graph, script)
+
+
+#*************#
+#   spread   #
+#*************#
+def test_a_spectrum_with_coils_offers_to_draw_them_apart_and_stacked(tmp_path):
+    from nifti_mrs.create_nmrs import gen_nifti_mrs
+    from nifti_mrs_plus import NIfTI_MRS_Plus
+
+    t = np.arange(256) * 2.5e-4
+    fid = np.exp(2j * np.pi * (2.0 - 4.65) * 123.2 * t - t / 0.05)
+    fids = np.stack([fid, 2 * fid], -1).reshape(1, 1, 1, -1, 2)
+    path, = NIfTI_MRS_Plus([gen_nifti_mrs(fids, 2.5e-4, 123.2, dim_tags=["DIM_COIL", None, None])]) \
+        .save_nifti(str(tmp_path), prefix="coils")
+    graph = Graph()
+    data = graph.add("files")
+    graph.set(data, "files", [path])
+
+    async def script(user, app):
+        await app.run()
+        with app.client:
+            await app.act(data, "preview")
+        await user.should_see(marker="spread")
+        app._show(stack=1.0)
+        figure = app._figure(app.graph.output(data).list()[0])
+        assert [d["name"] for d in figure["data"]] == ["coil 0", "coil 1"]
+        assert max(figure["data"][1]["y"]) > 2 * max(figure["data"][0]["y"]), "stacked above"
+
+    simulate(graph, script)
 
 
 #**********#

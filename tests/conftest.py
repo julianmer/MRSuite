@@ -20,6 +20,8 @@ import glob
 import os
 import shutil
 
+import nibabel as nib
+import numpy as np
 import pytest
 
 # a single already-averaged, already-combined single-voxel spectrum: the degenerate
@@ -103,3 +105,31 @@ def fsl_mrs_fit():
     mrs.processForFitting()
     return fitting.fit_FSLModel(mrs, method="Newton", ppmlim=(0.2, 4.2), baseline_order=2)
 
+
+#***********#
+#   study   #
+#***********#
+@pytest.fixture
+def study(tmp_path, spectrum):
+    """A folder as a study comes: two BIDS subjects, a plain-named one, a T1 and
+    derivatives that are not data."""
+    from nifti_mrs_plus import NIfTI_MRS_Plus
+
+    once, = NIfTI_MRS_Plus([spectrum]).save_nifti(str(tmp_path / ".once"), prefix="tmp")
+
+    def put(rel):
+        path = tmp_path / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(once, path)
+
+    for rel in ["sub-01/ses-01/mrs/sub-01_ses-01_acq-press_svs.nii.gz",
+                "sub-01/ses-01/mrs/sub-01_ses-01_acq-press_mrsref.nii.gz",
+                "sub-02/mrs/sub-02_acq-press_svs.nii.gz",
+                "sub-02/mrs/sub-02_acq-press_mrsref.nii.gz",
+                "extra/press_water_PFL.nii.gz", "extra/press_metab_PFL.nii.gz",
+                "extra/press_mm_PFL.nii.gz", "derivatives/osprey/sub-01_svs.nii.gz"]:
+        put(rel)
+    anat = tmp_path / "sub-01/ses-01/anat"
+    anat.mkdir(parents=True)
+    nib.save(nib.Nifti1Image(np.zeros((4, 4, 4)), np.eye(4)), anat / "sub-01_ses-01_T1w.nii.gz")
+    return tmp_path

@@ -96,7 +96,9 @@ def view(graph: Graph, running: Optional[str], thumbs: Dict[str, Tuple[int, Any]
         status = "running" if node.id == running else "error" if node.error else \
             "done" if node.made is not None else "idle"
         option = b.options[node.option] if b.step else None
-        files = [str(f).rstrip("/").rsplit("/", 1)[-1] for f in node.values.get("files", [])]
+        chosen = node.values.get("files") or (
+            [node.values["folder"]] if node.block == "folder" and "folder" in node.values else [])
+        files = [str(f).rstrip("/").rsplit("/", 1)[-1] for f in chosen]
         wired = {e.input for e in graph.edges if e.target == node.id}
         set_ = {f.name: repr(node.values[f.name]) if f.name in node.values else f.default
                 for f in graph.arguments(node.id) if f.name not in wired}  # what one unwired is

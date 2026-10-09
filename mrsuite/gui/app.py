@@ -62,6 +62,7 @@ class App:
         self.previewed: Optional[str] = None         # the block in the preview
         self.port: Optional[str] = None              # which of its outputs
         self.index, self.scaling = 0, None           # which spectrum, which concentrations
+        self.spread, self.stack = None, 0.0           # which dimension drawn apart, how far
         self.running: Optional[str] = None           # the block under way
         self.runs: Optional[Graph] = None            # the graph a run is under way on
         self.theme = "system"
@@ -482,6 +483,10 @@ class App:
         elif what == "run":
             await self.run(id)
         elif what == "preview":
+            if id == self.previewed:                   # the eye again: closed
+                self.previewed = None
+                self.preview.refresh()
+                return
             self.previewed, self.port, self.index = id, None, 0
             if self.graph.nodes[id].made is None:
                 await self.run(id)
@@ -586,12 +591,18 @@ class App:
                       label="Toolbox", on_change=lambda e: self._choose(node.id, e.value)) \
                 .classes("w-full").props("dense outlined").mark("toolbox")
         if _chooses(b) and not self._wired(node.id, "files"):
-            for f in node.values.get("files", []):
+            study = node.block == "folder"
+            for f in ([node.values["folder"]] if study and "folder" in node.values
+                      else node.values.get("files", [])):
                 ui.label(str(f)).classes("text-xs font-mono break-all")
-            ui.button("Choose files…", icon="folder_open",
+            ui.button("Choose folder…" if study else "Choose files…", icon="folder_open",
                       on_click=lambda: self.choose_files(node.id)) \
                 .props("outline dense no-caps").classes("w-full")
-            if nicegui.native.main_window is not None:    # the browser's picker has a folder button
+            if study:
+                ui.button("Collect…", icon="rule", on_click=lambda: self.collect(node.id)) \
+                    .props("outline dense no-caps").classes("w-full").mark("collect") \
+                    .tooltip("What the folder holds: put each file's role and group right")
+            if nicegui.native.main_window is not None and not study:   # the browser's picker
                 ui.button("Choose folder…", icon="folder",
                           on_click=lambda: self.choose_files(node.id, folder=True)) \
                     .props("outline dense no-caps").classes("w-full").mark("choose-folder")
@@ -623,7 +634,8 @@ class App:
             fields, signature, help_ = list(b.fields), "", ""
         paths = catalog.paths(help_, [f.name for f in fields])
         for f in fields:
-            if _chooses(b) and f.name == "files" and not self._wired(node.id, "files"):
+            if _chooses(b) and f.name in ("files", "folder", "roles", "groups") \
+                    and not self._wired(node.id, "files"):
                 continue
             self._field(node, f, f.name in paths)
         if b.step:
@@ -747,8 +759,9 @@ class App:
     async def choose_files(self, id: str, folder: bool = False) -> None:
         """Files, or a folder (DICOM), for a block that takes them, from the system's own
         dialog where there is one; a read block's then read in, so its outputs show."""
-        read = self.graph.nodes[id].block == "files"
-        chosen = await self._pick(formats=read, folder=folder)
+        block = self.graph.nodes[id].block
+        read, study = block in ("files", "folder"), block == "folder"
+        chosen = await self._pick(formats=block == "files", folder=folder or study)
         if not chosen or id not in self.graph.nodes:
             return
         paths, format = chosen
@@ -757,11 +770,67 @@ class App:
             await self._idle()                       # so the files are read straight away
             if id not in self.graph.nodes:
                 return
-            self.graph.set(id, "format", None if format == "auto" else format)
-        self.graph.set(id, "files", [str(p) for p in paths])
+        if study:
+            self.graph.set(id, "folder", str(paths[0]))
+        else:
+            if block == "files":
+                self.graph.set(id, "format", None if format == "auto" else format)
+            self.graph.set(id, "files", [str(p) for p in paths])
         self._changed()
         if read:
             await self.run(id)
+
+    #*************#
+    #   collect   #
+    #*************#
+    async def collect(self, id: str) -> None:
+        """The window over a folder: every file found, its role and group as its name says,
+        each to put right (or leave out), then loaded."""
+        from mrsuite import collect as study
+
+        node = self.graph.nodes[id]
+        folder = node.values.get("folder")
+        if not folder:
+            ui.notify("Choose a folder first", type="info")
+            return
+        try:
+            found = await run.io_bound(study.discover, folder)
+        except Exception as err:                       # noqa: BLE001 - said, not hidden
+            ui.notify(brief(err), type="negative", multi_line=True)
+            return
+        roles, groups = node.values.get("roles") or {}, node.values.get("groups") or {}
+        rows = []
+        with ui.dialog() as dialog, ui.card().classes("w-[60rem] max-w-full"):
+            ui.label(f"Collect {Path(folder).name}").classes("text-base font-semibold")
+            with ui.scroll_area().classes("w-full h-[60vh]"):
+                with ui.grid(columns="1fr 9rem 14rem").classes("w-full gap-1 items-center"):
+                    for head in ("file", "role", "group"):
+                        ui.label(head).classes("mr-muted text-xs")
+                    for i, e in enumerate(found):
+                        rel = e.path.relative_to(folder).as_posix()
+                        ui.label(rel).classes("text-xs font-mono break-all")
+                        role = ui.select({**{r: r for r in study.ROLES}, "": "leave out"},
+                                         value=roles.get(rel, e.role)) \
+                            .props("dense outlined").mark(f"role-{i}")
+                        group = ui.input(value=groups.get(rel, e.group)) \
+                            .props("dense outlined").mark(f"group-{i}")
+                        rows.append((rel, e, role, group))
+            with ui.row().classes("w-full"):
+                ui.button("Cancel", on_click=lambda: dialog.submit(False)).props("flat")
+                ui.space()
+                ui.button("Load", on_click=lambda: dialog.submit(True)) \
+                    .props("unelevated no-caps").mark("collect-load")
+        load = await dialog
+        if load:
+            roles = {rel: r.value for rel, e, r, g in rows if r.value != e.role}
+            groups = {rel: g.value for rel, e, r, g in rows if g.value != e.group}
+        dialog.delete()
+        if not load or id not in self.graph.nodes:
+            return
+        self.graph.set(id, "roles", roles or None)
+        self.graph.set(id, "groups", groups or None)
+        self._changed()
+        await self.run(id)
 
     #**********#
     #   pick   #
@@ -817,6 +886,17 @@ class App:
                 ui.number("spectrum", value=self.index, min=0, max=count - 1, step=1,
                           on_change=lambda e: self._show(index=int(e.value or 0))) \
                     .props("dense outlined").classes("w-28")
+            tags = [t for t in getattr(value.list()[0], "dim_tags", [])[:value.list()[0].ndim - 4]
+                    if t] if isinstance(value, NIfTI_MRS_Plus) else []
+            if tags:                                   # coils, averages, ...: drawn apart
+                ui.select({t: t.removeprefix("DIM_").lower() for t in tags},
+                          value=self.spread if self.spread in tags else tags[0], label="spread",
+                          on_change=lambda e: self._show(spread=e.value)) \
+                    .props("dense outlined").classes("w-28").mark("spread")
+                ui.slider(min=0, max=1, step=0.1, value=self.stack,
+                          on_change=lambda e: self._show(stack=float(e.value or 0))) \
+                    .props("dense label").classes("w-28 self-center").tooltip("stack") \
+                    .mark("stack")
             if results(value):
                 scalings = sorted(value[self.index].concentrations)
                 self.scaling = self.scaling if self.scaling in scalings else \
@@ -857,21 +937,24 @@ class App:
     #**********#
     #   show   #
     #**********#
-    def _show(self, port: Optional[str] = None, index: Optional[int] = None) -> None:
-        if index is None:
+    def _show(self, port: Optional[str] = None, index: Optional[int] = None,
+              spread: Optional[str] = None, stack: Optional[float] = None) -> None:
+        if index is None and spread is None and stack is None:
             self.port = port or self.port
             self.preview.refresh()
         else:
-            self.index = index
+            self.index = self.index if index is None else index
+            self.spread = spread or self.spread
+            self.stack = self.stack if stack is None else stack
             self.shown.refresh()
 
     #************#
     #   figure   #
     #************#
     def _figure(self, spectrum: Any) -> dict:
-        """A spectrum for plotly: the real part, a trace per coil or average (per metabolite
-        for a basis set), ppm falling."""
-        ppm, ys, labels = traces(spectrum)
+        """A spectrum for plotly: the real part, a trace per coil or average, drawn apart
+        and stacked as chosen (per metabolite for a basis set), ppm falling."""
+        ppm, ys, labels = traces(spectrum, spread=self.spread, stack=self.stack)
         ink, grid = ("#e5e9ef", "#29313c") if self.dark.value else ("#18202b", "#dbe1ea")
         single = len(ys) == 1
         return {"data": [{"type": "scatter", "mode": "lines", "x": ppm.tolist(), "y": y.tolist(),
@@ -1007,8 +1090,9 @@ class App:
 #   chooses   #
 #*************#
 def _chooses(b: blocks.Block) -> bool:
-    """Whether a block's files are chosen with a button rather than typed: a call's."""
-    return not b.step and any(f.name == "files" for f in b.fields)
+    """Whether a block's files, or folder, are chosen with a button rather than typed: a
+    call's."""
+    return not b.step and (b.key == "folder" or any(f.name == "files" for f in b.fields))
 
 
 #************#

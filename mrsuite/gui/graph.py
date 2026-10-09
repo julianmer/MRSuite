@@ -213,7 +213,7 @@ class Graph:
         else:
             node.values[name] = value
         self.invalidate(id)                  # before wires go, so the blocks after it hear
-        if node.block == "files":
+        if node.block in ("files", "folder"):
             node.found = ["spectra"] if self._nifti(node) else []
             self._drop_wires(node)
 
@@ -275,7 +275,7 @@ class Graph:
         toolbox; none where it cannot be asked (not installed), which its run says."""
         node = self.nodes[id]
         b = blocks.block(node.block)
-        if not (b.step or b.call) or node.block == "files" or \
+        if not (b.step or b.call) or node.block in ("files", "folder") or \
                 (b.step and not catalog.asked(*b.options[node.option])):
             return []
         try:
@@ -387,6 +387,14 @@ class Graph:
                 raise ValueError(f"{node.name}: give the model's name")
             line = f"Pipeline([models.load({node.values['name']!r}).step()]).run({wires['data']})"
             return f"{node.name} = {line}", {*b.imports, PIPELINE}, [node.name]
+        if node.block == "folder":
+            folder = node.values.get("folder")
+            if not folder:
+                raise ValueError(f"{node.name}: choose a folder to load")
+            fixed = "".join(f", {k}={node.values[k]!r}" for k in ("roles", "groups")
+                            if node.values.get(k))             # what the window put right
+            return (f"{node.name} = collect.load({str(folder)!r}{fixed})", set(b.imports),
+                    [node.name])
         if node.block == "files":
             files = node.values.get("files")
             if not files:
@@ -428,7 +436,7 @@ class Graph:
     def ref(self, id: str, output: str) -> str:
         """The code that reaches one output of a block."""
         node = self.nodes[id]
-        if node.block == "files" and not self._nifti(node):
+        if self._indexed(node):
             return f"{node.name}[{output!r}]"
         return node.name if len(self.ports(id)[1]) == 1 else f"{node.name}_{output}"
 
@@ -539,7 +547,7 @@ class Graph:
                 if node.changes != mine:         # edited while it ran: what it made is stale
                     return False
                 node.made = {n: space[n] for n in names}
-            if node.block == "files" and not self._nifti(node):
+            if self._indexed(node):
                 node.found = [n for n, v in node.made[node.name].items()
                               if isinstance(v, NIfTI_MRS_Plus)]
                 self._drop_wires(node)
@@ -561,7 +569,7 @@ class Graph:
             return None
         outputs = self.ports(id)[1]
         port = port or (outputs[0].name if outputs else None)
-        if node.block == "files" and not self._nifti(node):
+        if self._indexed(node):
             return node.made[node.name].get(port)
         return node.made[self.ref(id, port)] if port else None
 
@@ -668,6 +676,14 @@ class Graph:
         return node.values.get("format", "auto") == "auto" and bool(files) and all(
             str(f).endswith((".nii", ".nii.gz")) for f in files)
 
+    #*************#
+    #   indexed   #
+    #*************#
+    def _indexed(self, node: Node) -> bool:
+        """Whether a block's outputs are the keys of what it made, found when it ran: a folder
+        loaded, or files read through spec2nii."""
+        return node.block == "folder" or (node.block == "files" and not self._nifti(node))
+
     #****************#
     #   drop wires   #
     #****************#
@@ -734,24 +750,46 @@ def results(value: Any) -> bool:
 #************#
 #   traces   #
 #************#
-def traces(spectrum: Any, limit: int = 64) -> Tuple[np.ndarray, List[np.ndarray], List[str]]:
+def traces(spectrum: Any, limit: int = 64, spread: Optional[str] = None,
+           stack: float = 0.0) -> Tuple[np.ndarray, List[np.ndarray], List[str]]:
     """
-    A spectrum's real part on its ppm axis, one trace per coil, average or other higher
-    dimension, at most ``limit``; a basis set's, one per metabolite, by name.
+    A spectrum's real part on its ppm axis, one trace per element of one higher dimension
+    (its first by default), at most ``limit``; a basis set's, one per metabolite, by name.
+
+    Args:
+        spectrum: NIfTI-MRS, or a Basis.
+        limit (int): Traces at most.
+        spread (Optional[str]): The dimension to draw element by element, by its tag, e.g.
+            'DIM_COIL' or 'DIM_DYN'. The others are averaged where they are averages
+            (DIM_DYN) and taken at their first element otherwise.
+        stack (float): How far each trace sits above the one before, as a fraction of
+            the largest amplitude; 0 draws them over each other.
 
     Returns:
-        The ppm axis, the traces and a label for each.
+        The ppm axis, the traces and a label for each, e.g. 'coil 3'.
     """
     if isinstance(spectrum, Basis):
         return (spectrum.ppm(), list(spectrum.spectra()[:limit].real),
                 list(spectrum.names[:limit]))
-    fids = np.moveaxis(np.asarray(spectrum[:]), 3, 0).reshape(spectrum.shape[3], -1)
+    data = np.asarray(spectrum[:])
+    tags = list(spectrum.dim_tags)[:data.ndim - 4]
+    axis = 4 + tags.index(spread) if spread in tags else 4
+    for d in reversed(range(4, data.ndim)):
+        if d != axis:
+            data = data.mean(axis=d, keepdims=True) if tags[d - 4] == "DIM_DYN" \
+                else data.take([0], axis=d)
+    fids = np.moveaxis(data, 3, 0).reshape(data.shape[3], -1)
     specs = np.fft.fftshift(np.fft.fft(fids, axis=0), axes=0)
     n, dwell = fids.shape[0], spectrum.dwelltime
     hz = np.fft.fftshift(np.fft.fftfreq(n, dwell))
     ppm = hz / spectrum.spectrometer_frequency[0] + spectrum.SpecFreqChemShift   # by nucleus
     count = min(specs.shape[1], limit)
-    return ppm, [specs[:, j].real for j in range(count)], [f"{j}" for j in range(count)]
+    ys = [specs[:, j].real for j in range(count)]
+    if stack and count > 1:
+        step = stack * max(float(np.abs(y).max()) for y in ys)
+        ys = [y + j * step for j, y in enumerate(ys)]
+    name = (tags[axis - 4] or "DIM").removeprefix("DIM_").lower() + " " if tags else ""
+    return ppm, ys, [f"{name}{j}" for j in range(count)]
 
 
 #***********#

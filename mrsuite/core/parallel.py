@@ -106,13 +106,11 @@ class _Files(list):
 #***************#
 def _run_chunk(task) -> List[Any]:
     """In a worker: read one chunk back and run the method on it, in this process."""
-    from fsl_mrs.utils import mrs_io
-
     module, name, data, args, kwargs = task
 
     def load(value: Any) -> Any:
         if isinstance(value, _Files):
-            return NIfTI_MRS_Plus([mrs_io.read_FID(path) for path in value])
+            return NIfTI_MRS_Plus([NIFTI_MRS(path, validate_on_creation=False) for path in value])
         return value
 
     method = getattr(importlib.import_module(module), name)

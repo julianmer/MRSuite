@@ -217,3 +217,205 @@ def test_a_pipeline_can_carry_something_other_than_spectra():
 #**********#
 def test_repr_names_the_steps():
     assert repr(Pipeline([fsl_mrs.conjugate, lambda d: d])) == "Pipeline(conjugate -> step1)"
+
+
+#************#
+#   stages   #
+#************#
+def test_stages_hand_out_every_step_and_end_where_run_does(data):
+    pipeline = Pipeline([fsl_mrs.step.apodize(amount=[5.0]), fsl_mrs.step.fshift(amount=2.0)])
+
+    stages = list(pipeline.stages(data))
+
+    assert len(stages) == 2
+    assert np.array_equal(stages[-1][0][:], pipeline.run(data)[0][:])
+    assert not np.array_equal(stages[0][0][:], stages[1][0][:])
+
+
+#*****************#
+#   written out   #
+#*****************#
+@pytest.fixture
+def written(spectrum):
+    """A pipeline of every kind of argument: a list, a number, a tuple, a path, a nested
+    pipeline, and spectra, named."""
+    from pathlib import Path
+    from mrsuite.bridges import lcmodel
+
+    water = spectrum.copy()
+    return water, Pipeline([fsl_mrs.step.apodize(amount=[5.0]),
+                            Pipeline([fsl_mrs.step.fshift(amount=1.5)]),
+                            fsl_mrs.step.ecc(water),
+                            lcmodel.step.fit(Path("x.BASIS"), ppmlim=(0.5, 4.2))])
+
+
+def same(a: Pipeline, b: Pipeline) -> bool:
+    """The same steps, each method by its module and name, with the same arguments, nested
+    pipelines alike."""
+    def key(step):
+        return step.method.__module__, step.method.__qualname__, step.args, step.kwargs
+
+    return len(a.steps) == len(b.steps) and all(
+        same(x, y) if isinstance(x, Pipeline) else not isinstance(y, Pipeline) and key(x) == key(y)
+        for x, y in zip(a.steps, b.steps))
+
+
+def test_a_pipeline_written_as_code_builds_the_same_pipeline(written):
+    water, pipeline = written
+    code = pipeline.script(inputs={"water": water})
+    namespace = {}
+    exec(code, namespace)
+
+    again = namespace["pipeline"](water)
+
+    assert "def pipeline(water):" in code and "fsl_mrs.step.ecc(water)" in code
+    assert same(pipeline, again)
+    assert again.steps[2].args[0] is water and again.steps[3].kwargs["ppmlim"] == (0.5, 4.2)
+
+
+def test_a_pipeline_written_as_a_recipe_builds_the_same_pipeline(written):
+    import json
+
+    water, pipeline = written
+    recipe = json.loads(json.dumps(pipeline.to_dict(inputs={"water": water})))
+
+    again = Pipeline.from_dict(recipe, water=water)
+
+    assert recipe["inputs"] == ["water"]
+    assert same(pipeline, again)
+    assert again.steps[2].args[0] is water and again.steps[3].kwargs["ppmlim"] == (0.5, 4.2)
+
+
+def test_a_rebuilt_pipeline_gives_the_same_spectra(written, data):
+    water, pipeline = written
+    namespace = {}
+    exec(pipeline.script(inputs={"water": water}), namespace)
+    first = Pipeline(pipeline.steps[:3])
+    again = Pipeline(namespace["pipeline"](water).steps[:3])
+
+    assert np.array_equal(first.run(data.list()[0])[:], again.run(data.list()[0])[:])
+
+
+#*************#
+#   refused   #
+#*************#
+def test_what_cannot_be_written_down_is_refused_by_name(written):
+    water, pipeline = written
+
+    with pytest.raises(ValueError, match="does not name"):
+        pipeline.script()
+    with pytest.raises(ValueError, match="step 0.*cannot be written down"):
+        Pipeline([lambda d: d]).to_dict()
+    with pytest.raises(ValueError, match="cannot be written down; give arguments"):
+        Pipeline([fsl_mrs.step.apodize(amount=object())]).script()
+    with pytest.raises(ValueError, match="takes \\['water'\\]"):
+        Pipeline.from_dict(pipeline.to_dict(inputs={"water": water}))
+
+
+#***************#
+#   as it was   #
+#***************#
+def test_a_bridge_function_as_a_step_is_written_as_itself(data):
+    code = Pipeline([fsl_mrs.conjugate]).script()
+    namespace = {}
+    exec(code, namespace)
+
+    assert "        fsl_mrs.conjugate," in code
+    assert np.array_equal(namespace["pipeline"]().run(data)[0][:],
+                          Pipeline([fsl_mrs.conjugate]).run(data)[0][:])
+
+
+def test_two_functions_of_one_name_stay_apart(tmp_path, monkeypatch):
+    for module in ("first_lab", "second_lab"):
+        (tmp_path / f"{module}.py").write_text(
+            "from mrsuite import method\n\n"
+            f"@method('{module}')\ndef clean(spectrum):\n    return spectrum\n")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    import first_lab
+    import second_lab
+
+    namespace = {}
+    exec(Pipeline([first_lab.clean.step(), second_lab.clean.step()]).script(), namespace)
+
+    assert [s.method.program for s in namespace["pipeline"]().steps] == ["first_lab", "second_lab"]
+
+
+def test_arguments_python_cannot_spell_plainly_come_back(spectrum):
+    code = Pipeline([fsl_mrs.step.fshift(amount=float("nan"), **{"na.rm": True})]).script()
+    namespace = {}
+    exec(code, namespace)
+
+    step = namespace["pipeline"]().steps[0]
+    assert np.isnan(step.kwargs["amount"]) and step.kwargs["na.rm"] is True
+
+
+def test_what_would_come_back_otherwise_is_refused(spectrum, monkeypatch):
+    from mrsuite.bridges.fid_a import FIDABridge
+    from mrsuite.core.method import Method
+
+    model = Method()
+    model.source = {"name": "2a92d3638784ad7302c42c5ecc67276d9aa01660", "revision": None}
+    monkeypatch.setattr(FIDABridge, "exists", lambda self, func: True)
+    own = FIDABridge(runtime="matlab")
+
+    def written(*steps, **inputs):
+        return Pipeline(list(steps)).script(inputs=inputs)
+
+    with pytest.raises(ValueError, match="loaded from a folder"):
+        written(model.step())
+    with pytest.raises(ValueError, match="settings of its own"):
+        written(own.op_addphase.step(10))
+    with pytest.raises(ValueError, match="would not be Python names"):
+        written(fsl_mrs.step.ecc(spectrum), fsl_mrs=spectrum)
+    with pytest.raises(ValueError, match="cannot be written down; give"):
+        written(fsl_mrs.step.fshift(amount=1 + 2j))
+    with pytest.raises(ValueError, match="starting with \\$"):
+        written(fsl_mrs.step.fshift(amount={"$path": "x"}))
+
+
+def test_a_function_of_the_running_script_is_refused(monkeypatch):
+    """Found again by name now, but in whatever script runs when the recipe is read."""
+    import sys
+    from mrsuite import method
+
+    @method("here")
+    def clean(spectrum):
+        return spectrum
+    clean.__module__, clean.__qualname__ = "__main__", "clean"
+    monkeypatch.setattr(sys.modules["__main__"], "clean", clean, raising=False)
+
+    with pytest.raises(ValueError, match="the script that is running"):
+        Pipeline([clean.step()]).to_dict()
+
+
+#############
+#   basis   #
+#############
+def test_a_basis_is_named_like_spectra_and_never_printed_whole():
+    """A fit's basis goes into a recipe and a script by its name, as spectra do; refused or
+    shown, a basis of thousands of points stays one line."""
+    from mrsuite.core.basis import Basis
+
+    basis = Basis(["NAA", "Cr"], np.ones((2, 4096), complex), 4000.0, 123.2)
+    pipeline = Pipeline([fsl_mrs.step.fit(basis)])
+
+    recipe = pipeline.to_dict(inputs={"basis": basis})
+    again = Pipeline.from_dict(recipe, basis=basis)
+
+    assert again.steps[0].args[0] is basis
+    assert "def pipeline(basis):" in pipeline.script(inputs={"basis": basis})
+    assert len(repr(pipeline.steps[0])) < 100
+    with pytest.raises(ValueError, match="a basis the pipeline does not name") as err:
+        pipeline.to_dict()
+    assert len(str(err.value)) < 200
+
+
+def test_an_argument_named_like_a_python_keyword_is_written_as_code_that_runs():
+    """spant's ABfit takes lambda."""
+    from mrsuite.core.method import Step
+
+    code = Pipeline([Step(fsl_mrs.fit, (), {"lambda": 1, "ppmlim": (1, 2)})]).script()
+    namespace = {}
+    exec(compile(code, "<script>", "exec"), namespace)
+
+    assert namespace["pipeline"]().steps[0].kwargs == {"lambda": 1, "ppmlim": (1, 2)}

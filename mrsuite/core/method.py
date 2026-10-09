@@ -127,13 +127,9 @@ class Method:
     #**********#
     #   step   #
     #**********#
-    def step(self, *args, **kwargs) -> Callable:
+    def step(self, *args, **kwargs) -> "Step":
         """This method as a pipeline step: the arguments bound now, the data taken later."""
-        def bound(data):
-            return self(data, *args, **kwargs)
-        bound.__name__ = getattr(self, "__name__", type(self).__name__)
-        bound.__doc__ = self.__doc__
-        return bound
+        return Step(self, args, kwargs)
 
     #***********#
     #   label   #
@@ -204,6 +200,48 @@ class Method:
                         _keep_header(item, one)
                     if self.records:
                         provenance.append(one, entry)
+
+
+#**************************************************************************************************#
+#                                            Class Step                                            #
+#**************************************************************************************************#
+#                                                                                                  #
+# A method with its arguments bound, taking the data when called: one step of a pipeline.          #
+#                                                                                                  #
+#**************************************************************************************************#
+class Step:
+    """A method with its arguments bound, taking the data when called: one step of a pipeline.
+
+    It keeps what it calls and with what, so a pipeline can show it, change it and write
+    it down as the code that makes it (see ``Pipeline.script``).
+
+    Args:
+        method (Callable): What it calls, the data first.
+        args (tuple): The arguments after the data.
+        kwargs (dict): The arguments by name.
+    """
+
+    #**********#
+    #   init   #
+    #**********#
+    def __init__(self, method: Callable, args: tuple = (), kwargs: Optional[dict] = None):
+        self.method, self.args, self.kwargs = method, tuple(args), dict(kwargs or {})
+        # so a pipeline files what the step measured under the method's name
+        self.__name__ = getattr(method, "__name__", type(method).__name__)
+        self.__doc__ = getattr(method, "__doc__", None)
+
+    #**********#
+    #   call   #
+    #**********#
+    def __call__(self, data: Any) -> Any:
+        return self.method(data, *self.args, **self.kwargs)
+
+    #**********#
+    #   repr   #
+    #**********#
+    def __repr__(self) -> str:
+        bound = [repr(a) for a in self.args] + [f"{k}={v!r}" for k, v in self.kwargs.items()]
+        return f"{self.__name__}.step({', '.join(bound)})"
 
 
 #**************************************************************************************************#

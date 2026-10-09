@@ -212,3 +212,42 @@ def test_the_check_names_the_rule_a_method_breaks(spectrum):
 def test_the_check_wants_a_version(spectrum):
     with pytest.raises(AssertionError, match="does not tell its version"):
         check(method("test")(scale.__wrapped__), _batch(spectrum))
+
+
+#*****************#
+#   a step says   #
+#*****************#
+def test_a_step_says_what_it_calls_and_with_what(spectrum):
+    step = scale.step(factor=3.0)
+
+    assert step.method is scale and step.args == () and step.kwargs == {"factor": 3.0}
+    assert repr(step) == "scale.step(factor=3.0)" and step.__name__ == "scale"
+    assert np.array_equal(step(spectrum)[:], scale(spectrum, factor=3.0)[:])
+
+
+#*******************#
+#   your own step   #
+#*******************#
+def test_your_own_method_is_written_out_by_its_module_and_name(spectrum):
+    code = Pipeline([scale.step(factor=3.0)]).script()
+    namespace = {}
+    exec(code, namespace)
+
+    assert "import tests.core.test_method" in code
+    assert "tests.core.test_method.scale.step(factor=3.0)" in code
+    assert namespace["pipeline"]().steps[0].kwargs == {"factor": 3.0}
+
+
+#************#
+#   models   #
+#************#
+def test_a_model_is_written_out_as_loaded_by_name():
+    """A trained model is reached again the way it was loaded, by its name on the Hub."""
+    from mrsuite.core.method import Method
+
+    model = Method()
+    model.source = {"name": "MRSuite/wand-mrsi2024", "revision": "abc123"}
+    code = Pipeline([model.step(remove=["nuisance"])]).script()
+
+    assert "models.load('MRSuite/wand-mrsi2024', revision='abc123').step(remove=['nuisance'])" \
+        in code

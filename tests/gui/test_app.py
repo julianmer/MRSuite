@@ -328,6 +328,25 @@ def test_the_native_open_dialog_gets_what_can_reach_the_window(monkeypatch, tmp_
     assert len(asked) == 1
 
 
+def test_the_native_window_can_choose_a_folder_too(monkeypatch, tmp_path):
+    """A DICOM series is a folder; pywebview's dialog chooses files or a folder, not both."""
+    import webview
+    asked = []
+
+    class Window:
+        async def create_file_dialog(self, *args, **kwargs):
+            asked.append(kwargs)
+            return (str(tmp_path),)
+
+    async def script(user, app):
+        with monkeypatch.context() as patch:
+            patch.setattr(nicegui.app.native, "main_window", Window())
+            assert await app._pick(folder=True) == ([tmp_path], "auto")
+
+    simulate(Graph(), script)
+    assert asked[0]["dialog_type"] == webview.FileDialog.FOLDER
+
+
 #*************#
 #   preview   #
 #*************#
@@ -361,6 +380,28 @@ def slow(monkeypatch, graph, id):
     monkeypatch.setattr(graph, "code", lambda k: (lambda line, imports, names: (
         "time.sleep(1)\n" + line if k == id else line, imports | {"import time"}, names))(
         *code(k)))
+
+
+#*************#
+#   spinner   #
+#*************#
+@needs_challenge
+def test_a_run_under_way_spins_and_its_block_shows_it(monkeypatch):
+    graph = Graph()
+    data = graph.add("ismrm2016")
+    graph.set(data, "n", 1)
+    slow(monkeypatch, graph, data)
+
+    async def script(user, app):
+        assert not app.spinner.visible
+        task = asyncio.create_task(app.run())
+        await until(lambda: app.spinner.visible)
+        assert [n["data"]["status"] for n in drawn(user)[0]] == ["running"]
+        await task
+        assert not app.spinner.visible
+        assert [n["data"]["status"] for n in drawn(user)[0]] == ["done"]
+
+    simulate(graph, script)
 
 
 #*************#
@@ -416,7 +457,7 @@ def test_files_chosen_for_a_basis_set_are_set_and_not_read(tmp_path):
     async def script(user, app):
         asked, runs = [], []
 
-        async def pick(title="Open data", formats=True):
+        async def pick(title="Open data", formats=True, folder=False):
             asked.append(formats)
             return chosen, "auto"
 

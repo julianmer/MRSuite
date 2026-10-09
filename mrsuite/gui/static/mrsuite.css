@@ -127,8 +127,9 @@ body {
 .is-done .mr-status { background: var(--mr-teal); }
 .is-error .mr-status { background: var(--mr-red); }
 .is-error { border-color: var(--mr-red); }
-.is-running .mr-status { background: var(--mr-blue); animation: mr-pulse 0.9s infinite alternate; }
-@keyframes mr-pulse { to { opacity: 0.25; } }
+.is-running .mr-status { background: transparent; border: 2px solid var(--mr-blue); border-top-color: transparent;
+                         width: 10px; height: 10px; animation: mr-spin 0.8s linear infinite; }
+@keyframes mr-spin { to { transform: rotate(360deg); } }
 
 .mr-ports { display: flex; flex-direction: column; gap: 2px; padding: 6px 0; }
 .mr-port { position: relative; padding: 1px 12px; color: var(--mr-muted); font-size: 11px; }

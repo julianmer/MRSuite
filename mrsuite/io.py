@@ -43,7 +43,7 @@ DRIVER = Path(__file__).with_name("basic_driver.py")
 def load(*files: Any, format: str = "auto",
          **options: Any) -> Dict[str, Union[NIfTI_MRS_Plus, nib.Nifti1Image]]:
     """
-    Raw scanner data as NIfTI-MRS+, converted by spec2nii.
+    Raw scanner data as NIfTI-MRS+, converted by spec2nii; NIfTI-MRS files as they are.
 
     One acquisition can give several outputs - a GE P-file holds the water-suppressed
     spectra and their water reference - so each comes back under spec2nii's name for it,
@@ -62,11 +62,14 @@ def load(*files: Any, format: str = "auto",
 
     Returns:
         Dict[str, Union[NIfTI_MRS_Plus, nib.Nifti1Image]]: Output name -> the data, its
-        processing history starting with the conversion, or the image.
+        processing history starting with the conversion, or the image. NIfTI-MRS files
+        need no conversion: they come back as one batch, 'spectra', through ``read``.
 
     Raises:
         RuntimeError: If spec2nii fails or writes nothing, with its own message.
     """
+    if format == "auto" and files and all(str(f).endswith((".nii", ".nii.gz")) for f in files):
+        return {"spectra": read(*files)}
     import spec2nii
 
     flags = []

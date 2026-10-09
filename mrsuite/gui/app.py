@@ -95,7 +95,7 @@ class App:
                 with ui.splitter(value=320, limits=(220, 480)).props("unit=px reverse") \
                         .classes("w-full h-full") as right:
                     with right.before:
-                        with ui.splitter(horizontal=True, value=70, limits=(25, 95)) \
+                        with ui.splitter(horizontal=True, value=58, limits=(25, 95)) \
                                 .classes("w-full h-full") as split:
                             with split.before:
                                 self.canvas = Canvas().classes("w-full h-full")
@@ -145,11 +145,13 @@ class App:
             ui.button("Run", icon="play_arrow", on_click=lambda: self.run()) \
                 .props("unelevated dense no-caps").classes("mr-run px-3") \
                 .tooltip("Run every block that has not run").mark("run")
-            button("", "stop", self.graph_stop, "Stop after the block under way")
+            button("Stop", "stop", self.graph_stop, "Stop after the block under way").mark("stop")
             ui.element("div").classes("mr-divider")
             button("Script", "code", self.script, "The graph as Python").mark("script")
             button("", "fit_screen", lambda: self.canvas.fit(), "Show every block")
             ui.space()
+            self.spinner = ui.spinner(size="1.1em", color="primary").mark("spinner")
+            self.spinner.set_visibility(False)
             self.status = ui.label("").classes("mr-muted text-sm")
             with ui.button(icon="settings", color=None).props("flat round dense") \
                     .tooltip("Settings"):
@@ -520,6 +522,7 @@ class App:
             if self.runs is graph:
                 self.runs, self.running = None, None
                 self.status.text = ""
+                self.spinner.set_visibility(False)
         self._changed()
 
     #**********#
@@ -555,6 +558,7 @@ class App:
             self.draw()
             node = self.graph.nodes.get(self.running or "")
             self.status.text = f"Running {node.name}…" if node else "Running…"
+            self.spinner.set_visibility(True)
 
     #***************#
     #   inspector   #
@@ -587,6 +591,10 @@ class App:
             ui.button("Choose files…", icon="folder_open",
                       on_click=lambda: self.choose_files(node.id)) \
                 .props("outline dense no-caps").classes("w-full")
+            if nicegui.native.main_window is not None:    # the browser's picker has a folder button
+                ui.button("Choose folder…", icon="folder",
+                          on_click=lambda: self.choose_files(node.id, folder=True)) \
+                    .props("outline dense no-caps").classes("w-full").mark("choose-folder")
         if node.error:
             ui.label(node.error).classes("text-xs text-negative break-words")
         ui.label("Settings").classes("mr-section pt-2")
@@ -736,11 +744,11 @@ class App:
     #***********#
     #   files   #
     #***********#
-    async def choose_files(self, id: str) -> None:
-        """Files for a block that takes them, from the system's own dialog where there is
-        one; a read block's then read in, so its outputs show."""
+    async def choose_files(self, id: str, folder: bool = False) -> None:
+        """Files, or a folder (DICOM), for a block that takes them, from the system's own
+        dialog where there is one; a read block's then read in, so its outputs show."""
         read = self.graph.nodes[id].block == "files"
-        chosen = await self._pick(formats=read)
+        chosen = await self._pick(formats=read, folder=folder)
         if not chosen or id not in self.graph.nodes:
             return
         paths, format = chosen
@@ -758,13 +766,15 @@ class App:
     #**********#
     #   pick   #
     #**********#
-    async def _pick(self, title: str = "Open data", formats: bool = True) \
-            -> Optional[Tuple[List[Path], str]]:
+    async def _pick(self, title: str = "Open data", formats: bool = True,
+                    folder: bool = False) -> Optional[Tuple[List[Path], str]]:
         window = nicegui.native.main_window
         if window is not None:
             # NiceGUI's default dialog is Open; pywebview's OPEN_DIALOG cannot cross to the window
+            import webview
+            kind = {"dialog_type": webview.FileDialog.FOLDER} if folder else {}
             found = await window.create_file_dialog(allow_multiple=True,
-                                                    directory=str(self.folder))
+                                                    directory=str(self.folder), **kind)
             return ([Path(p) for p in found], "auto") if found else None
         done: asyncio.Future = asyncio.get_running_loop().create_future()
 
@@ -826,9 +836,9 @@ class App:
         """The spectrum or fit chosen, refreshed alone so the spectrum box keeps its focus."""
         self.index = min(self.index, max(count - 1, 0))      # typed past the last
         if isinstance(value, NIfTI_MRS_Plus):
-            ui.plotly(self._figure(value.list()[self.index])).classes("w-full grow min-h-[12rem]")
+            ui.plotly(self._figure(value.list()[self.index])).classes("w-full grow min-h-[24rem]")
         elif isinstance(value, Basis):
-            ui.plotly(self._figure(value)).classes("w-full grow min-h-[12rem]")
+            ui.plotly(self._figure(value)).classes("w-full grow min-h-[24rem]")
         elif results(value):
             columns, rows = table(value[self.index])
             ui.table(columns=[{"name": c, "label": c, "field": c, "align": "left"}

@@ -16,9 +16,12 @@
 #*************#
 #   imports   #
 #*************#
+import inspect
+import keyword
 import os
-from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+import re
+from functools import lru_cache
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -26,12 +29,13 @@ from nifti_mrs.create_nmrs import gen_nifti_mrs
 from nifti_mrs.nifti_mrs import NIFTI_MRS
 from oct2py import Oct2Py
 
-from mrsuite.bridges.base import Bridge
+from mrsuite import externals
+from mrsuite.bridges.base import Bridge, defaults
 from mrsuite.core.provenance import git_version
 from mrsuite.octave import resolve_runtime, session
 
 # Absolute, so the bridge works from any working directory.
-FIDA_ROOT = Path(__file__).resolve().parents[2] / "externals" / "fid-a"
+FIDA_ROOT = externals.path("fid-a")
 
 
 #**************************************************************************************************#
@@ -437,6 +441,7 @@ class FIDABridge(Bridge):
 
     name = "fid_a"
     program = "FID-A"
+    external = "fid-a"
 
     #**********#
     #   init   #
@@ -444,13 +449,21 @@ class FIDABridge(Bridge):
     def __init__(self, fida_root: Optional[str] = None, verbose: bool = False,
                  runtime: Optional[str] = None):
         super().__init__()
-        self._root = str(fida_root or FIDA_ROOT)
+        self._fida_root = fida_root
         self._verbose = verbose
         self._runtime = runtime
         self._octave: Optional[Oct2Py] = None
         self._octave_version: Optional[str] = None
         self._codec = None
         self.nout = 1
+
+    #**********#
+    #   root   #
+    #**********#
+    @property
+    def _root(self) -> str:
+        """The toolbox's folder, fetched on first use when MRSuite is installed."""
+        return str(self._fida_root or externals.ensure(self.external))
 
     #*************#
     #   version   #
@@ -498,13 +511,25 @@ class FIDABridge(Bridge):
             self._codec = FIDACodec()
         return self._codec
 
+    #***********#
+    #   about   #
+    #***********#
+    def about(self, func: str) -> Tuple[Optional[inspect.Signature], str]:
+        """What a function's .m file says of it: its arguments, from the function line, and
+        the comment block beside it. Read from the file, so Octave need not start."""
+        path = _files(self._root).get(func)
+        if path is None:                                 # an Octave built-in
+            return None, f"Octave's {func}, dispatched by MRSuite."
+        return _m_file(path, self.nout)
+
     #*************#
     #   resolve   #
     #*************#
     def _resolve(self, func: str) -> Callable:
+        root = self._root               # fetched here, so a failed fetch says so, once
         if not self.exists(func):
             raise AttributeError(
-                f"FID-A has no function '{func}' on the Octave path ({self._root}).")
+                f"FID-A has no function '{func}' on the Octave path ({root}).")
 
         def target(*args, **kwargs):
             nout = kwargs.pop("nout", self.nout)
@@ -520,21 +545,33 @@ class FIDABridge(Bridge):
     def _skip_reason(self, func, args, kwargs):
         """Decline operations that are meaningless on degenerate input.
 
-        FID-A does not guard alignment against single-average data:
+        An operation over coils, averages or sub-spectra has nothing to do on data that
+        no longer has them, and FID-A (or Osprey's copy) fails there rather than say so:
         op_alignAverages_fd indexes in.sz(in.dims.averages), so an absent averages
-        dimension becomes in.sz(0) and Octave raises on the zero subscript. There is
-        nothing to align either way, so decline instead.
+        dimension becomes in.sz(0) and Octave raises on the zero subscript;
+        op_combinesubspecs sums over dimension 0; Osprey's op_addrcvrs and op_averaging
+        abort where FID-A's return the data. So decline instead.
         """
-        if "alignAverages" not in func:
-            return None
+        over, doing = next((v for k, v in OVER.items() if func.startswith(k)), ((), None))
         data = args[0] if args else None
         tags = list(getattr(data, "dim_tags", []) or [])
-        if "DIM_DYN" not in tags:
-            return "no DIM_DYN: nothing to align"
-        n = data.shape[data.dim_position("DIM_DYN")]
+        found = next((t for t in over if t in tags), None)
+        if not over:
+            return None
+        if found is None:
+            return f"no {' or '.join(over)}: nothing to {doing}"
+        n = data.shape[data.dim_position(found)]
         if n < 2:
-            return f"DIM_DYN has length {n}: nothing to align"
+            return f"{found} has length {n}: nothing to {doing}"
         return None
+
+    #**************#
+    #   declined   #
+    #**************#
+    def _declined(self, func, data, kwargs):
+        """The data, and nothing for each further output asked for (``nout``)."""
+        nout = kwargs.get("nout", self.nout)
+        return data if nout == 1 else (data, *[None] * (nout - 1))
 
     def _to_toolbox(self, obj: NIFTI_MRS):
         return self.codec.nifti2fida(obj)
@@ -568,15 +605,210 @@ class FIDABridge(Bridge):
         Cheaper and more complete than interrogating the session, and it works before
         Octave has been started.
         """
-        found = []
-        for dirpath, _, files in os.walk(self._root):
-            if os.sep + "." in dirpath:
-                continue
-            found += [f[:-2] for f in files if f.endswith(".m")]
-        return sorted(set(found))
+        return sorted(_files(self._root))
+
+    #***********#
+    #   steps   #
+    #***********#
+    def steps(self) -> List[str]:
+        """The op_ functions, FID-A's operations on a spectrum's struct."""
+        return [name for name in self.available() if name.startswith("op_")]
 
 
 bridge = FIDABridge()
+
+
+# the operations over one dimension of the data (as the codec maps FID-A's), and what they do
+SUBSPECS = ("DIM_EDIT", "DIM_ISIS")
+OVER = {"op_addrcvrs": (("DIM_COIL",), "combine"), "op_averaging": (("DIM_DYN",), "average"),
+        "op_rmbadaverages": (("DIM_DYN",), "remove"), "op_alignAverages": (("DIM_DYN",), "align"),
+        "op_combinesubspecs": (SUBSPECS, "combine"), "op_alignMPSubspecs": (SUBSPECS, "align")}
+
+
+#***********#
+#   files   #
+#***********#
+@lru_cache(maxsize=None)
+def _files(root: str) -> Dict[str, str]:
+    """Every .m file under a toolbox by function name, the first found where two share one."""
+    found = {}
+    for dirpath, dirnames, files in os.walk(root):
+        dirnames[:] = sorted(d for d in dirnames if not d.startswith("."))
+        for f in sorted(files):
+            if f.endswith(".m"):
+                found.setdefault(f[:-2], os.path.join(dirpath, f))
+    return found
+
+
+#*******************#
+#   function line   #
+#*******************#
+FUNCTION = re.compile(r"^\s*function\b\s*(?:\[?([\w\s,~.]*?)\]?\s*=\s*)?(\w+)\s*(?:\(([^)]*)\))?")
+
+
+#************#
+#   m file   #
+#************#
+def _m_file(path: str, nout: int) -> Tuple[Optional[inspect.Signature], str]:
+    """A .m file's arguments, positional and the data first as Octave takes them, with
+    ``nout`` for how many outputs to ask for, from the function line named after the file
+    (a script's own functions and a class's methods are not it); and its help, the file's
+    first comment block, as Octave's help reads it."""
+    with open(path, errors="replace") as fh:
+        lines = fh.read().splitlines()
+    stem = os.path.splitext(os.path.basename(path))[0]
+    found = None
+    for i, text in enumerate(lines):
+        if not re.match(r"\s*function\b", text):
+            continue
+        declared, k = _code(text), i                     # joined over its ... continuations
+        while declared.endswith("...") and k + 1 < len(lines):
+            k += 1
+            declared = declared[:-3] + " " + _code(lines[k])
+        match = FUNCTION.match(declared)
+        if match and match.group(2) == stem:
+            found = match
+            break
+    block = "\n".join(_comments(lines))
+    if found is None:                                    # a script, or a class
+        return None, block or f"{os.path.basename(path)}, without help."
+
+    names = [n.strip() for n in (found.group(3) or "").split(",") if n.strip()]
+    given = _optional(lines[i + 1:], names)
+    parameters = []
+    try:
+        for k, name in enumerate(names):
+            if name == "varargin":
+                parameters.append(inspect.Parameter("varargin",
+                                                    inspect.Parameter.VAR_POSITIONAL))
+                continue
+            if name == "~":                              # an argument the function ignores
+                name = f"unused{k}"
+            elif not name.isidentifier() or keyword.iskeyword(name):    # e.g. FID-A's 'in'
+                given = {(name + "_" if n == name else n): v for n, v in given.items()}
+                name += "_"
+            parameters.append(inspect.Parameter(name, inspect.Parameter.POSITIONAL_ONLY))
+        parameters.append(inspect.Parameter("nout", inspect.Parameter.KEYWORD_ONLY,
+                                            default=nout))
+        signature = defaults(inspect.Signature(parameters), given)
+    except ValueError:                       # a declaration not read: told, the call still works
+        signature = None
+    return signature, block or f"{os.path.basename(path)}, without help."
+
+
+#**************************************************************************************************#
+#                                          Class Computed                                          #
+#**************************************************************************************************#
+#                                                                                                  #
+# A default a function works out for itself, so a call leaves the argument out.                    #
+#                                                                                                  #
+#**************************************************************************************************#
+class Computed:
+    """A default a function works out for itself, so a call leaves the argument out."""
+
+    def __repr__(self) -> str:
+        return "set by the toolbox"
+
+
+#**************#
+#   optional   #
+#**************#
+NARGIN = re.compile(r"\bnargin\s*(<=|<|==)\s*(\d+)")
+EXIST = re.compile(r"~\s*exist\(\s*'(\w+)'|\bexist\(\s*'(\w+)'\s*(?:,\s*'var'\s*)?\)\s*==\s*0")
+
+
+def _optional(body: List[str], names: List[str]) -> Dict[str, Any]:
+    """
+    The arguments a function's body gives a value when they are not passed, the way
+    FID-A and Osprey do it: the first assignment to an argument, under ``if nargin<k``
+    (or ``<=``) that fires whenever the argument is missing (k at least its place), or
+    under ``if ~exist('x','var')``. A plain value (number, text, logical, row of numbers)
+    right under the guard is its default; one worked out, or chosen in a branch below the
+    guard (a switch, an if on the data), is Computed; one asked for interactively
+    (``input(``) stays required, since nobody is there to answer.
+
+    Args:
+        body: The lines after the function line.
+        names: The arguments, in order.
+    """
+    out: Dict[str, Any] = {}
+    decided, depth, guards = set(), 0, []               # guards: (depth, line) still open
+    for text in map(_code, body):
+        if re.match(r"function\b", text):              # the file's next function
+            break
+        if re.match(r"(if|for|parfor|while|switch|try)\b", text):
+            if re.search(r"\bend\s*;?$", text):          # all on one line: opens nothing
+                continue
+            depth += 1
+            if NARGIN.search(text) or EXIST.search(text):
+                guards.append((depth, text))
+            continue
+        if re.match(r"(else|elseif|end)\b", text):     # a guard holds only up to these
+            guards = [g for g in guards if g[0] < depth]
+            depth -= text.startswith("end")
+            continue
+        assigned = re.match(r"(\w+)\s*=(?!=)\s*(.+?);?$", text)
+        name = assigned and assigned.group(1)
+        if name not in names or name in decided:
+            continue
+        decided.add(name)
+        at, guard = guards[-1] if guards else (0, "")
+        place = names.index(name) + 1
+        # the most arguments it fires for (k-1 for <, k for <=) covers every call without it
+        fires = any(int(k) - (how == "<") >= place - 1
+                    for how, k in NARGIN.findall(guard) if how != "==") \
+            or name in {a or b for a, b in EXIST.findall(guard)}
+        if fires and "input(" not in assigned.group(2):
+            out[name] = _matlab(assigned.group(2)) if at == depth else Computed()
+    return out
+
+
+#************#
+#   matlab   #
+#************#
+NUMBER = r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?"
+
+
+def _matlab(text: str) -> Any:
+    """A MATLAB value written plainly, as Python, else Computed."""
+    text = text.strip()
+    if text in ("true", "false"):
+        return text == "true"
+    if re.fullmatch(NUMBER, text):
+        return int(text) if re.fullmatch(r"[-+]?\d+", text) else float(text)
+    if re.fullmatch(r"'(?:[^']|'')*'", text):
+        return text[1:-1].replace("''", "'")
+    if re.fullmatch(r'"[^"]*"', text):
+        return text[1:-1]
+    row = re.fullmatch(rf"\[\s*({NUMBER}(?:\s*[,\s]\s*{NUMBER})*)\s*\]", text)
+    if row:
+        return [_matlab(v) for v in re.split(r"[,\s]+", row.group(1).strip())]  # not a cell
+    return Computed()
+
+
+#**********#
+#   code   #
+#**********#
+def _code(line: str) -> str:
+    """A line without its comment."""
+    return line.split("%", 1)[0].strip()
+
+
+#**************#
+#   comments   #
+#**************#
+def _comments(lines: List[str]) -> List[str]:
+    """A file's first comment block, without its comment signs: before the function line,
+    as FID-A writes it, or after it, as Osprey does."""
+    block, started = [], False
+    for text in lines:
+        stripped = text.strip()
+        if stripped.startswith("%"):
+            block.append(stripped.lstrip("%").rstrip())
+            started = True
+        elif started:
+            break
+    return block
 
 
 #*************#

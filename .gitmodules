@@ -22,3 +22,6 @@
 [submodule "externals/mrspeclab"]
 	path = externals/mrspeclab
 	url = https://github.com/MRSEPFL/MRSpecLAB.git
+[submodule "externals/basic"]
+	path = externals/basic
+	url = https://github.com/julianmer/BasiC.git

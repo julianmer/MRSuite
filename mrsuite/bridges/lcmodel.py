@@ -19,9 +19,10 @@
 #*************#
 import shutil
 import sys
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from mrsuite.bridges.base import Deferred
+from mrsuite.core.basis import as_file
 from mrsuite.core.method import method
 from mrsuite.core.result import FitResult
 from mrsuite.octave import scratch
@@ -90,18 +91,21 @@ def _binary() -> Dict[str, Any]:
 #*********#
 @method("LCModel", version=_version, runtime=_binary, name="LCModel", batched=True,
         parallel=True)
-def fit(data: Any, basis: str, water: Any = None, ppmlim: tuple = (0.5, 4.2),
-        **kwargs) -> Any:
+def fit(data: Any, basis: Any, water: Any = None, ppmlim: tuple = (0.5, 4.2),
+        control: Optional[str] = None, **kwargs) -> Any:
     """
     Fit with LCModel, as MRSuite's uniform result.
 
     Args:
         data: NIfTI-MRS or NIfTI-MRS+. A batch is fitted spectrum by spectrum.
-        basis (str): Path to an LCModel ``.basis`` file.
+        basis: A Basis (``mrsuite.io.basis``), or a path to an LCModel ``.basis`` file.
         water: Unsuppressed reference, enabling LCModel's water scaling. One per
             spectrum. With it the concentrations are mM and filed under 'molarity';
             without it they are unreferenced and filed under 'raw'.
         ppmlim (tuple): Fit range in ppm.
+        control (str): An LCModel control file to fit with, as a study keeps one: complete
+            (its nunfil, deltat, hzpppm and the rest), since PyLCModel only sets its basis,
+            ppm range and omitted metabolites. By default PyLCModel writes one of its own.
         **kwargs: Passed to ``PyLCModel``, e.g. ``save_path``, ``conj``. The binary is
             chosen with ``LCMODEL_EXEC``, not ``path2exec``, so the provenance can tell it.
             Without a ``save_path`` each call works in a folder of its own, removed
@@ -120,7 +124,8 @@ def fit(data: Any, basis: str, water: Any = None, ppmlim: tuple = (0.5, 4.2),
     own = "save_path" not in kwargs
     workdir = scratch("lcmodel_") if own else kwargs["save_path"]
     try:
-        engine = PyLCModel(path2basis=str(basis), ppmlim=ppmlim,
+        engine = PyLCModel(path2basis=str(as_file(basis)), ppmlim=ppmlim,
+                           control=None if control is None else str(control),
                            **{**kwargs, "save_path": workdir})
         scaling = "raw" if water is None else "molarity"
         return [to_result(report, scaling=scaling) for report in engine.report(data, water)]

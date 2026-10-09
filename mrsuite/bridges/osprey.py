@@ -20,7 +20,6 @@ import os
 import re
 import warnings
 from functools import lru_cache
-from pathlib import Path
 from typing import Any, List, Optional
 
 import numpy as np
@@ -28,13 +27,14 @@ import numpy as np
 from mrs_tools.constants import PPM_SHIFT
 from nifti_mrs.nifti_mrs import NIFTI_MRS
 
-from mrsuite import __version__
+from mrsuite import __version__, externals
 from mrsuite.bridges.fid_a import FIDABridge, FIDACodec
+from mrsuite.core.basis import as_file
 from mrsuite.core.method import method
 from mrsuite.core.result import FitResult
 from mrsuite.octave import build_lbfgsb, resolve_runtime, scratch
 
-OSPREY_ROOT = Path(__file__).resolve().parents[2] / "externals" / "osprey"
+OSPREY_ROOT = externals.path("osprey")
 
 
 #**************************************************************************************************#
@@ -192,13 +192,14 @@ class OspreyBridge(FIDABridge):
 
     name = "osprey"
     program = "Osprey"
+    external = "osprey"
 
     #**********#
     #   init   #
     #**********#
     def __init__(self, osprey_root: Optional[str] = None, verbose: bool = False,
                  runtime: Optional[str] = None, centre_ppm: Optional[float] = None):
-        super().__init__(fida_root=str(osprey_root or OSPREY_ROOT), verbose=verbose,
+        super().__init__(fida_root=osprey_root, verbose=verbose,
                          runtime=runtime)
         self.centre_ppm = centre_ppm
 
@@ -456,8 +457,9 @@ def fit(data: Any, basis: Any, fit_opts: Optional[dict] = None,
 
     Args:
         data: NIfTI-MRS or NIfTI-MRS+. A batch is fitted spectrum by spectrum.
-        basis: An LCModel ``.BASIS`` file, as every fitter takes, or a basis container
-            from ``bridge.basis`` or ``bridge.basis_from_lcmodel``. A file is read without
+        basis: A Basis (``mrsuite.io.basis``), an LCModel ``.BASIS`` file, as every
+            fitter takes, or a basis container from ``bridge.basis`` or
+            ``bridge.basis_from_lcmodel``. A file is read without
             Osprey's own macromolecules and lipids: a basis handed to all fitters brings
             its own, and adding Osprey's would fit them twice.
         fit_opts (Optional[dict]): Overrides for ``bridge.fit_options()``.
@@ -473,6 +475,7 @@ def fit(data: Any, basis: Any, fit_opts: Optional[dict] = None,
         A FitResult, or one per spectrum for a batch, each with the data's processing
         history and the fit itself as its provenance.
     """
+    basis = as_file(basis)
     if isinstance(basis, (str, os.PathLike)):
         basis = _basis(os.path.abspath(basis), os.path.getmtime(basis))
     opts = bridge.fit_options(**(fit_opts or {}))

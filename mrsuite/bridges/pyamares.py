@@ -214,7 +214,9 @@ def _components(fid: np.ndarray, t: np.ndarray,
     dwell = t[1] - t[0]
     hz, rate, size, rest = np.empty(0), np.empty(0), np.empty(0), fid
     for _ in range(3):
-        found = hlsvdpro(rest, 50, sparse=True)
+        # pyAMARES' own default, the full SVD: its sparse one starts from a random vector,
+        # so the same basis would give a slightly different prior each time
+        found = hlsvdpro(rest, 50)
         new_hz, new_rate = found[2] / dwell, -found[3] / dwell    # negative damping decays
         # what is left of a component is found again, and two near-equal components
         # would cancel at large amplitudes: within a tenth of the resolution they are one

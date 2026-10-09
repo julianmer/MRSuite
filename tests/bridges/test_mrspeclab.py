@@ -347,3 +347,23 @@ def test_the_driver_states_the_acquisition_as_suspect_reads_it():
 def test_removing_every_transient_is_refused_plainly(combined):
     with pytest.raises(RuntimeError, match="left no transient"):
         mrspeclab.RemoveBadAverages(combined[0], stdDevThreshold=0.001)
+
+
+#***********#
+#   about   #
+#***********#
+def test_a_node_states_its_parameters_as_its_gui_does():
+    from typing import Literal
+
+    signature, help_ = mrspeclab.bridge.about("LineBroadening")
+    factor, kind = signature.parameters["factor"], signature.parameters["apod_type"]
+
+    assert factor.default == 5 and factor.annotation is int
+    assert kind.annotation == Literal["exponential", "gaussian"]
+    assert "from 1 to 50" in help_
+
+
+def test_a_parameter_python_cannot_spell_still_goes_by_name():
+    signature, help_ = mrspeclab.bridge.about("AverageBlock")
+
+    assert "params" in signature.parameters and "Block length" in help_

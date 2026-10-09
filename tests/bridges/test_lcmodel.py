@@ -95,6 +95,26 @@ def test_a_batch_gives_one_result_per_spectrum(spectra):
     assert out[0].conc("raw")["NAA"] == pytest.approx(out[1].conc("raw")["NAA"])
 
 
+#*************#
+#   control   #
+#*************#
+def test_a_control_file_given_is_the_one_fitted_with(spectrum, tmp_path):
+    """PyLCModel's own control as a file fits as no file does; the same with a stiffer
+    baseline (DKNTMN, LCModel's knot spacing) fits otherwise."""
+    from lcmodel_wrapper import control
+
+    own = control.build_control(str(CHALLENGE_BASIS), spectrum.shape[3],
+                                1 / spectrum.dwelltime, spectrum.spectrometer_frequency[0])
+    (tmp_path / "own.control").write_text("\n".join(own) + "\n")
+    (tmp_path / "stiff.control").write_text("\n".join([*own[:-1], "dkntmn=0.6", "$END"]))
+
+    plain = lcmodel.fit(spectrum, CHALLENGE_BASIS).conc("raw")
+    assert lcmodel.fit(spectrum, CHALLENGE_BASIS, control=tmp_path / "own.control") \
+        .conc("raw") == pytest.approx(plain)
+    assert lcmodel.fit(spectrum, CHALLENGE_BASIS, control=tmp_path / "stiff.control") \
+        .conc("raw") != pytest.approx(plain)
+
+
 #*******************#
 #   water scaling   #
 #*******************#

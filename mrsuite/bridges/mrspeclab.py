@@ -17,6 +17,7 @@
 #*************#
 #   imports   #
 #*************#
+import inspect
 import json
 import os
 import shutil
@@ -24,7 +25,7 @@ import subprocess
 import warnings
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
 
 import numpy as np
 
@@ -32,12 +33,13 @@ from nifti_mrs.create_nmrs import gen_nifti_mrs
 from nifti_mrs.nifti_mrs import NIFTI_MRS
 
 from nifti_mrs_plus import NIfTI_MRS_Plus
+from mrsuite import externals
 from mrsuite.bridges.base import Bridge
 from mrsuite.core.method import _keep_header
 from mrsuite.core.provenance import git_version
 from mrsuite.octave import scratch
 
-ROOT = Path(__file__).resolve().parents[2] / "externals" / "mrspeclab"
+ROOT = externals.path("mrspeclab")
 DRIVER = Path(__file__).with_name("mrspeclab_driver.py")
 
 # the Python MRSpecLAB runs in: one of your own, else an environment MRSuite builds with uv
@@ -87,7 +89,7 @@ def _driver(job: Dict[str, Any], folder: str) -> None:
     environment's cache."""
     path = os.path.join(folder, "job.json")
     with open(path, "w") as fh:
-        json.dump({**job, "root": str(ROOT)}, fh)
+        json.dump({**job, "root": str(externals.ensure("mrspeclab"))}, fh)
     proc = subprocess.run(
         [python(), str(DRIVER), path], cwd=folder, capture_output=True, text=True,
         env={**os.environ, "MPLBACKEND": "Agg",
@@ -292,9 +294,7 @@ class MRSpecLABBridge(Bridge):
                 warnings.warn(f"MRSpecLAB's {func} {flaw}")
             return _process(func, data, wref, params)
 
-        run.__doc__ = (f"{node['label']}: {node['description']} (MRSpecLAB node by "
-                       f"{node['author']}). Parameters by idname, with their defaults: "
-                       f"{node['parameters']}")
+        run.__signature__, run.__doc__ = _about(node)
         return run
 
     #****************#
@@ -320,7 +320,7 @@ class MRSpecLABBridge(Bridge):
     #*************#
     def version(self) -> Optional[str]:
         """The MRSpecLAB checkout's exact state, e.g. 'v.1.0.0-8-g6e71664'."""
-        return git_version(str(ROOT))
+        return git_version(str(externals.ensure("mrspeclab")))
 
     #*************#
     #   runtime   #
@@ -331,6 +331,44 @@ class MRSpecLABBridge(Bridge):
 
 
 bridge = MRSpecLABBridge()
+
+
+#***********#
+#   kinds   #
+#***********#
+KINDS = {"IntegerProp": int, "TransientsProp": int, "FloatProp": float, "StringProp": str,
+         "VectorProp": tuple}
+
+
+#***********#
+#   about   #
+#***********#
+def _about(node: Dict[str, Any]) -> Tuple[inspect.Signature, str]:
+    """A node's arguments as the GUI states them: the spectra, their water reference, and
+    each parameter by its idname, with its default, its kind and its choices; and its help,
+    with each parameter's label and range. An idname Python cannot spell, such as 'Block
+    length', still goes by name through the keyword arguments."""
+    parameters = [inspect.Parameter("data", inspect.Parameter.POSITIONAL_ONLY),
+                  inspect.Parameter("wref", inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                                    default=None)]
+    lines = [f"{node['label']}: {node['description']} (MRSpecLAB node by {node['author']}).",
+             "", "Parameters:"]
+    for name, default in node["parameters"].items():
+        prop = node.get("properties", {}).get(name, {})
+        kind = Literal[tuple(prop["choices"])] if prop.get("choices") else \
+            KINDS.get(prop.get("kind"), inspect.Parameter.empty)
+        if name.isidentifier():
+            parameters.append(inspect.Parameter(name, inspect.Parameter.KEYWORD_ONLY,
+                                                default=default, annotation=kind))
+        says = [f"default {default!r}"]
+        if prop.get("choices"):
+            says.append(f"one of {prop['choices']}")
+        if prop.get("min") is not None and prop.get("max") is not None:
+            says.append(f"from {prop['min']} to {prop['max']}")
+        lines.append(f"    {name}: {prop.get('label') or name}; {', '.join(says)}")
+    if len(parameters) - 2 < len(node["parameters"]):
+        parameters.append(inspect.Parameter("params", inspect.Parameter.VAR_KEYWORD))
+    return inspect.Signature(parameters), "\n".join(lines)
 
 
 #*************#

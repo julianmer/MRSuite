@@ -107,20 +107,29 @@ def run(job: Dict[str, Any], folder: str, runtime: Optional[str] = None) -> Dict
 #**********#
 def info(runtime: Optional[str] = None) -> Dict[str, Any]:
     """spant's and R's versions and spant's exported functions, asked once per runtime."""
-    return _info(resolve_runtime(runtime))
+    out = _asked("info", resolve_runtime(runtime))
+    return {**out, "functions": sorted(out["functions"])}
 
 
-#*****************#
-#   info cached   #
-#*****************#
+#***********#
+#   about   #
+#***********#
+def about(runtime: Optional[str] = None) -> Dict[str, Any]:
+    """spant's functions' arguments, a default as the R code that states it, and their help
+    pages, asked once per runtime: apart from ``info``, which every spant call needs and
+    which reading 400 help pages would slow by seconds."""
+    return _asked("about", resolve_runtime(runtime))
+
+
+#***********#
+#   asked   #
+#***********#
 @lru_cache(maxsize=None)
-def _info(runtime: str) -> Dict[str, Any]:
+def _asked(task: str, runtime: str) -> Dict[str, Any]:
     from mrsuite.octave import scratch
 
     folder = scratch("mrsuite_r_")
     try:
-        out = run({"task": "info"}, folder, runtime)
+        return run({"task": task}, folder, runtime)
     finally:
         shutil.rmtree(folder, ignore_errors=True)
-    out["functions"] = sorted(out["functions"])
-    return out

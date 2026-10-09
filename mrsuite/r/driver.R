@@ -32,18 +32,44 @@ if (job$task == "info") {
     out <- list(spant = as.character(packageVersion("spant")), r = R.version.string,
                 functions = ls("package:spant"))
 
+} else if (job$task == "about") {
+    functions <- ls("package:spant")
+    # each function's arguments, a default as the R code that states it ("" for none)
+    arguments <- lapply(functions, function(name) {
+        fun <- getExportedValue("spant", name)
+        if (!is.function(fun)) return(list())
+        given <- formals(fun)
+        sapply(names(given), function(arg) paste(deparse(given[[arg]]), collapse = " "),
+               simplify = FALSE)
+    })
+    names(arguments) <- functions
+    # and its help page, as R prints it, under every name the page documents
+    pages <- setNames(list(), character())                   # {} in JSON, even with none
+    for (rd in tools::Rd_db("spant")) {
+        text <- paste(capture.output(tools::Rd2txt(rd, options = list(underline_titles = FALSE))),
+                      collapse = "\n")
+        tags <- vapply(rd, function(part) attr(part, "Rd_tag"), "")
+        for (alias in unlist(lapply(rd[tags == "\\alias"], as.character))) pages[[alias]] <- text
+    }
+    out <- list(arguments = arguments, help = pages)
+
 } else if (job$task == "call") {
     # a spant function over each spectrum; arguments that are themselves spectra come
     # per item under job$spectra, everything else is shared
+    # spectra come back as files, anything else (an SNR, a table) as a value
     fun <- getExportedValue("spant", job$func)
+    values <- rep(list(NA), length(job$inputs))
     for (i in seq_along(job$inputs)) {
         extra <- lapply(job$spectra, function(paths) read_spectrum(paths[[i]], job$refs[[i]]))
         result <- do.call(fun, c(list(read_spectrum(job$inputs[[i]], job$refs[[i]])),
                                  job$args, job$kwargs, extra))
-        if (!inherits(result, "mrs_data")) stop(job$func, " did not return spectra")
-        write_mrs(result, job$outputs[[i]], format = "nifti", force = TRUE)
+        if (inherits(result, "mrs_data")) {
+            write_mrs(result, job$outputs[[i]], format = "nifti", force = TRUE)
+        } else if (!is.null(result)) {          # NULL would drop the item from the list
+            values[[i]] <- unclass(result)
+        }
     }
-    out <- list(ok = TRUE)
+    out <- list(ok = TRUE, values = values)
 
 } else if (job$task == "fit") {
     basis <- read_basis(job$basis, ref = job$basis_ref)

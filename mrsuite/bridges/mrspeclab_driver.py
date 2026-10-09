@@ -87,7 +87,8 @@ def stacked(spectra):
 #   info   #
 #**********#
 def info(job):
-    """The nodes with their parameters' defaults, and what they run on, as JSON."""
+    """The nodes with their parameters' defaults and what the GUI states of each - its kind,
+    label, choices and range - and what they run on, as JSON."""
     registry = nodes(job["root"])
     out = {}
     for name, cls in registry.items():
@@ -95,7 +96,12 @@ def info(job):
         meta = built.meta_info
         out[name] = {"label": meta["label"], "author": meta["author"],
                      "description": meta["description"],
-                     "parameters": {p.idname: p.value for p in built.parameters}}
+                     "parameters": {p.idname: p.value for p in built.parameters},
+                     "properties": {p.idname: {"kind": type(p).__name__, "label": p.label,
+                                               "choices": getattr(p, "choices", None),
+                                               "min": getattr(p, "min_value", None),
+                                               "max": getattr(p, "max_value", None)}
+                                    for p in built.parameters}}
     with open(job["result"], "w") as fh:
         json.dump({"nodes": out, "python": sys.version.split()[0],
                    "packages": dict(sorted((d.metadata["Name"], d.version)

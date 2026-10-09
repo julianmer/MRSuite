@@ -114,6 +114,24 @@ def test_fid_a_dispatches_a_function_mrsuite_never_wraps(spectrum):
     assert out.shape[3] < spectrum.shape[3], "frequency range should have cropped the FID"
 
 
+#*************#
+#   prompts   #
+#*************#
+@needs_octave
+def test_octave_asking_for_input_fails_at_once_rather_than_waiting(tmp_path):
+    """FID-A asks interactively for some left-out arguments; nobody is there to answer."""
+    from mrsuite.octave import session
+
+    oc = session(str(tmp_path))
+    try:
+        with pytest.raises(Exception, match="Octave asked for input \\(a number:\\)"):
+            oc.eval("x = input('a number: ');")
+        assert int(oc.eval("40", nout=1)) == 40, "the next call is its own, not an answer"
+        assert int(oc.eval("exist('x')", nout=1)) == 0
+    finally:
+        oc.exit()
+
+
 #*******************#
 #   fid-a batched   #
 #*******************#
@@ -190,7 +208,37 @@ def test_coilcombine_declines_on_a_single_coil(spectra):
     assert isinstance(out, NIfTI_MRS_Plus) and len(out) == len(spectra)
     assert np.allclose(np.asarray(out[0][:]), np.asarray(spectra[0][:]))
     assert fsl_mrs.bridge._skipped, "skip should be recorded, not silent"
-    assert "already combined" in fsl_mrs.bridge._skipped[0]
+    assert "DIM_COIL has length 1: nothing to combine" in fsl_mrs.bridge._skipped[0]
+
+
+@pytest.mark.parametrize("bridge, func, why", [
+    ("fsl_mrs", "remove_unlike", "no DIM_DYN: nothing to remove"),
+    pytest.param("fid_a", "op_combinesubspecs", "no DIM_EDIT or DIM_ISIS: nothing to combine",
+                 marks=needs_octave),
+    pytest.param("osprey", "op_averaging", "no DIM_DYN: nothing to average",
+                 marks=needs_octave),
+])
+def test_an_operation_over_a_dimension_the_data_lacks_declines(spectra, bridge, func, why):
+    """Averaged, combined, unedited: nothing to remove, combine or average, where the
+    toolbox itself fails (FSL-MRS: IndexError; FID-A: sum over dimension 0; Osprey:
+    'Averaging has already been performed')."""
+    import importlib
+
+    module = importlib.import_module(f"mrsuite.bridges.{bridge}")
+    args = ("diff",) if func == "op_combinesubspecs" else ()
+    out = getattr(module.bridge, func)(spectra, *args)
+
+    kept = out[0] if isinstance(out, tuple) else out          # remove_unlike: kept, removed
+    assert np.allclose(np.asarray(kept[0][:]), np.asarray(spectra[0][:]))
+    assert why in module.bridge._skipped[0]
+
+
+@needs_octave
+def test_a_declined_call_gives_back_as_many_outputs_as_asked_for(spectra):
+    out, metric, bad = fid_a.op_rmbadaverages(spectra, 3, "t", nout=3)
+
+    assert np.allclose(np.asarray(out[0][:]), np.asarray(spectra[0][:]))
+    assert metric == bad == [None] * len(spectra), "one for each spectrum, as a run gives"
 
 
 #****************#
@@ -421,3 +469,143 @@ def test_describe_summarises_a_bridge():
     text = describe(fsl_mrs.bridge)
 
     assert "fsl_mrs" in text and "functions" in text
+
+
+#***********#
+#   about   #
+#***********#
+def test_a_python_toolbox_function_states_its_own_arguments():
+    import inspect
+
+    signature, help_ = fsl_mrs.bridge.about("average")
+
+    assert list(signature.parameters)[:2] == ["data", "dim"]
+    assert inspect.signature(fsl_mrs.average) == signature, "the dispatched function says so too"
+    assert ":param str dim:" in help_
+
+
+def test_fid_a_states_a_function_from_its_file_without_starting_octave():
+    from mrsuite.bridges.fid_a import FIDABridge
+
+    bridge = FIDABridge()
+    signature, help_ = bridge.about("op_rmbadaverages")
+
+    assert str(signature) == "(in_, nsd=3, domain='t', /, *, nout=1)"   # FID-A's 'in', spelt
+    assert "Removes motion corrupted averages" in help_                # its block before
+    assert bridge._octave is None
+
+
+def test_osprey_help_is_the_block_after_the_function_line():
+    from mrsuite.bridges.osprey import OspreyBridge
+
+    signature, help_ = OspreyBridge().about("OspreyProcess")
+
+    assert str(signature) == "(MRSCont, /, *, nout=1)"
+    assert "pre-processes MRS data" in help_
+
+
+#***********#
+#   steps   #
+#***********#
+def test_the_steps_are_the_functions_on_spectra():
+    from mrsuite.bridges.fid_a import FIDABridge
+
+    assert "average" in fsl_mrs.bridge.steps()
+    assert not {"first_index", "update_processing_prov"} & set(fsl_mrs.bridge.steps())
+    steps = FIDABridge().steps()
+    assert "op_averaging" in steps and all(name.startswith("op_") for name in steps)
+
+
+#*************#
+#   m files   #
+#*************#
+@pytest.mark.parametrize("bridge, func, signature", [
+    ("fid_a", "select_spec", "(src, unused1, /, *, nout=1)"),        # ~ for an unused argument
+    ("fid_a", "op_CSIB0Correction",                                   # continued with ...
+     "(MRSIStruct, phaseMap, freqMap, plottingArguments, /, *, nout=1)"),
+    ("osprey", "osp_RemovePreFix", "(Name, /, *, nout=1)"),           # function[out]
+    ("fid_a", "run_simSemiLASERShaped_fast_phCyc", "None"),           # a script, its own
+])                                                                    # functions not it
+def test_a_function_line_is_read_as_octave_reads_it(bridge, func, signature):
+    from mrsuite.bridges.fid_a import FIDABridge
+    from mrsuite.bridges.osprey import OspreyBridge
+
+    found = (FIDABridge if bridge == "fid_a" else OspreyBridge)().about(func)[0]
+
+    assert str(found) == signature
+
+
+@pytest.mark.parametrize("bridge, func, signature", [
+    ("fid_a", "op_getSNR", "(in_, NAAppmmin=1.8, NAAppmmax=2.2, noiseppmmin=-2, "
+                           "noiseppmmax=0, suppressPlots=False, /, *, nout=1)"),
+    ("fid_a", "op_removeWater",                                        # M worked out
+     "(in_, wlim=[4.4, 5], Kinit=30, M=set by the toolbox, plot_bool=0, /, *, nout=1)"),
+    ("osprey", "op_robustSpecReg",                         # echo set only when nargin<2
+     "(in_, seqType, echo, F0=set by the toolbox, noAlign=0, /, *, nout=1)"),
+    ("fid_a", "op_autophase",                              # dimNum asked for: required
+     "(in_, ppmmin, ppmmax, ph, dimNum, /, *, nout=1)"),
+    ("fid_a", "op_getLW", "(in_, Refppmmin=4.4, Refppmmax=5.0, zpfactor=8, "  # in = ... later
+                          "suppressPlots=False, /, *, nout=1)"),
+])
+def test_a_functions_own_defaults_are_read_from_its_body(bridge, func, signature):
+    from mrsuite.bridges.fid_a import FIDABridge
+    from mrsuite.bridges.osprey import OspreyBridge
+
+    assert str((FIDABridge if bridge == "fid_a" else OspreyBridge)().about(func)[0]) == signature
+
+
+def test_a_default_holds_only_inside_its_guard():
+    from mrsuite.bridges.fid_a import _optional
+
+    body = ["if nargin<3", "  a = 1;", "else", "  b = 2;", "end", "if ~exist('c','var')",
+            "  c = 'x';", "end", "d = 4;", "if nargin<6, e = 5; end", "e = 6;",
+            "if nargin<=6", "  switch d", "    case 4", "      f = 'one';", "  end", "end",
+            "if nargin==7", "  g = 7;", "end"]
+
+    found = _optional(body, ["in", "a", "b", "c", "d", "e", "f", "g"])
+
+    assert set(found) == {"a", "c", "f"}, "e: a one-line if opens nothing; g: == misses calls"
+    assert (found["a"], found["c"], type(found["f"]).__name__) == (1, "x", "Computed")
+
+
+@needs_octave
+def test_a_fid_a_default_read_is_the_one_fid_a_uses(spectrum):
+    left_out = fid_a.op_getSNR(spectrum)
+
+    assert left_out == fid_a.op_getSNR(spectrum, 1.8, 2.2, -2, 0, False)
+
+
+def test_fsl_mrs_takes_its_command_lines_defaults(spectrum):
+    """fsl_mrs_proc phase --ppm 2.8 3.2, and so on: what FSL-MRS's own command line gives
+    the arguments its functions leave without one."""
+    import inspect
+
+    phase = inspect.signature(fsl_mrs.phase_correct).parameters["ppmlim"].default
+    shift = inspect.signature(fsl_mrs.shift_to_reference).parameters
+    assert phase == (2.8, 3.2)
+    assert (shift["ppm_ref"].default, shift["peak_search"].default) == (3.027, (2.8, 3.2))
+    assert "fsl_mrs_proc" in fsl_mrs.bridge.about("phase_correct")[1]
+    left_out = np.asarray(fsl_mrs.phase_correct(spectrum)[:])
+    assert np.array_equal(left_out, np.asarray(fsl_mrs.phase_correct(spectrum, (2.8, 3.2))[:]))
+
+
+def test_an_fsl_mrs_whose_command_line_is_laid_out_otherwise_still_runs(monkeypatch, spectrum):
+    from mrsuite.bridges import fsl_mrs as bridged
+
+    def otherwise():
+        raise KeyError("main")
+
+    monkeypatch.setattr(bridged, "_read_proc_defaults", otherwise)
+    bridged._proc_defaults.cache_clear()
+    try:
+        assert bridged._proc_defaults() == {}
+        assert fsl_mrs.phase_correct(spectrum, (2.8, 3.2)) is not None
+    finally:
+        bridged._proc_defaults.cache_clear()
+
+
+def test_the_help_is_the_files_first_comment_block():
+    """FID-A's header, not a comment in the code after the function line."""
+    from mrsuite.bridges.fid_a import FIDABridge
+
+    assert FIDABridge().about("op_HSVDfit")[1].startswith("op_HSVDfit.m")

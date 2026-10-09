@@ -204,3 +204,21 @@ def test_names_are_spelt_as_pyamares_reads_them(tmp_path):
     with pytest.raises(ValueError, match="alike"):
         pyamares.prior(str(tmp_path / "q.csv"), {"A+B": fid, "A-B": fid}, 1 / 2500.0, 127.7,
                        4.65)
+
+
+#*******************#
+#   deterministic   #
+#*******************#
+@needs_pyamares
+def test_the_same_basis_always_gives_the_same_prior(tmp_path):
+    """A run resumed, or compared with another, has to fit with the prior it recorded."""
+    n, dwell, f0, shift = 2048, 1 / 2500.0, 127.7, 4.65
+    t = np.arange(n) * dwell
+    rng = np.random.default_rng(0)
+    # lines closer than the FID resolves, as a J-coupled metabolite's
+    basis = {"A": sum(np.exp((2j * np.pi * (ppm - shift) * f0 - 6.0) * t)
+                      for ppm in rng.uniform(3.2, 3.9, 24))}
+    paths = [pyamares.prior(str(tmp_path / f"{k}.csv"), basis, dwell, f0, shift)
+             for k in range(2)]
+
+    assert open(paths[0]).read() == open(paths[1]).read()

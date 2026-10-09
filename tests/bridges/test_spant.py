@@ -40,6 +40,30 @@ def test_a_step_keeps_the_spectrum_what_it_was(spectrum):
     assert out.hdr_ext["ProcessingApplied"][-1]["Program"] == "spant"
 
 
+#************#
+#   values   #
+#************#
+def test_a_function_that_gives_no_spectra_gives_its_value(spectrum):
+    """calc_spec_snr returns a number per spectrum, not spectra."""
+    from mrsuite import spant
+
+    snr = spant.calc_spec_snr(spectrum)
+
+    assert isinstance(snr, float) and snr > 10
+
+
+def test_a_value_is_given_back_for_every_spectrum_even_none(spectra, tmp_path):
+    """write_mrs returns NULL; R drops a NULL from a list, which lost spectra."""
+    from mrsuite import spant
+
+    out = spant.write_mrs(spectra, fname=str(tmp_path / "w.nii.gz"), format="nifti",
+                          force=True)
+
+    assert out == [None] * len(spectra)
+    assert [type(v) for v in spant.is_fd(spectra)] == [bool] * len(spectra), "logicals stay"
+    assert [type(v) for v in spant.Npts(spectra)] == [int] * len(spectra), "counts stay"
+
+
 #*************#
 #   unknown   #
 #*************#
@@ -62,3 +86,36 @@ def test_the_callers_spectrum_is_left_alone(spectrum):
     spant.lb(source, 5)                                       # would fail on a stale file
 
     assert np.array_equal(source[:], spectrum[:])
+
+
+#***********#
+#   about   #
+#***********#
+def test_spant_states_a_function_as_r_does():
+    from mrsuite.bridges.spant import bridge
+
+    signature, help_ = bridge.about("lb")
+
+    assert str(signature) == "(x, /, *, lb, lg=1)"                    # lg's default, R's own
+    assert "Apply line-broadening" in help_ and "Arguments:" in help_
+    assert "lb" in bridge.steps() and "fit_mrs" not in bridge.steps()
+
+
+#****************#
+#   on its own   #
+#****************#
+def test_a_spant_call_does_not_wait_for_every_help_page(monkeypatch):
+    """Arguments and help are a job of their own, which a call does not run."""
+    from mrsuite.bridges.spant import bridge
+
+    def slow(runtime=None):
+        raise AssertionError("a call asked for every help page")
+    monkeypatch.setattr(r, "about", slow)
+
+    assert callable(bridge.lb) and "help" not in r.info()
+
+
+def test_r_dots_first_still_take_the_data():
+    from mrsuite.bridges.spant import bridge
+
+    assert str(bridge.about("append_coils")[0]) == "(*args, **kwargs)"

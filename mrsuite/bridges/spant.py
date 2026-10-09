@@ -17,11 +17,13 @@
 #*************#
 #   imports   #
 #*************#
+import inspect
 import json
+import keyword
 import os
 import re
 import shutil
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import nibabel as nib
 import numpy as np
@@ -32,6 +34,7 @@ from nifti_mrs.nifti_mrs import NIFTI_MRS
 from nifti_mrs_plus import NIfTI_MRS_Plus
 from mrsuite import r
 from mrsuite.bridges.base import Bridge
+from mrsuite.core.basis import as_file
 from mrsuite.core.method import method
 from mrsuite.core.result import FitResult
 from mrsuite.octave import scratch
@@ -72,6 +75,24 @@ def _read_back(path: str, source: NIFTI_MRS) -> NIFTI_MRS:
 
 
 #**************************************************************************************************#
+#                                           Class RCode                                            #
+#**************************************************************************************************#
+#                                                                                                  #
+# A default as R states it: code R evaluates when the argument is left out, shown as written.      #
+#                                                                                                  #
+#**************************************************************************************************#
+class RCode(str):
+    """A default as R states it: code R evaluates when the argument is left out, shown as
+    written."""
+
+    #**********#
+    #   repr   #
+    #**********#
+    def __repr__(self) -> str:
+        return str(self)
+
+
+#**************************************************************************************************#
 #                                        Class SpantBridge                                         #
 #**************************************************************************************************#
 #                                                                                                  #
@@ -88,6 +109,7 @@ class SpantBridge(Bridge):
     name = "spant"
     program = "spant"
     batched = True
+    explains = False            # its arguments and help are an R job of their own, see about
 
     #*************#
     #   resolve   #
@@ -114,6 +136,42 @@ class SpantBridge(Bridge):
     #***************#
     def available(self) -> List[str]:
         return r.info()["functions"]
+
+    #***********#
+    #   steps   #
+    #***********#
+    def steps(self) -> List[str]:
+        """The functions that take spectra first: mrs_data, or a method for it, as lb has.
+        Most give spectra back; those that give a number, such as Npts, hand that on."""
+        about = r.about()
+        return [name for name in self.available()
+                if next(iter(about["arguments"].get(name) or {}), "") == "mrs_data"
+                or "S3 method for class 'mrs_data'" in about["help"].get(name, "")]
+
+    #***********#
+    #   about   #
+    #***********#
+    def about(self, func: str) -> Tuple[Optional[inspect.Signature], str]:
+        """spant's own arguments, the data first and the rest by name, a default as the R
+        code that states it; and its help page. Names Python cannot spell, such as na.rm,
+        still go by name through the keyword arguments."""
+        self._resolve(func)
+        about = r.about()
+        given = about["arguments"].get(func) or {}
+        parameters, spelt = [], True
+        for k, (name, default) in enumerate(given.items()):
+            if name == "..." and k == 0:                 # the data among the rest, as R's c
+                parameters.append(inspect.Parameter("args", inspect.Parameter.VAR_POSITIONAL))
+            if name == "..." or not name.isidentifier() or keyword.iskeyword(name):
+                spelt = False
+                continue
+            kind = inspect.Parameter.POSITIONAL_ONLY if k == 0 else \
+                inspect.Parameter.KEYWORD_ONLY
+            parameters.append(inspect.Parameter(
+                name, kind, default=RCode(default) if default else inspect.Parameter.empty))
+        if not spelt:
+            parameters.append(inspect.Parameter("kwargs", inspect.Parameter.VAR_KEYWORD))
+        return inspect.Signature(parameters), about["help"].get(func, f"spant's {func}.")
 
     #*************#
     #   version   #
@@ -146,16 +204,33 @@ class SpantBridge(Bridge):
             inputs = _write(items, folder, "in")
             outputs = [os.path.join(folder, f"out{i}.nii.gz") for i in range(len(items))]
             per_item = {k: _write(v.list(), folder, k) for k, v in spectra.items()}
-            r.run({"task": "call", "func": func, "inputs": inputs, "outputs": outputs,
-                   "refs": [item.SpecFreqChemShift for item in items],
-                   "args": _plain(list(args)), "kwargs": _plain(plain),
-                   "spectra": per_item}, folder)
-            return [_read_back(o, item) for o, item in zip(outputs, items)]
+            done = r.run({"task": "call", "func": func, "inputs": inputs, "outputs": outputs,
+                          "refs": [item.SpecFreqChemShift for item in items],
+                          "args": _plain(list(args)), "kwargs": _plain(plain),
+                          "spectra": per_item}, folder)
+            # spectra back as spectra; what else a function returns (an SNR), as it is
+            return [_read_back(o, item) if os.path.exists(o) else _value(value)
+                    for o, item, value in zip(outputs, items, done["values"])]
         finally:
             shutil.rmtree(folder, ignore_errors=True)
 
 
 bridge = SpantBridge()
+
+
+#***********#
+#   value   #
+#***********#
+def _value(value: Any) -> Any:
+    """What R gave back: an array without R's dimensions of one, a single value as itself;
+    a number, logical, text or table as it came."""
+    try:
+        array = np.squeeze(np.asarray(value))
+    except ValueError:                                 # ragged
+        return value
+    if array.dtype == object:
+        return value
+    return array.item() if array.ndim == 0 else array
 
 
 #***********#
@@ -234,14 +309,15 @@ def to_result(row: Dict[str, Any], amplitudes: List[str], method: str) -> FitRes
 #*********#
 @method("spant", version=lambda: bridge.version(), runtime=lambda: bridge.runtime(),
         name="fit_mrs", batched=True, parallel=True)
-def fit(data: Any, basis: str, method: str = "ABFIT", opts: Optional[dict] = None) -> Any:
+def fit(data: Any, basis: Any, method: str = "ABFIT", opts: Optional[dict] = None) -> Any:
     """
     Fit with spant, as MRSuite's uniform result.
 
     Args:
         data: NIfTI-MRS or NIfTI-MRS+. A batch is fitted spectrum by spectrum, in one job.
-        basis (str): An LCModel ``.BASIS`` file, as every fitter takes; spant resamples it
-            to the data. Its ppm reference is read from PPMSEP, else taken as 4.65.
+        basis: A Basis (``mrsuite.io.basis``), or an LCModel ``.BASIS`` file, as every
+            fitter takes; spant resamples it to the data. Its ppm reference is read from
+            PPMSEP, else taken as 4.65.
         method (str): spant's fitting method.
         opts (Optional[dict]): Options for ``abfit_opts``, by name.
         workers (int): Processes to spread a batch over (see ``mrsuite.core.parallel``).
@@ -251,6 +327,7 @@ def fit(data: Any, basis: str, method: str = "ABFIT", opts: Optional[dict] = Non
         history and the fit itself as its provenance.
     """
     items = data.list()
+    basis = as_file(basis)
     reference = _ppmsep(str(basis))
     folder = scratch("mrsuite_spant_")
     try:

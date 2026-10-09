@@ -17,17 +17,28 @@
 #*************#
 #   imports   #
 #*************#
+import ast
+import functools
+import importlib.util
 import inspect
 import os
 import warnings
 from functools import lru_cache
-from typing import Any, Callable, List, Optional
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional
 
 import numpy as np
 
-from fsl_mrs.utils.preproc import nifti_mrs_proc
+try:
+    from fsl_mrs.utils.preproc import nifti_mrs_proc
+except ModuleNotFoundError as err:
+    if (err.name or "").partition(".")[0] != "fsl_mrs":   # installed, but broken
+        raise
+    raise ImportError("FSL-MRS is not installed: conda install -c conda-forge -c "
+                      "https://fsl.fmrib.ox.ac.uk/fsldownloads/fslconda/public/ fsl_mrs") from err
 
-from mrsuite.bridges.base import Bridge
+from mrsuite.bridges.base import Bridge, defaults
+from mrsuite.core.basis import as_file
 from mrsuite.core.method import method
 from mrsuite.core.result import FitResult
 
@@ -68,7 +79,8 @@ class FSLMRSBridge(Bridge):
             raise AttributeError(
                 f"FSL-MRS has no processing function '{func}'. "
                 f"Available: {', '.join(self.available())}")
-        return target
+        given = _proc_defaults().get(func)
+        return _defaulted(target, given) if given else target
 
     #*****************#
     #   skip reason   #
@@ -79,17 +91,27 @@ class FSLMRSBridge(Bridge):
         Already-combined data can still declare a DIM_COIL of length 1. FSL-MRS's
         copy(remove_dim=...) slices with self[:], which drops that trailing singleton,
         so remove_dim then indexes an axis that is no longer there and raises
-        AxisError. Nothing is combined either way, so decline instead.
+        AxisError; remove_unlike on data without averages fails with an IndexError.
+        Nothing is combined or removed either way, so decline instead.
         """
-        if func != "coilcombine":
+        tag, doing = {"coilcombine": ("DIM_COIL", "combine"),
+                      "remove_unlike": ("DIM_DYN", "remove")}.get(func, (None, None))
+        if tag is None:
             return None
         data = args[0] if args else kwargs.get("data")
-        if data is None or "DIM_COIL" not in getattr(data, "dim_tags", []):
-            return "no DIM_COIL: nothing to combine"
-        n = data.shape[data.dim_position("DIM_COIL")]
+        if data is None or tag not in getattr(data, "dim_tags", []):
+            return f"no {tag}: nothing to {doing}"
+        n = data.shape[data.dim_position(tag)]
         if n < 2:
-            return f"DIM_COIL has length {n}: already combined"
+            return f"{tag} has length {n}: nothing to {doing}"
         return None
+
+    #**************#
+    #   declined   #
+    #**************#
+    def _declined(self, func, data, kwargs):
+        """remove_unlike gives the spectra kept and those removed: none removed."""
+        return (data, None) if func == "remove_unlike" else data
 
     #****************#
     #   to toolbox   #
@@ -118,8 +140,120 @@ class FSLMRSBridge(Bridge):
                       if not n.startswith("_")
                       and inspect.isfunction(getattr(nifti_mrs_proc, n)))
 
+    #***********#
+    #   steps   #
+    #***********#
+    def steps(self) -> List[str]:
+        """The functions that take the spectra first, leaving out helpers such as
+        first_index and update_processing_prov."""
+        return [name for name in self.available() if next(iter(
+            inspect.signature(getattr(nifti_mrs_proc, name)).parameters), "").startswith("data")]
+
 
 bridge = FSLMRSBridge()
+
+
+#*******************#
+#   proc defaults   #
+#*******************#
+@lru_cache(maxsize=None)
+def _proc_defaults() -> Dict[str, Dict[str, Any]]:
+    """
+    The defaults FSL-MRS's command line, fsl_mrs_proc, gives the arguments its processing
+    functions leave without one, e.g. phase_correct's ppmlim, 2.8-3.2 ppm; by function.
+    Read from fsl_mrs_proc's source - each subcommand's options, the handler it sets, and
+    the option each handler hands each function argument - so a new FSL-MRS brings its
+    own. A function its handlers give different defaults gets none; a script laid out
+    otherwise than this reads (FSL-MRS 2.5) gives none at all, rather than stop every call.
+    """
+    try:
+        return _read_proc_defaults()
+    except (AttributeError, KeyError, IndexError, TypeError, ValueError, SyntaxError):
+        return {}
+
+
+#************************#
+#   read proc defaults   #
+#************************#
+def _read_proc_defaults() -> Dict[str, Dict[str, Any]]:
+    source = importlib.util.find_spec("fsl_mrs.scripts.fsl_mrs_proc").origin
+    tree = ast.parse(Path(source).read_text())
+    functions = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
+    calls = [n for n in ast.walk(functions["main"]) if isinstance(n, ast.Call)
+             and isinstance(n.func, ast.Attribute) and isinstance(n.func.value, ast.Name)]
+    parser = {}                                        # a parser or its group -> the parser
+    for n in ast.walk(functions["main"]):
+        if isinstance(n, ast.Assign) and n.value in calls:
+            made, of = n.targets[0].id, n.value.func.value.id
+            if n.value.func.attr == "add_parser":
+                parser[made] = made
+            elif n.value.func.attr == "add_argument_group":
+                parser[made] = parser.get(of, of)
+    options: Dict[str, Dict[str, Any]] = {}            # parser -> option -> its default
+    handler = {}                                       # handler -> its parser
+    for call in calls:
+        owner, keywords = parser.get(call.func.value.id), {k.arg: k.value for k in call.keywords}
+        if owner and call.func.attr == "add_argument" and "default" in keywords:
+            flags = [a.value for a in call.args if isinstance(a, ast.Constant)]
+            dest = ast.literal_eval(keywords["dest"]) if "dest" in keywords else next(
+                (f.lstrip("-").replace("-", "_") for f in flags if f.startswith("--")),
+                flags[0] if flags else None)
+            try:
+                options.setdefault(owner, {})[dest] = ast.literal_eval(keywords["default"])
+            except ValueError:                         # not a plain value
+                pass
+        elif owner and call.func.attr == "set_defaults" and "func" in keywords:
+            handler[keywords["func"].id] = owner
+    named = {a.asname or a.name for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)
+             for a in n.names if a.name == "nifti_mrs_proc"}    # e.g. 'as preproc'
+    found: Dict[str, Dict[str, Any]] = {}
+    clash = set()
+    for name, owner in handler.items():
+        for call in ast.walk(functions[name]):
+            if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
+                    and getattr(call.func.value, "id", None) in named):
+                continue
+            target = getattr(nifti_mrs_proc, call.func.attr, None)
+            if not inspect.isfunction(target):
+                continue
+            parameters = inspect.signature(target).parameters
+            passed = [*zip(parameters, call.args), *((k.arg, k.value) for k in call.keywords)]
+            for argument, value in passed:
+                option = value.slice.value if isinstance(value, ast.Subscript) and \
+                    getattr(value.value, "id", None) == "args" and \
+                    isinstance(value.slice, ast.Constant) else None
+                default = options.get(owner, {}).get(option)
+                if default is None or parameters[argument].default is not inspect.Parameter.empty:
+                    continue
+                mine = found.setdefault(call.func.attr, {})
+                if mine.get(argument, default) != default:
+                    clash.add((call.func.attr, argument))
+                mine[argument] = default
+    for function, argument in clash:
+        del found[function][argument]
+    return found
+
+
+#***************#
+#   defaulted   #
+#***************#
+def _defaulted(target: Callable, given: Dict[str, Any]) -> Callable:
+    """A function that takes fsl_mrs_proc's defaults for what it is not given."""
+    signature = defaults(inspect.signature(target), given)
+    taken = {k: p.default for k, p in signature.parameters.items() if k in given
+             and p.default is not inspect.Parameter.empty}
+
+    @functools.wraps(target)
+    def call(*args, **kwargs):
+        bound = signature.bind(*args, **kwargs)
+        bound.apply_defaults()
+        return target(*bound.args, **bound.kwargs)
+
+    call.__signature__ = signature
+    if taken:
+        call.__doc__ = (target.__doc__ or "").rstrip() + "\n\nDefaults from FSL-MRS's " \
+            "command line (fsl_mrs_proc): " + ", ".join(f"{k}={v!r}" for k, v in taken.items())
+    return call
 
 
 #***********#
@@ -160,8 +294,9 @@ def fit(data: Any, basis: Any, water: Any = None, ppmlim: tuple = (0.2, 4.2),
 
     Args:
         data: NIfTI-MRS or NIfTI-MRS+. A batch is fitted spectrum by spectrum.
-        basis: A basis file or folder FSL-MRS reads (an LCModel ``.BASIS``, as every
-            fitter takes), or an ``fsl_mrs`` basis from ``mrs_io.read_basis``.
+        basis: A Basis (``mrsuite.io.basis``), a basis file or folder FSL-MRS reads (an
+            LCModel ``.BASIS``, as every fitter takes), or an ``fsl_mrs`` basis from
+            ``mrs_io.read_basis``.
         water: Unsuppressed reference, for molarity and molality scaling, one per
             spectrum. Without it the result carries raw and internally referenced
             concentrations only.
@@ -189,6 +324,7 @@ def fit(data: Any, basis: Any, water: Any = None, ppmlim: tuple = (0.2, 4.2),
     """
     from fsl_mrs.utils import fitting, quantify
 
+    basis = as_file(basis)
     if isinstance(basis, (str, os.PathLike)):
         basis = _basis(os.path.abspath(basis), os.path.getmtime(basis))
 

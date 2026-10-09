@@ -24,6 +24,7 @@ from typing import Any, Dict, Optional
 import numpy as np
 
 from mrsuite.bridges.base import Deferred
+from mrsuite.core.basis import as_file
 from mrsuite.core.method import method
 from mrsuite.core.result import FitResult
 
@@ -102,7 +103,7 @@ def _binary() -> Dict[str, Any]:
 #   fit   #
 #*********#
 @method("TARQUIN", version=_version, runtime=_binary, name="TARQUIN", parallel=True)
-def fit(data: Any, basis: Optional[str] = None, water: Any = None, te: Optional[float] = None,
+def fit(data: Any, basis: Any = None, water: Any = None, te: Optional[float] = None,
         opts: Optional[Dict[str, Any]] = None) -> FitResult:
     """
     Fit with TARQUIN, as MRSuite's uniform result.
@@ -110,12 +111,13 @@ def fit(data: Any, basis: Optional[str] = None, water: Any = None, te: Optional[
     Args:
         data: NIfTI-MRS or NIfTI-MRS+ of single spectra. A batch is fitted spectrum by
             spectrum.
-        basis: An LCModel ``.basis``, as every fitter takes. TARQUIN does not resample:
-            its sampling frequency must match the data's. By default TARQUIN rescales an
-            LCModel basis to its sIns or Scyllo signal and stops if it has neither;
-            ``{"rescale_lcm_basis": False}`` turns that off. None uses TARQUIN's default
-            internal basis, ``1h_brain_glth``, simulated for the sequence at the data's
-            echo time; ``{"int_basis": "1h_brain"}`` picks another.
+        basis: A Basis (``mrsuite.io.basis``), or an LCModel ``.basis``, as every fitter
+            takes. TARQUIN does not resample: its sampling frequency must match the
+            data's. By default TARQUIN rescales an LCModel basis to its sIns or Scyllo
+            signal and stops if it has neither; ``{"rescale_lcm_basis": False}`` turns
+            that off. None uses TARQUIN's default internal basis, ``1h_brain_glth``,
+            simulated for the sequence at the data's echo time; ``{"int_basis":
+            "1h_brain"}`` picks another.
         water: Unsuppressed reference, one per spectrum, enabling TARQUIN's water
             scaling. With it the concentrations are mM and filed under 'molarity';
             without it they are unreferenced and filed under 'raw'.
@@ -149,7 +151,7 @@ def fit(data: Any, basis: Optional[str] = None, water: Any = None, te: Optional[
                          "the header does not state; pass te= or a basis")
 
     # conj: PyTARQUIN hands out NIfTI-MRS as indexed, the conjugate of what TARQUIN reads
-    engine = PyTARQUIN(path2basis=basis, opts=opts, echo_time=te, conj=True)
+    engine = PyTARQUIN(path2basis=as_file(basis), opts=opts, echo_time=te, conj=True)
     return to_result(engine.report(data, water)[0])
 
 

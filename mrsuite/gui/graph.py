@@ -388,7 +388,10 @@ class Graph:
             line = f"Pipeline([models.load({node.values['name']!r}).step()]).run({wires['data']})"
             return f"{node.name} = {line}", {*b.imports, PIPELINE}, [node.name]
         if node.block == "folder":
-            folder = node.values.get("folder")
+            folder, chosen = node.values.get("folder"), node.values.get("entries")
+            if chosen:                                         # the window's own list
+                listed = ",\n    ".join(repr(tuple(e)) for e in chosen)
+                return f"{node.name} = collect.load([\n    {listed}])", set(b.imports), [node.name]
             if not folder:
                 raise ValueError(f"{node.name}: choose a folder to load")
             fixed = "".join(f", {k}={node.values[k]!r}" for k in ("roles", "groups")

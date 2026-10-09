@@ -784,51 +784,92 @@ class App:
     #   collect   #
     #*************#
     async def collect(self, id: str) -> None:
-        """The window over a folder: every file found, its role and group as its name says,
-        each to put right (or leave out), then loaded."""
+        """The window over what to load: a folder discovered, files chosen anywhere, in any
+        layout; rows selected get a role and a group at once, or go; then loaded."""
         from mrsuite import collect as study
 
         node = self.graph.nodes[id]
-        folder = node.values.get("folder")
-        if not folder:
-            ui.notify("Choose a folder first", type="info")
-            return
+        rows: List[Dict[str, str]] = []
+
+        def add(found: List[Any]) -> None:
+            known = {r["path"] for r in rows}
+            rows.extend({"path": str(e.path), "file": e.path.name, "role": e.role,
+                         "group": e.group, "format": e.format}
+                        for e in found if str(e.path) not in known)
+            table.rows = list(rows)                    # the table keeps a list of its own
+
+        async def add_from(folder: bool) -> None:
+            chosen = await self._pick("Add to the collection", formats=False, folder=folder)
+            if chosen:
+                paths = chosen[0]
+                found = []
+                for p in paths:
+                    found += study.discover(p) if p.is_dir() and study._format(p) != "dicom" \
+                        else study.entries([p])
+                add(found)
+
+        def chosen_rows() -> List[Dict[str, str]]:
+            picked = {r["path"] for r in table.selected}
+            return [r for r in rows if r["path"] in picked]
+
+        def apply() -> None:
+            for r in chosen_rows():
+                r["role"] = role.value
+                if group.value:
+                    r["group"] = group.value
+            table.rows = list(rows)
+
+        def remove() -> None:
+            gone = {r["path"] for r in chosen_rows()}
+            rows[:] = [r for r in rows if r["path"] not in gone]
+            table.selected = []
+            table.rows = list(rows)
+
         try:
-            found = await run.io_bound(study.discover, folder)
+            first = study.as_entries(node.values["entries"]) if node.values.get("entries") \
+                else study.discover(node.values["folder"]) if node.values.get("folder") else []
         except Exception as err:                       # noqa: BLE001 - said, not hidden
             ui.notify(brief(err), type="negative", multi_line=True)
             return
-        roles, groups = node.values.get("roles") or {}, node.values.get("groups") or {}
-        rows = []
-        with ui.dialog() as dialog, ui.card().classes("w-[60rem] max-w-full"):
-            ui.label(f"Collect {Path(folder).name}").classes("text-base font-semibold")
-            with ui.scroll_area().classes("w-full h-[60vh]"):
-                with ui.grid(columns="1fr 9rem 14rem").classes("w-full gap-1 items-center"):
-                    for head in ("file", "role", "group"):
-                        ui.label(head).classes("mr-muted text-xs")
-                    for i, e in enumerate(found):
-                        rel = e.path.relative_to(folder).as_posix()
-                        ui.label(rel).classes("text-xs font-mono break-all")
-                        role = ui.select({**{r: r for r in study.ROLES}, "": "leave out"},
-                                         value=roles.get(rel, e.role)) \
-                            .props("dense outlined").mark(f"role-{i}")
-                        group = ui.input(value=groups.get(rel, e.group)) \
-                            .props("dense outlined").mark(f"group-{i}")
-                        rows.append((rel, e, role, group))
-            with ui.row().classes("w-full"):
-                ui.button("Cancel", on_click=lambda: dialog.submit(False)).props("flat")
+        with ui.dialog() as dialog, ui.card().classes("w-[64rem] max-w-full gap-2"):
+            with ui.row().classes("w-full items-center gap-2"):
+                ui.label("Collect").classes("text-base font-semibold")
+                ui.button("Add folder…", icon="folder", on_click=lambda: add_from(True)) \
+                    .props("outline dense no-caps").mark("collect-folder")
+                ui.button("Add files…", icon="note_add", on_click=lambda: add_from(False)) \
+                    .props("outline dense no-caps").mark("collect-files")
                 ui.space()
+                search = ui.input(placeholder="search").props("dense outlined clearable") \
+                    .classes("w-48").mark("collect-search")
+            columns = [{"name": c, "label": c, "field": c, "sortable": True, "align": "left"}
+                       for c in ("file", "group", "role", "format")]
+            table = ui.table(columns=columns, rows=rows, row_key="path", selection="multiple",
+                             pagination=0).classes("w-full").props("dense flat") \
+                .style("max-height: 55vh").mark("collect-table")
+            search.bind_value_to(table, "filter")
+            with ui.row().classes("w-full items-center gap-2"):
+                role = ui.select({r: r for r in study.ROLES}, value="svs", label="role") \
+                    .props("dense outlined").classes("w-28").mark("collect-role")
+                group = ui.input(label="group").props("dense outlined").classes("w-48") \
+                    .mark("collect-group")
+                ui.button("Apply to selected", on_click=apply).props("outline dense no-caps") \
+                    .mark("collect-apply")
+                ui.button("Remove selected", on_click=remove).props("outline dense no-caps") \
+                    .mark("collect-remove")
+                ui.space()
+                ui.button("Cancel", on_click=lambda: dialog.submit(False)).props("flat")
                 ui.button("Load", on_click=lambda: dialog.submit(True)) \
                     .props("unelevated no-caps").mark("collect-load")
+            add(first)
         load = await dialog
-        if load:
-            roles = {rel: r.value for rel, e, r, g in rows if r.value != e.role}
-            groups = {rel: g.value for rel, e, r, g in rows if g.value != e.group}
+        kept = [(r["path"], r["role"], r["group"]) for r in rows]
         dialog.delete()
         if not load or id not in self.graph.nodes:
             return
-        self.graph.set(id, "roles", roles or None)
-        self.graph.set(id, "groups", groups or None)
+        if not kept:
+            ui.notify("Nothing to load: add a folder or files", type="info")
+            return
+        self.graph.set(id, "entries", kept)
         self._changed()
         await self.run(id)
 

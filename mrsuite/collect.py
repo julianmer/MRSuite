@@ -20,7 +20,7 @@ import re
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import pandas as pd
 from nifti_mrs.nifti_mrs import NIFTI_MRS, NotNIFTI_MRS
@@ -103,21 +103,9 @@ def discover(folder: Any, roles: Optional[Dict[str, str]] = None,
         parts = path.relative_to(folder).parts
         if any(p.startswith(".") or p in SKIPPED for p in parts):
             continue
-        if path.is_dir():
-            if any(f.suffix.lower() in DICOM for f in path.iterdir() if f.is_file()):
-                entries.append(_entry(path, folder, "dicom"))
-            continue
-        suffix = path.suffix.lower()
-        if path.name.lower().endswith((".nii", ".nii.gz")):
-            if not path.exists():                      # git-annex's link, content not fetched
-                continue
-            try:
-                NIFTI_MRS(str(path))
-            except Exception:                          # noqa: BLE001 - an image, the T1 say
-                continue
-            entries.append(_entry(path, folder, "nifti"))
-        elif suffix in FORMATS:
-            entries.append(_entry(path, folder, FORMATS[suffix]))
+        format = _format(path)
+        if format and not (path.is_dir() and format != "dicom"):
+            entries.append(_entry(path, folder, format))
     for e in entries:
         rel = e.path.relative_to(folder).as_posix()
         e.role, e.group = (roles or {}).get(rel, e.role), (groups or {}).get(rel, e.group)
@@ -126,6 +114,70 @@ def discover(folder: Any, roles: Optional[Dict[str, str]] = None,
         raise ValueError(f"no such role: {sorted(wrong)}; one of {ROLES}")
     entries = [e for e in entries if e.role]
     return sorted(entries, key=lambda e: (e.group, ROLES.index(e.role), str(e.path)))
+
+
+#************#
+#   format   #
+#************#
+def _format(path: Path) -> Optional[str]:
+    """What reads a path: spec2nii's subcommand by the extension, 'dicom' for a folder of
+    DICOM files, 'nifti' for NIfTI-MRS (its header read, so an image or a git-annex link
+    without content is None); None for anything else."""
+    if path.is_dir():
+        files = (f for f in path.iterdir() if f.is_file())
+        return "dicom" if any(f.suffix.lower() in DICOM for f in files) else None
+    if path.name.lower().endswith((".nii", ".nii.gz")):
+        if not path.exists():
+            return None
+        try:
+            NIFTI_MRS(str(path))
+        except Exception:                              # noqa: BLE001 - an image, the T1 say
+            return None
+        return "nifti"
+    return FORMATS.get(path.suffix.lower())
+
+
+#*************#
+#   entries   #
+#*************#
+def entries(paths: Sequence[Any]) -> List[Entry]:
+    """Files or DICOM folders chosen anywhere, as entries by their names (see ``discover``),
+    each grouped under its own folder; one nothing reads is left out."""
+    out = []
+    for path in map(Path, paths):
+        format = _format(path)
+        if format:
+            out.append(_entry(path, path.parent, format))
+    return out
+
+
+#**************#
+#   as given   #
+#**************#
+def as_entries(items: Sequence[Any]) -> List[Entry]:
+    """Entries from (path, role, group) triples, as a graph keeps them.
+
+    Raises:
+        ValueError: For a path nothing reads, or a role that is not one of ROLES.
+    """
+    out = []
+    for item in items:
+        if isinstance(item, Entry):
+            out.append(item)
+            continue
+        path, role, group = item
+        format = _format(Path(path))
+        if format is None:
+            raise ValueError(f"nothing reads {path}")
+        if role not in ROLES:
+            raise ValueError(f"no such role: {role!r}; one of {ROLES}")
+        out.append(Entry(Path(path), role, group, format))
+    return out
+
+
+def as_triples(found: Sequence[Entry]) -> List[Tuple[str, str, str]]:
+    """Entries as (path, role, group) triples, as a graph keeps them."""
+    return [(str(e.path), e.role, e.group) for e in found]
 
 
 #***********#
@@ -167,7 +219,8 @@ def load(what: Union[str, Path, List[Entry]], roles: Optional[Dict[str, str]] = 
     its spectrum where every group has both.
 
     Args:
-        what: The study's folder (see ``discover``), or entries, e.g. relabelled.
+        what: The study's folder (see ``discover``), or entries, e.g. relabelled, as
+            Entry objects or (path, role, group) triples.
         roles, groups: As ``discover`` takes them, for a folder.
 
     Returns:
@@ -178,7 +231,7 @@ def load(what: Union[str, Path, List[Entry]], roles: Optional[Dict[str, str]] = 
     Raises:
         ValueError: If nothing is found.
     """
-    entries = discover(what, roles, groups) if isinstance(what, (str, Path)) else list(what)
+    entries = discover(what, roles, groups) if isinstance(what, (str, Path)) else as_entries(what)
     if not entries:
         raise ValueError(f"no MRS files found under {what}")
     found: Dict[str, list] = {}

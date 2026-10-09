@@ -286,13 +286,13 @@ BLOCKS: Dict[str, Block] = {b.key: b for b in [
     Block("files", "data", "Read files", call="io.load", imports=("from mrsuite import io",),
           fields=(_value("files"), _choice("format", FORMATS, "'auto'")),
           outputs=(), help="Raw scanner data through spec2nii, or NIfTI-MRS as it is."),
-    Block("folder", "data", "Load folder", call="collect.load",
+    Block("folder", "data", "Load dataset", call="collect.load",
           imports=("from mrsuite import collect",),
           fields=(_value("folder", positional=True), _value("roles", "None"),
                   _value("groups", "None")),
-          outputs=(), help="Every spectrum under a study's folder, told its role by its name: "
-                            "BIDS (sub-*_svs, _mrsref) or words like ref, water, mm; one output "
-                            "per role, in group order."),
+          outputs=(), help="A dataset from a folder, or files from anywhere (Collect…), each "
+                            "told its role by its name, BIDS (sub-*_svs, _mrsref) or words like "
+                            "ref, water, mm, to put right; one output per role, in group order."),
     Block("ismrm2016", "data", "2016 fitting challenge", call="challenge2016.load",
           imports=("from mrsuite.datasets import challenge2016",),
           fields=(_value("n", "None"),),

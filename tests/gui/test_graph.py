@@ -233,6 +233,20 @@ def test_a_folder_block_loads_a_study_and_shows_the_roles_it_found(study):
     assert f"{graph.nodes[folder].name}['mrsref']" in graph.script()
 
 
+def test_a_blocks_own_list_of_files_loads_and_is_written_out_in_full(study):
+    """What the window collected, from anywhere, as (path, role, group) triples."""
+    graph = Graph()
+    folder = graph.add("folder")
+    chosen = [(str(study / "extra/press_metab_PFL.nii.gz"), "svs", "one"),
+              (str(study / "sub-02/mrs/sub-02_acq-press_mrsref.nii.gz"), "mrsref", "one")]
+    graph.set(folder, "entries", chosen)
+
+    assert graph.run(folder)
+    assert [p.name for p in graph.ports(folder)[1]] == ["svs", "mrsref"]
+    assert all(repr(c) in graph.script() for c in chosen)
+    assert Graph.from_dict(graph.to_dict()).nodes[folder].values["entries"] == chosen
+
+
 def test_what_the_window_put_right_goes_into_the_script(study):
     graph = Graph()
     folder = graph.add("folder")

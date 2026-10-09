@@ -251,29 +251,50 @@ def test_a_folder_chosen_for_a_load_folder_block_is_set_and_loaded(tmp_path):
     simulate(graph, script)
 
 
-def test_the_collect_window_puts_a_files_role_right_and_loads(study):
+def test_the_collect_window_takes_files_from_anywhere_and_sets_many_at_once(study):
+    """A folder discovered, files added from elsewhere, rows chosen given a role and a
+    group together, one removed; what is left is the block's own list, and loads."""
     graph = Graph()
     folder = graph.add("folder")
-    graph.set(folder, "folder", str(study))
+    graph.set(folder, "folder", str(study / "sub-02"))
+    elsewhere = [study / "extra/press_metab_PFL.nii.gz", study / "extra/press_mm_PFL.nii.gz"]
 
     async def script(user, app):
         runs = []
 
         async def run(*args):
             runs.append(args)
-        app.run = run
+
+        async def pick(title="Open data", formats=True, folder=False):
+            return elsewhere, "auto"
+        app.run, app._pick = run, pick
 
         async def opened():
             with app.client:
                 await app.collect(folder)
         task = asyncio.create_task(opened())
-        await user.should_see("extra/press_mm_PFL.nii.gz")
-        user.find(marker="role-2").elements.pop().set_value("")        # the mm file: left out
+        await user.should_see(marker="collect-table")
+        table = user.find(marker="collect-table").elements.pop()
+        assert [r["file"] for r in table.rows] == ["sub-02_acq-press_svs.nii.gz",
+                                                   "sub-02_acq-press_mrsref.nii.gz"]
+        user.find(marker="collect-files").click()
+        await until(lambda: len(table.rows) == 4)
+        assert [r["role"] for r in table.rows] == ["svs", "mrsref", "svs", "mm"]
+        table.selected = [r for r in table.rows if "extra" in r["path"]]
+        user.find(marker="collect-role").elements.pop().set_value("mrsref")
+        user.find(marker="collect-group").elements.pop().set_value("water-run")
+        user.find(marker="collect-apply").click()
+        table.selected = [r for r in table.rows if r["file"] == "press_mm_PFL.nii.gz"]
+        user.find(marker="collect-remove").click()
         user.find(marker="collect-load").click()
         await task
 
-        assert graph.nodes[folder].values["roles"] == {"extra/press_mm_PFL.nii.gz": ""}
-        assert "groups" not in graph.nodes[folder].values and runs == [(folder,)]
+        assert graph.nodes[folder].values["entries"] == [
+            (str(study / "sub-02/mrs/sub-02_acq-press_svs.nii.gz"), "svs", "sub-02_acq-press"),
+            (str(study / "sub-02/mrs/sub-02_acq-press_mrsref.nii.gz"), "mrsref", "sub-02_acq-press"),
+            (str(elsewhere[0]), "mrsref", "water-run")]
+        assert runs == [(folder,)]
+        assert "collect.load([\n" in graph.script()
 
     simulate(graph, script)
 

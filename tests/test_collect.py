@@ -70,6 +70,22 @@ def test_roles_and_groups_can_be_set_right_by_hand(study):
         collect.discover(study, roles={"extra/press_mm_PFL.nii.gz": "macro"})
 
 
+def test_files_chosen_anywhere_and_triples_become_entries(study):
+    chosen = [study / "extra/press_mm_PFL.nii.gz", study / "sub-02/mrs/sub-02_acq-press_svs.nii.gz",
+              study / "sub-01/ses-01/anat/sub-01_ses-01_T1w.nii.gz", study / "nothing.txt"]
+
+    found = collect.entries(chosen)
+
+    assert [(e.group, e.role) for e in found] == [("press_PFL", "mm"), ("sub-02_acq-press", "svs")]
+    triples = collect.as_triples(found)
+    assert triples[0] == (str(chosen[0]), "mm", "press_PFL")
+    assert collect.as_entries(triples) == found
+    with pytest.raises(ValueError, match="nothing reads"):
+        collect.as_entries([(str(chosen[3]), "svs", "x")])
+    with pytest.raises(ValueError, match="no such role"):
+        collect.as_entries([(str(chosen[0]), "macro", "x")])
+
+
 #**********#
 #   load   #
 #**********#
@@ -79,6 +95,8 @@ def test_a_study_loads_role_by_role_in_group_order(study, spectrum):
 
     assert list(out) == ["svs", "mrsref", "mm"]
     assert [len(v.list()) for v in out.values()] == [3, 3, 1]
+    by_hand = collect.load([(str(study / "extra/press_mm_PFL.nii.gz"), "svs", "one")])
+    assert list(by_hand) == ["svs"] and len(by_hand["svs"].list()) == 1
     assert np.array_equal(out["mm"].list()[0][:], spectrum[:])
     assert collect.table(collect.discover(study)).columns.tolist() == \
         ["group", "role", "format", "path"]

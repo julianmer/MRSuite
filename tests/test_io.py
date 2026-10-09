@@ -235,6 +235,20 @@ def test_a_basis_sets_basis_file_is_written_once_and_another_gets_its_own():
     assert io.basis(samples("JMRUI", "NAA.txt")).lcmodel() != path
 
 
+#***************#
+#   nifti-mrs   #
+#***************#
+def test_nifti_mrs_files_are_read_in_as_they_are(tmp_path, spectrum):
+    """Read files takes them too: no spec2nii, one batch called spectra."""
+    from nifti_mrs_plus import NIfTI_MRS_Plus
+
+    path, = NIfTI_MRS_Plus([spectrum]).save_nifti(str(tmp_path), prefix="one")
+    out = io.load(path)
+
+    assert list(out) == ["spectra"]
+    assert np.array_equal(out["spectra"].list()[0][:], spectrum[:])
+
+
 #*************#
 #   partial   #
 #*************#
@@ -266,7 +280,13 @@ def test_every_fit_takes_a_basis_set_as_its_basis_file(fitter, spectrum):
     fit = getattr(mrsuite, fitter).fit
     basis = io.basis(BASIS_2016)
 
-    assert fit(spectrum, basis).conc() == fit(spectrum, basis.lcmodel()).conc()
+    own, written, original = (fit(spectrum, b).conc()
+                              for b in (basis, basis.lcmodel(), str(BASIS_2016)))
+
+    assert own == written
+    assert list(own) == list(original) and own, "the same metabolites, from the same functions"
+    if fitter != "osprey":      # Osprey's fit swings under any change of the basis' last digit
+        assert np.allclose(list(own.values()), list(original.values()), rtol=0.05)
 
 
 #*************#

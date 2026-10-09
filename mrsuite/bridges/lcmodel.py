@@ -19,6 +19,7 @@
 #*************#
 import shutil
 import sys
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from mrsuite.bridges.base import Deferred
@@ -26,6 +27,23 @@ from mrsuite.core.basis import as_file
 from mrsuite.core.method import method
 from mrsuite.core.result import FitResult
 from mrsuite.octave import scratch
+
+
+#*****************#
+#   diagnostics   #
+#*****************#
+def _diagnostics(coord: Path) -> str:
+    """LCModel's diagnostic table from a .coord, e.g. 'FATAL MYBASI 31' for a basis it
+    cannot read; one line."""
+    try:
+        lines = coord.read_text(errors="replace").splitlines()
+    except OSError:
+        return "no .coord written"
+    for n, line in enumerate(lines):
+        if "lines in following diagnostic table" in line:
+            count = int(line.split()[0])
+            return "; ".join(" ".join(l.split()) for l in lines[n + 1:n + 1 + count])
+    return "no diagnostics in the .coord"
 
 
 #***************#
@@ -128,7 +146,13 @@ def fit(data: Any, basis: Any, water: Any = None, ppmlim: tuple = (0.5, 4.2),
                            control=None if control is None else str(control),
                            **{**kwargs, "save_path": workdir})
         scaling = "raw" if water is None else "molarity"
-        return [to_result(report, scaling=scaling) for report in engine.report(data, water)]
+        results = []
+        for i, report in enumerate(engine.report(data, water)):
+            if not report[0]:                      # no metabolites: LCModel said why
+                raise RuntimeError("LCModel fitted nothing: "
+                                   + _diagnostics(Path(workdir) / f"temp{i}.coord"))
+            results.append(to_result(report, scaling=scaling))
+        return results
     finally:
         if own:
             shutil.rmtree(workdir, ignore_errors=True)

@@ -72,6 +72,20 @@ def test_absent_qc_is_omitted_rather_than_faked():
 #*********#
 #   fit   #
 #*********#
+def test_a_basis_lcmodel_cannot_read_is_an_error_not_an_empty_fit(spectrum, tmp_path):
+    """LCModel reads the basis in Fortran's fixed columns; blanks between the values shift
+    them, and LCModel says so in the .coord rather than failing."""
+    text = open(CHALLENGE_BASIS).read()
+    spaced = "\n".join(" ".join(line[i:i + 13] for i in range(0, len(line), 13))
+                       if line[:1] == " " and "E" in line and "=" not in line and "$" not in line
+                       else line for line in text.splitlines())
+    broken = tmp_path / "spaced.BASIS"
+    broken.write_text(spaced + "\n")
+
+    with pytest.raises(RuntimeError, match=r"LCModel fitted nothing: .*FATAL"):
+        lcmodel.fit(spectrum, str(broken))
+
+
 def test_a_fit_runs_end_to_end(spectrum):
     """Asserted on physiology, not on stored numbers: a mis-scaled or mirrored spectrum
     still fits and still returns finite values, but not with these ratios."""

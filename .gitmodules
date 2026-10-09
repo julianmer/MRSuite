@@ -25,3 +25,6 @@
 [submodule "externals/basic"]
 	path = externals/basic
 	url = https://github.com/julianmer/BasiC.git
+[submodule "data/openneuro_ds006812"]
+	path = data/openneuro_ds006812
+	url = https://github.com/OpenNeuroDatasets/ds006812.git

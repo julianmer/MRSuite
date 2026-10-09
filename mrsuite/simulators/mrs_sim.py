@@ -32,13 +32,14 @@ import numpy as np
 from nifti_mrs.create_nmrs import gen_nifti_mrs
 
 from nifti_mrs_plus import NIfTI_MRS_Plus
+from mrsuite import externals
 from mrsuite.core import provenance
 from mrsuite.octave import scratch
 from mrsuite.training import recipe as recipe_
 from mrsuite.training import source
 from mrsuite.training.source import Truth
 
-ROOT = Path(__file__).resolve().parents[2] / "externals" / "mrs-sim"
+ROOT = externals.path("mrs-sim")
 DRIVER = Path(__file__).with_name("mrs_sim_driver.py")
 
 # the Python MRS-Sim runs in: this one unless it needs an environment of its own
@@ -61,7 +62,7 @@ def config(name: str = "coil_combined_with_artifacts") -> Dict[str, Any]:
     Returns:
         Dict[str, Any]: The config, as MRS-Sim reads it.
     """
-    with open(ROOT / "src" / "config" / "predefined" / f"{name}.json") as fh:
+    with open(externals.ensure("mrs-sim") / "src" / "config" / "predefined" / f"{name}.json") as fh:
         return json.load(fh)
 
 
@@ -70,7 +71,7 @@ def config(name: str = "coil_combined_with_artifacts") -> Dict[str, Any]:
 #*************#
 def version() -> Optional[str]:
     """The MRS-Sim checkout's exact state, for the provenance."""
-    return provenance.git_version(str(ROOT))
+    return provenance.git_version(str(externals.ensure("mrs-sim")))
 
 
 #*******************#
@@ -101,7 +102,14 @@ def compile_basis(basis: Union[str, Path], out: Union[str, Path], te: float,
     Returns:
         str: The path written.
     """
-    from fsl_mrs.utils import mrs_io
+    try:
+        from fsl_mrs.utils import mrs_io
+    except ModuleNotFoundError as err:
+        if (err.name or "").partition(".")[0] != "fsl_mrs":   # installed, but broken
+            raise
+        raise ImportError("FSL-MRS is not installed: conda install -c conda-forge -c "
+                          "https://fsl.fmrib.ox.ac.uk/fsldownloads/fslconda/public/ "
+                          "fsl_mrs") from err
     from scipy import io as scipy_io
 
     if Path(basis).suffix.lower() != ".basis":
@@ -167,7 +175,7 @@ def _basis_mat(config: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
 
     path = Path(config["PM_basis_set"])
     if not path.is_absolute():
-        path = ROOT / "src" / "basis_sets" / path
+        path = externals.ensure("mrs-sim") / "src" / "basis_sets" / path
     mat = scipy_io.loadmat(str(path), simplify_cells=True)
     return mat["metabolites"], mat["header"]
 
@@ -220,7 +228,7 @@ def distributions(samples: Dict[str, np.ndarray], folder: Union[str, Path],
         [PYTHON, "src/findParamDist.py", "--paramPath", str(folder / "parameters"),
          "--savedir", str(folder / "fits"), "--paramKeys", ",".join(keys.values()),
          "--findCorr"],
-        cwd=ROOT, capture_output=True, text=True,
+        cwd=externals.ensure("mrs-sim"), capture_output=True, text=True,
         env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "MPLBACKEND": "Agg"})
     fitted, corr = (folder / "fits" / "parameter_distributions_best_fit.json",
                     folder / "fits" / "correlation_matrix.mat")
@@ -593,11 +601,11 @@ def _run(config: Dict[str, Any], n: int, seed: int, components: bool,
         with open(path, "w") as fh:
             json.dump({"config": config, "n": count, "seed": seed, "components": components,
                        "folder": folder, "result": result}, fh)
-        proc = subprocess.run([PYTHON, str(DRIVER), path], cwd=ROOT, capture_output=True,
-                              text=True, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1",
-                                              **({"OMP_NUM_THREADS": str(threads),
-                                                  "MKL_NUM_THREADS": str(threads)}
-                                                 if threads else {})})
+        proc = subprocess.run([PYTHON, str(DRIVER), path], cwd=externals.ensure("mrs-sim"),
+                              capture_output=True, text=True,
+                              env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1",
+                                   **({"OMP_NUM_THREADS": str(threads),
+                                       "MKL_NUM_THREADS": str(threads)} if threads else {})})
         if proc.returncode != 0 or not os.path.exists(result):
             raise RuntimeError(f"MRS-Sim failed:\n{proc.stderr[-3000:]}")
         with np.load(result) as r:

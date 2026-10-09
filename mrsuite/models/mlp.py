@@ -16,12 +16,12 @@
 #*************#
 #   imports   #
 #*************#
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import numpy as np
 import torch
 
+from mrsuite import externals
 from mrsuite.core.provenance import git_version
 from mrsuite.core.result import FitResult
 from mrsuite.models.base import load_file, spectra
@@ -57,7 +57,8 @@ class MLP(TorchModel, paper_url="https://arxiv.org/abs/2511.23135"):
             two linewidths, shift, zero- and first-order phase, and a baseline.
     """
 
-    repo = Path(__file__).resolve().parents[2] / "externals" / "ood-robust-mrs"
+    external = "ood-robust-mrs"
+    repo = externals.path(external)
     objectives = ("concentrations", "spectra", "scaled")
     signal_parameters = (["gamma", "sigma", "eps", "phi0", "phi1"]
                          + [f"baseline{i}" for i in range(6)])
@@ -70,6 +71,7 @@ class MLP(TorchModel, paper_url="https://arxiv.org/abs/2511.23135"):
         super().__init__()
         self.metabolites, self.first, self.last = list(metabolites), first, last
         self.acquisition = dict(acquisition)
+        self.repo = externals.ensure(self.external)
         # 'relu' as the published models ran: their configs' 'activation' was never read
         self.net = load_file(self.repo / "models" / "nnModels.py").MLP(
             (2, last - first), len(metabolites), width=width, depth=depth, act="relu")

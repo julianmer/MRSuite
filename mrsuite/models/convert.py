@@ -26,6 +26,7 @@ from typing import Any, Dict, Type
 
 import torch
 
+from mrsuite import externals
 from mrsuite.core.provenance import git_version, portable, portable_file
 from mrsuite.models.base import classpath
 from mrsuite.models.pytorch import TorchModel
@@ -63,8 +64,9 @@ def run_reference(cls: Type[TorchModel], job: Dict[str, Any],
         path, result = os.path.join(folder, "job.json"), os.path.join(folder, "result.json")
         with open(path, "w") as fh:
             json.dump({**job, "result": result}, fh)
-        proc = subprocess.run([python, str(REFERENCE), path], cwd=cls.repo, capture_output=True,
-                              text=True, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+        proc = subprocess.run([python, str(REFERENCE), path], cwd=externals.ensure(cls.external),
+                              capture_output=True, text=True,
+                              env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
         if proc.returncode != 0:
             raise RuntimeError(f"the original {cls.__name__} failed:\n{proc.stderr[-3000:]}")
         with open(result) as fh:
@@ -102,6 +104,6 @@ def convert(cls: Type[TorchModel], checkpoint: str, job: Dict[str, Any],
                                if k.startswith("net.")})
     model.recipe = {"training": {
         "model": classpath(cls), "checkpoint": portable_file(checkpoint),
-        "job": {**copy.deepcopy(job), "basis": portable(Path(cls.repo, job["basis"]))},
-        "converted with": {cls.repo.name: git_version(str(cls.repo))}}}
+        "job": {**copy.deepcopy(job), "basis": portable(Path(model.repo, job["basis"]))},
+        "converted with": {cls.external: git_version(str(model.repo))}}}
     return model

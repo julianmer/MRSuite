@@ -26,7 +26,7 @@ from mrsvalidate.analysis import agreement
 
 from nifti_mrs_plus import NIfTI_MRS_Plus
 from mrsuite.benchmark import bias, mae
-from mrsuite.bridges import fsl_mrs, lcmodel, osprey, spant, tarquin
+from mrsuite.bridges import fsl_mrs, lcmodel, osprey, pyamares, spant, tarquin, vespa
 from mrsuite.datasets import challenge2016, mrsi_challenge
 
 MRSI_BASIS = Path(mrsi_challenge.DATA_DIR).parent / "basis_sets" / "mrsi_challenge_2024.BASIS"
@@ -154,6 +154,14 @@ FITS = {"fsl_mrs": fsl_mrs.fit, "lcmodel": lcmodel.fit, "tarquin": tarquin.fit,
 METHODS = {name: Fit(fit, chunk=CHUNK[name]) for name, fit in FITS.items()}
 METHODS.update({f"{name}-water": Fit(FITS[name], water=options, chunk=CHUNK[name])
                 for name, options in challenge2016.WATER.items()})
+# Vespa and pyAMARES take the challenge's priors in place of a basis, ~450 s and ~400 s per
+# spectrum; pyAMARES with its own tolerances (1e-6: the FID's maximum, 1, under a root) but
+# lmfit's evaluation limit, 2000 (free parameters + 1), in place of its 1000, which the
+# prior's 67 parameters exhaust
+METHODS["vespa"] = Fit(vespa.fit, args=lambda dataset: (challenge2016.vespa_prior(),), chunk=1)
+METHODS["pyamares"] = Fit(pyamares.fit, args=lambda dataset: (challenge2016.pyamares_prior(),),
+                          options={"opts": {"fit_kws": {"max_nfev": None, "xtol": 1e-6,
+                                                        "ftol": 1e-6}}}, chunk=1)
 METHODS.update({f"wand-{name}": replace(entry, before=(wand,))
                 for name, entry in list(METHODS.items())})
 
@@ -177,7 +185,7 @@ STAGES = {
 #   scoring   #
 #*************#
 # No default reference: water where the truth is in mM and the fits are water-scaled; on
-# MRSI, whose truth is on the basis' own scale, tCr and the optimal scale.
+# MRSI, whose truth is on the basis' own scale, tCr, the optimal scale and none at all.
 REFERENCES = {"challenge2016": ("water", "tCr", "optimal"),
-              **{s: ("tCr", "optimal") for s in SUBJECTS}}
+              **{s: ("tCr", "optimal", "none") for s in SUBJECTS}}
 METRICS = {"mae": mae, "bias": bias, "lin_ccc": agreement.lin_ccc}

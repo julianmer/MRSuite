@@ -23,11 +23,17 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import pandas as pd
-from mrsvalidate import (ObservationSet, ParameterRole, ParameterSchema, ParameterSpec,
-                         align_observations)
-from mrsvalidate.analysis import descriptive
-from mrsvalidate.pipeline import AnalysisStep, RunConfig, run_analysis_plan
-from mrsvalidate.results import ScalarMetricResult
+try:
+    from mrsvalidate import (ObservationSet, ParameterRole, ParameterSchema, ParameterSpec,
+                             align_observations)
+    from mrsvalidate.analysis import descriptive
+    from mrsvalidate.pipeline import AnalysisStep, RunConfig, run_analysis_plan
+    from mrsvalidate.results import ScalarMetricResult
+except ModuleNotFoundError as err:   # not on PyPI yet, so not a dependency
+    if (err.name or "").partition(".")[0] != "mrsvalidate":   # installed, but broken
+        raise
+    raise ImportError("MRSValidate is not installed: pip install "
+                      "git+https://github.com/JohnLaMaster/MRSValidate.git") from err
 
 from mrsuite.core.result import FitResult
 

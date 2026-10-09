@@ -8,7 +8,7 @@ version = "0.1.0a0"
 description = "MRS Processing, Analysis, AI Model Integration, and Benchmarking"
 readme = "README.md"
 license = {text = "Apache-2.0"}
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 authors = [{ name = "Julian P. Merkofer", email = "j.p.merkofer@tue.nl" }]
 keywords = ["MRS", "magnetic resonance spectroscopy", "NIfTI-MRS", "fitting"]
 
@@ -28,30 +28,38 @@ dependencies = [
     "pandas",
     "openpyxl",       # pandas needs it to read the challenge ground-truth .xlsx files
     "nifti-mrs",
-    "nifti-mrs-plus>=0.1.0",   # the shared batched NIfTI-MRS wrapper
+    "nifti-mrs-plus>=0.2.0",   # the shared batched NIfTI-MRS wrapper; 0.2 for set_provenance
     "spec2nii",       # mrsuite.io: raw scanner data to NIfTI-MRS
-    "fsl_mrs",
     "oct2py",         # bridges to the FID-A Octave sources in externals/fid-a
-    "lcmodel-wrapper>=0.2",   # drives the LCModel binary; 0.2 for the coord parser
+    "lcmodel-wrapper>=0.3",   # drives the LCModel binary; 0.3 for __version__
     "tarquin-wrapper>=0.1",   # drives the TARQUIN binary
-    # loads the MRSI challenge; git main until a release ships MRSIChallengeDataModule
-    "augmentrum @ git+https://github.com/julianmer/Augmentrum.git@main",
     "h5py",           # reads the MRSI challenge's basis set out of its .mat files
     "torch",          # the published models: WAND and the MLPs
     "huggingface_hub",   # the model zoo: from_pretrained and push_to_hub
     "safetensors",    # the Hub's format for PyTorch weights
     "ssqueezepy>=0.6.6",   # WAND's wavelet transform; 0.6.4 calls a SciPy function now removed
+    # not here: FSL-MRS (conda only), Augmentrum (which needs it) and MRSValidate (not on PyPI);
+    # like pyAMARES and Vespa, their parts of MRSuite say how to install them when first used
 ]
 
 [project.optional-dependencies]
 dev = ["pytest"]
 train = ["keras>=3.0"]   # Model.learn: one Keras loop for PyTorch, TensorFlow and JAX models
+gui = ["nicegui[native,plotly]>=3.17,<4"]   # mrsuite-gui; 4.0 changes its process pool and run
+
+[project.scripts]
+mrsuite-gui = "mrsuite.gui.__main__:main"
 
 [project.urls]
 Repository = "https://github.com/julianmer/MRSuite"
 
 [tool.setuptools.packages.find]
 include = ["mrsuite*"]
+
+# what runs outside Python: the Octave shims and solver source, the R driver, the dockerfiles
+[tool.setuptools.package-data]
+mrsuite = ["octave/dockerfile", "octave/shims/*.m", "octave/src/*.c", "r/dockerfile", "r/*.R",
+           "gui/canvas.js", "gui/static/*", "gui/vendor/*/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -3,7 +3,7 @@
   <h1 style="margin-top: 5px; margin-bottom: 5px;">MRSuite</h1>
   <p style="margin-top: 0px;"><em>MRS Processing, Analysis, AI Model Integration, and Benchmarking</em></p>
 
-  [![Python](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/)
+  [![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
   [![Status](https://img.shields.io/badge/status-alpha-orange.svg)](#project-status)
 </div>
 
@@ -51,6 +51,20 @@ A suite of tools for benchmarking MRS processing and analysis methods, including
 - **Reporting**: Generate detailed reports on benchmarking results.
 - **Visualization**: Visualize performance metrics and results.
 
+### Graphical Interface
+Build an analysis from blocks wired on a canvas: read data in, preprocess, fit, check quality and
+score against ground truth, with each block offering every toolbox that does its step (grouped
+after Near et al. and Kreis et al., NMR Biomed 2021) and every function of every toolbox besides.
+Each block shows what it made and exports it, and the whole graph is written out as the Python
+that makes it again:
+
+```bash
+uvx --from "mrsuite[gui] @ git+https://github.com/julianmer/MRSuite" mrsuite-gui
+```
+
+It opens a window of its own, or the browser where none can open (`--browser` asks for it);
+`mrsuite-gui --check` says which toolboxes this machine has.
+
 ### Reporting Standards
 A set of standards for generating reproducible reports, including:
 - **Documentation**: Automatically document each step of the processing pipeline.
@@ -61,5 +75,6 @@ A set of standards for generating reproducible reports, including:
 
 ## External Tools and Their Licences
 MRSuite does not ship the external tools it drives: each is fetched separately and keeps its
-own licence. MRS-Sim, for example, is licensed under AGPL-3.0; MRSuite runs it in a process of
+own licence. A checkout has them as submodules; an installed MRSuite clones each the first time
+it is used, at the commit MRSuite pins, into `~/.mrsuite` (or `$MRSUITE_HOME`). MRS-Sim, for example, is licensed under AGPL-3.0; MRSuite runs it in a process of
 its own and never bundles it.

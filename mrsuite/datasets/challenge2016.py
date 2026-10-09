@@ -24,8 +24,6 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
-from fsl_mrs.utils import mrs_io
-
 from nifti_mrs_plus import NIfTI_MRS_Plus
 from mrsuite.core import provenance
 
@@ -116,6 +114,7 @@ def load(n: Optional[int] = None, root: Path = ROOT,
         Each spectrum's processing history starts with the file it was read from.
     """
     import fsl_mrs
+    from fsl_mrs.utils import mrs_io
 
     spectra = Path(root) / 'datasets_JMRUI'
 

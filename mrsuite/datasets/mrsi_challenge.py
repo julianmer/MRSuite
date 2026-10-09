@@ -69,7 +69,13 @@ def _module(data_dir: Path):
     The .mat rather than the NIfTI files: TestSub10's spectroscopy NIfTI is mirrored in
     x against its own brain mask and B0 map, while the .mat is consistent throughout.
     """
-    from augmentrum.dataset.mrsi_challenge import MRSIChallengeDataModule
+    try:
+        from augmentrum.dataset.mrsi_challenge import MRSIChallengeDataModule
+    except ModuleNotFoundError as err:
+        if (err.name or "").partition(".")[0] != "augmentrum":   # installed, but broken
+            raise
+        raise ImportError("Augmentrum is not installed: with FSL-MRS installed, pip install "
+                          "git+https://github.com/julianmer/Augmentrum.git") from err
     return MRSIChallengeDataModule(data_dir=str(data_dir), source='mat')
 
 
@@ -101,9 +107,9 @@ def load(subject: str, signal: str = 'all', voxels: Optional[int] = None,
         Each spectrum's processing history starts with its subject, voxel and signal,
         and the file it came from.
     """
+    module = _module(data_dir)
     import augmentrum
 
-    module = _module(data_dir)
     volume = module.load([subject], signal=signal)[0][0][:]         # (x, y, z, t)
     aux = module.read_aux(subject, signal='meta')                   # test truth lives apart
     acquisition = module.read_acquisition(subject)

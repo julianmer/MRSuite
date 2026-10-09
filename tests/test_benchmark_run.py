@@ -355,7 +355,7 @@ def test_a_run_scores_end_to_end(real):
     pooled = tables["challenge2016"].query("metabolite == 'all'")
     on = {r: set(pooled[pooled.reference == r].method) for r in ("water", "tCr", "optimal")}
     assert on == {"water": {"tarquin-water"}, "tCr": {"fsl_mrs"}, "optimal": {"fsl_mrs"}}
-    assert set(tables["TestSub10"].reference) == {"tCr", "optimal"}
+    assert set(tables["TestSub10"].reference) == {"tCr", "optimal", "none"}
     assert (folder / "scores" / "challenge2016.csv").exists()
     assert pooled.query("metric == 'mae'").value.notna().all()
 

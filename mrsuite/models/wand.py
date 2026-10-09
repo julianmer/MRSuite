@@ -17,7 +17,6 @@
 #   imports   #
 #*************#
 import threading
-from pathlib import Path
 from typing import Dict, List, Optional
 
 import numpy as np
@@ -25,6 +24,7 @@ import torch
 
 from nifti_mrs.create_nmrs import gen_nifti_mrs
 
+from mrsuite import externals
 from mrsuite.core.provenance import git_version
 from mrsuite.models.base import load_file, spectra
 from mrsuite.models.pytorch import TorchModel
@@ -87,7 +87,8 @@ class WAND(TorchModel, paper_url="https://doi.org/10.1002/nbm.70038"):
         repo (Path): The original repository, which the network and transform are loaded from.
     """
 
-    repo = Path(__file__).resolve().parents[2] / "externals" / "wand-for-mrs"
+    external = "wand-for-mrs"
+    repo = externals.path(external)
     objectives = ("components",)
 
     #**********#
@@ -102,6 +103,7 @@ class WAND(TorchModel, paper_url="https://doi.org/10.1002/nbm.70038"):
         self.batch_statistics = batch_statistics
         self.nuisance = list(nuisance)
         self.components = self.metabolites + self.nuisance + ["baseline", "artifacts"]
+        self.repo = externals.ensure(self.external)
         self.cwt = load_file(self.repo / "utils" / "wavelets.py").CWT(
             last - first, wavelet=("morlet", {"mu": 14}), scales="log-piecewise", nv=32,
             padtype=None)

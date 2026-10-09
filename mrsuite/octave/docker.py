@@ -96,11 +96,17 @@ def _mounts() -> List[str]:
     """Host paths the container must see, each at its own absolute path.
 
     The repo covers the toolboxes, the shims, the data and oct2py's scratch. oct2py also
-    adds its own package directory to the Octave path, so that has to be visible too.
+    adds its own package directory to the Octave path, so that has to be visible too, and
+    an installed MRSuite fetches the toolboxes outside it (see externals).
     """
     import oct2py
 
+    from mrsuite import externals
+
     paths = [str(REPO), str(Path(oct2py.__file__).resolve().parent)]
+    if not externals.root().is_relative_to(REPO):
+        externals.root().mkdir(parents=True, exist_ok=True)   # else Docker makes it, as root
+        paths.append(str(externals.root()))
     return [arg for p in paths for arg in ("-v", f"{p}:{p}")]
 
 

@@ -1,0 +1,170 @@
+/* MRSuite's look: the logo's slate, blue, teal and white, on dark or light */
+
+:root {
+  --mr-blue: #5274f0;
+  --mr-teal: #16bdc6;
+  --mr-silver: #dce3ec;
+  --mr-slate: #8a9bb3;
+  --mr-red: #ef5d6c;
+  --mr-bg: #f3f5f8;
+  --mr-panel: #ffffff;
+  --mr-node: #ffffff;
+  --mr-border: #dbe1ea;
+  --mr-text: #18202b;
+  --mr-muted: #6b7686;
+  --mr-grid: #c3ccd8;
+  --mr-hover: rgba(82, 116, 240, 0.08);
+}
+
+body.body--dark {
+  --mr-bg: #0e1217;
+  --mr-panel: #141920;
+  --mr-node: #1b212a;
+  --mr-border: #29313c;
+  --mr-text: #e5e9ef;
+  --mr-muted: #8a94a3;
+  --mr-grid: #262e39;
+  --mr-hover: rgba(82, 116, 240, 0.14);
+}
+
+body {
+  background: var(--mr-bg);
+  color: var(--mr-text);
+  font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.nicegui-content { padding: 0; }
+
+/* the start: the logo, fading out */
+.mr-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  background: var(--mr-bg);
+  animation: mr-splash 1.8s ease forwards;
+  pointer-events: none;
+}
+.mr-splash img { width: 168px; animation: mr-rise 1.2s ease; }
+.mr-splash span { font-size: 22px; font-weight: 600; letter-spacing: 0.04em; }
+@keyframes mr-splash { 0%, 65% { opacity: 1; } 100% { opacity: 0; visibility: hidden; } }
+@keyframes mr-rise { from { transform: translateY(8px) scale(0.96); opacity: 0; } }
+
+/* the bar at the top */
+.mr-header {
+  background: var(--mr-panel) !important;
+  color: var(--mr-text) !important;
+  border-bottom: 1px solid var(--mr-border);
+  box-shadow: none !important;
+}
+.mr-brand { font-weight: 650; font-size: 17px; letter-spacing: 0.02em; }
+.mr-version { color: var(--mr-muted); font-size: 11px; }
+.mr-divider { width: 1px; height: 22px; background: var(--mr-border); margin: 0 6px; }
+.mr-run.q-btn { background: var(--mr-blue) !important; color: #fff !important; }
+
+/* side panels */
+.mr-drawer { background: var(--mr-panel) !important; border-color: var(--mr-border) !important;
+             color: var(--mr-text); }
+.q-splitter__separator { background: var(--mr-border); }       /* the edges dragged to size */
+.mr-drawer .q-item, .mr-drawer .q-field__native, .mr-drawer .q-field__label { color: var(--mr-text); }
+.mr-section { font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+              color: var(--mr-muted); }
+.mr-muted { color: var(--mr-muted); }
+.mr-swatch { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.mr-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 8px;
+  border-radius: 7px;
+  cursor: grab;
+  font-size: 13px;
+  user-select: none;
+}
+.mr-item:hover { background: var(--mr-hover); }
+.mr-item .mr-swatch { width: 4px; height: 16px; border-radius: 2px; }
+.mr-group .q-expansion-item__container > .q-item { min-height: 34px; padding: 0 8px; }
+.mr-group .q-item__label { font-weight: 600; font-size: 13px; }
+
+/* the canvas */
+.mr-canvas { width: 100%; height: 100%; outline: none; }
+.mr-canvas .vue-flow { background: var(--mr-bg); }
+.mr-canvas .vue-flow__background pattern circle { fill: var(--mr-grid); }
+.mr-canvas .vue-flow__edge-path { stroke: var(--mr-slate); stroke-width: 1.6; }
+.mr-canvas .vue-flow__edge.mr-kind-spectra .vue-flow__edge-path { stroke: var(--mr-blue); }
+.mr-canvas .vue-flow__edge.mr-kind-results .vue-flow__edge-path { stroke: var(--mr-teal); }
+.mr-canvas .vue-flow__edge.selected .vue-flow__edge-path { stroke-width: 2.6; }
+.mr-canvas .vue-flow__connection-path { stroke: var(--mr-blue); stroke-width: 1.6; }
+.mr-canvas .vue-flow__node { padding: 0; border: none; background: none; box-shadow: none; }
+
+/* a block */
+.mr-block {
+  min-width: 190px;
+  max-width: 260px;
+  background: var(--mr-node);
+  border: 1px solid var(--mr-border);
+  border-top: 3px solid var(--accent);
+  border-radius: 10px;
+  color: var(--mr-text);
+  font-size: 12px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+  transition: box-shadow 0.15s, border-color 0.15s;
+}
+.mr-block.is-selected { box-shadow: 0 0 0 2px var(--mr-blue), 0 6px 18px rgba(0, 0, 0, 0.2); }
+.mr-block-head { display: flex; align-items: center; gap: 7px; padding: 8px 10px 2px; }
+.mr-block-title { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden;
+                  text-overflow: ellipsis; }
+.mr-block-name { margin-left: auto; color: var(--mr-muted); font-family: ui-monospace, monospace;
+                 font-size: 10px; }
+.mr-block-tool { padding: 0 10px 2px 24px; color: var(--mr-muted); font-size: 11px;
+                 white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mr-status { width: 8px; height: 8px; border-radius: 50%; background: var(--mr-border); flex: none; }
+.is-done .mr-status { background: var(--mr-teal); }
+.is-error .mr-status { background: var(--mr-red); }
+.is-error { border-color: var(--mr-red); }
+.is-running .mr-status { background: var(--mr-blue); animation: mr-pulse 0.9s infinite alternate; }
+@keyframes mr-pulse { to { opacity: 0.25; } }
+
+.mr-ports { display: flex; flex-direction: column; gap: 2px; padding: 6px 0; }
+.mr-port { position: relative; padding: 1px 12px; color: var(--mr-muted); font-size: 11px; }
+.mr-in { display: flex; align-items: baseline; }
+.mr-out { text-align: right; }
+.mr-port .vue-flow__handle { width: 10px; height: 10px; border: 2px solid var(--mr-node);
+                             background: var(--mr-slate); }
+.mr-port .vue-flow__handle-left { left: -6px; }
+.mr-port .vue-flow__handle-right { right: -6px; }
+.vue-flow__handle.mr-kind-spectra { background: var(--mr-blue); }
+.vue-flow__handle.mr-kind-results { background: var(--mr-teal); }
+.vue-flow__handle.mr-kind-truth { background: var(--mr-silver); border-color: var(--mr-slate); }
+.vue-flow__handle.connectionindicator:hover, .vue-flow__handle.valid { transform: scale(1.3); }
+.mr-port .mr-value { color: var(--mr-text); opacity: 0.6; margin-left: auto; padding-left: 8px; max-width: 9em;
+                     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vue-flow__handle.connectingto:not(.valid) { background: var(--mr-red); }   /* won't fit */
+
+.mr-thumb { display: block; width: calc(100% - 20px); height: 38px; margin: 0 10px 4px;
+            border-radius: 6px; background: var(--mr-bg); }
+.mr-thumb polyline { fill: none; stroke: var(--accent); stroke-width: 1.3;
+                     vector-effect: non-scaling-stroke; }
+.mr-thumb rect { fill: var(--accent); opacity: 0.85; }
+.mr-thumb-text { margin: 0 10px 4px; padding: 4px 6px; border-radius: 6px; background: var(--mr-bg);
+                 font-family: ui-monospace, monospace; font-size: 11px; }
+.mr-error { margin: 0 10px 4px; color: var(--mr-red); font-size: 11px; max-height: 3.6em;
+            overflow: hidden; }
+
+.mr-actions { display: flex; gap: 2px; padding: 2px 6px 6px; opacity: 0.55;
+              transition: opacity 0.15s; }
+.mr-block:hover .mr-actions, .mr-block.is-selected .mr-actions { opacity: 1; }
+.mr-actions button { display: flex; align-items: center; justify-content: center; width: 26px;
+                     height: 24px; border: none; border-radius: 6px; background: none;
+                     color: var(--mr-muted); cursor: pointer; }
+.mr-actions button:hover { background: var(--mr-hover); color: var(--mr-blue); }
+.mr-actions .material-icons { font-size: 17px; }
+
+/* the preview */
+.mr-preview { background: var(--mr-panel); border-top: 1px solid var(--mr-border); }
+.mr-code { font-size: 12px; }

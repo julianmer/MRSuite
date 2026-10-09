@@ -17,6 +17,7 @@
 #   imports   #
 #*************#
 import json
+import subprocess
 from pathlib import Path
 
 import numpy as np
@@ -97,6 +98,62 @@ def test_a_shared_path_never_says_where_it_lies_on_this_machine(tmp_path):
     assert provenance.portable_file(tmp_path / "some.BASIS") == {
         "path": "some.BASIS",
         "sha256": provenance.file_checksum(tmp_path / "some.BASIS")["sha256"]}
+
+
+#*****************#
+#   entry files   #
+#*****************#
+def test_an_entry_records_files_portably(tmp_path):
+    """A header travels with its spectrum, so an entry's files carry no machine path."""
+    path = tmp_path / "basis.BASIS"
+    path.write_text("one")
+    # as a method records its call: the arguments as given, positional and by name
+    details = json.loads(provenance.entry("LCModel", "6.3", "fit", {
+        "args": (str(path),), "kwargs": {"basis": path}})["Details"])
+
+    file = {"path": "basis.BASIS", "sha256": provenance.file_checksum(path)["sha256"]}
+    assert details["args"] == [file]
+    assert details["kwargs"] == {"basis": file}
+
+
+def test_an_entry_records_folders_and_paths_to_be_portably(tmp_path):
+    """A fit's output folder, given or yet to be made, is a path too."""
+    details = json.loads(provenance.entry("LCModel", "6.3", "fit", {"kwargs": {
+        "save_path": str(tmp_path), "out": tmp_path / "later"}})["Details"])
+
+    assert details["kwargs"] == {"save_path": tmp_path.name, "out": "later"}
+    assert str(tmp_path) not in json.dumps(details)
+
+
+#*****************#
+#   basis files   #
+#*****************#
+def test_a_basis_records_its_files_once(monkeypatch):
+    """Its source already holds each file's record; a portable path that happens to lie
+    under the working folder is not read as a file a second time."""
+    from mrsuite.core.basis import Basis
+
+    monkeypatch.chdir(provenance.REPO)
+    source = {"files": [provenance.portable_file(provenance.REPO / "pyproject.toml")],
+              "format": "LCModel .BASIS", "reader": "BasiC 90329e3"}
+    basis = Basis(["NAA"], np.ones((1, 4), complex), 4000.0, 123.2, source=source)
+
+    assert provenance.describe(basis, portable=True)["basis"]["source"] == source
+
+
+#*********************#
+#   mrsuite version   #
+#*********************#
+def test_an_installed_mrsuite_never_takes_another_repositorys_commit(tmp_path, monkeypatch):
+    """Installed, the package lies in site-packages, which may sit inside any repository."""
+    git = ["git", "-C", str(tmp_path), "-c", "user.name=t", "-c", "user.email=t",
+           "-c", "commit.gpgsign=false"]
+    subprocess.run(git + ["init", "--quiet"], check=True)
+    subprocess.run(git + ["commit", "--quiet", "--allow-empty", "-m", "1"], check=True)
+    monkeypatch.setattr(provenance, "REPO", tmp_path)
+
+    assert provenance.git_version(str(tmp_path)), "the other repository has a commit"
+    assert provenance.mrsuite_version() == __import__("mrsuite").__version__
 
 
 #****************#

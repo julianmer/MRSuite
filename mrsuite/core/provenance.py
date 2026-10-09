@@ -31,6 +31,8 @@ from nifti_mrs.nifti_mrs import NIFTI_MRS
 
 from nifti_mrs_plus import NIfTI_MRS_Plus
 
+from mrsuite.core.basis import Basis
+
 REPO = Path(__file__).resolve().parents[2]
 
 # arrays up to this many elements are recorded as values, larger ones by checksum
@@ -68,7 +70,8 @@ def git_version(path: str) -> Optional[str]:
 def mrsuite_version() -> str:
     """MRSuite's release, and its commit when run from a checkout."""
     from mrsuite import __version__
-    commit = git_version(str(REPO))
+    # installed, REPO is site-packages, which may lie in someone else's repository
+    commit = git_version(str(REPO)) if (REPO / ".gitmodules").is_file() else None
     return f"{__version__} (git {commit})" if commit else __version__
 
 
@@ -137,14 +140,18 @@ def describe(value: Any, portable: bool = False) -> Any:
 
     Args:
         value: Any argument a step was given.
-        portable (bool): Files by their portable path (see ``portable``), as a record
-            shared beyond this machine gives them.
+        portable (bool): Files, folders and paths by their portable path (see
+            ``portable``), as a record shared beyond this machine gives them.
 
     Returns:
         A structure json.dumps accepts.
     """
     if isinstance(value, (str, os.PathLike)) and os.path.isfile(value):
         return portable_file(value) if portable else file_checksum(value)
+    # a folder, or a Path to write to: never where it lies on this machine
+    if portable and (isinstance(value, Path) or isinstance(value, (str, os.PathLike))
+                     and os.path.isdir(value)):
+        return globals()["portable"](value)         # the function; the argument shadows it
     if value is None or isinstance(value, (bool, int, float, str)):
         return value
     if isinstance(value, complex):
@@ -155,6 +162,9 @@ def describe(value: Any, portable: bool = False) -> Any:
         return {"nifti_mrs": {"sha256": checksum(value[:]), "shape": list(value.shape),
                               "ProcessingApplied": history(value)}}
     # by type, not by attribute: oct2py's Struct answers every attribute it is asked for
+    if isinstance(value, Basis):                       # its source is a record already
+        return {"basis": {"sha256": value.checksum(), "names": list(value.names),
+                          "source": value.source}}
     if isinstance(value, NIfTI_MRS_Plus):
         return {"nifti_mrs_plus": [describe(item, portable) for item in value.list()]}
     if isinstance(value, np.ndarray):
@@ -195,7 +205,9 @@ def entry(program: str, version: Optional[str], method: str,
         version (Optional[str]): Its exact version; 'unknown' when it cannot be told.
         method (str): What was done, e.g. the toolbox function's name.
         details (Dict[str, Any]): Everything else needed to redo it: the arguments, and
-            MRSuite's own version, recorded here because it is what made the call.
+            MRSuite's own version, recorded here because it is what made the call. Files
+            are recorded by their portable path (see ``portable``) and bytes: a header
+            travels with its spectrum, and should not carry this machine's paths.
 
     Returns:
         Dict[str, str]: With Time, Program, Version, Method and Details, the last as JSON.
@@ -203,7 +215,7 @@ def entry(program: str, version: Optional[str], method: str,
     details = {**details, "mrsuite": mrsuite_version()}
     return {"Time": datetime.now().isoformat(), "Program": program,
             "Version": version or "unknown", "Method": method,
-            "Details": json.dumps(describe(details), sort_keys=True)}
+            "Details": json.dumps(describe(details, portable=True), sort_keys=True)}
 
 
 #************#

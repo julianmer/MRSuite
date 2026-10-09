@@ -176,6 +176,16 @@ def basis(files: Any, format: str = "auto", sw: Optional[float] = None,
     return Basis(fids=fids, source=source, **said)
 
 
+#********************#
+#   add to a basis   #
+#********************#
+def add_to_basis(basis: Basis, spectrum: Any, name: str = "MM") -> Basis:
+    """A basis set with a measured spectrum as one more function, e.g. a macromolecule
+    acquisition as 'MM'; see ``mrsuite.core.basis.added``."""
+    from mrsuite.core.basis import added
+    return added(basis, spectrum, name)
+
+
 #*******************#
 #   convert basis   #
 #*******************#

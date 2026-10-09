@@ -123,6 +123,51 @@ class Basis:
         return path
 
 
+#***********#
+#   added   #
+#***********#
+def added(basis: Basis, spectrum: Any, name: str = "MM") -> Basis:
+    """
+    A basis with a measured spectrum as one more function, e.g. a macromolecule
+    acquisition, as LCModel's manual and FSL-MRS's basis tools take one: the spectrum put
+    on the basis' own ppm axis, resampled where its bandwidth or points differ, and taken
+    back to an FID at the basis' dwell time.
+
+    Args:
+        basis (Basis): The basis set.
+        spectrum: One NIfTI-MRS spectrum (or a batch of one), processed as the data it
+            will help fit: coil combined, averaged, its residual water removed, phased.
+        name (str): The function's name.
+
+    Returns:
+        Basis: A new one; its source notes what was added and where it came from.
+
+    Raises:
+        ValueError: For a spectrum with coils, averages or other higher dimensions.
+    """
+    from nifti_mrs_plus import NIfTI_MRS_Plus
+    from mrsuite.core import provenance
+    if isinstance(spectrum, NIfTI_MRS_Plus):           # a batch of one, as the GUI hands it
+        if len(spectrum.list()) != 1:
+            raise ValueError(f"a basis takes one spectrum, not {len(spectrum.list())}")
+        spectrum = spectrum.list()[0]
+    data = np.asarray(spectrum[:])
+    if data.shape[:3] != (1, 1, 1) or data.ndim != 4:
+        raise ValueError(f"a basis takes one spectrum, coil combined and averaged, not "
+                         f"one of shape {data.shape}")
+    fid = data.reshape(-1)
+    spec = np.fft.fftshift(np.fft.fft(fid))
+    hz = np.fft.fftshift(np.fft.fftfreq(fid.size, spectrum.dwelltime))
+    ppm = hz / spectrum.spectrometer_frequency[0] + spectrum.SpecFreqChemShift
+    own = basis.ppm()                                          # zero beyond what was measured
+    moved = np.interp(own, ppm, spec.real, left=0, right=0) \
+        + 1j * np.interp(own, ppm, spec.imag, left=0, right=0)
+    source = {**basis.source, "added": [*basis.source.get("added", []),
+                                        {"name": name, **provenance.describe(spectrum)}]}
+    return Basis([*basis.names, name], np.vstack([basis.fids, np.fft.ifft(np.fft.ifftshift(moved))[None]]),
+                 basis.bandwidth, basis.frequency, basis.centre, basis.te, basis.seq, source)
+
+
 #*************#
 #   as file   #
 #*************#

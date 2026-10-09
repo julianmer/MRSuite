@@ -309,6 +309,12 @@ BLOCKS: Dict[str, Block] = {b.key: b for b in [
           outputs=(Port("basis", BASIS),),
           help="A basis set in any format, told apart by BasiC, for any fit; sw (Hz), sf "
                "(MHz) and te (ms) where the files do not state them."),
+    Block("basis-add", "data", "Add spectrum to basis set", call="io.add_to_basis",
+          imports=("from mrsuite import io",),
+          inputs=(Port("basis", BASIS), Port("spectrum", SPECTRA)), fields=(_value("name", "'MM'"),),
+          outputs=(Port("basis", BASIS),),
+          help="A measured spectrum, e.g. a macromolecule acquisition processed like the data, "
+               "as one more basis function."),
     Block("basis-convert", "data", "Convert basis set", call="io.convert_basis",
           imports=("from mrsuite import io",), inputs=(Port("basis", BASIS),),
           fields=(_value("folder"), _value("tool"), _value("output", "'default'")),

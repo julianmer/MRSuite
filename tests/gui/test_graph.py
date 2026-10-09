@@ -244,6 +244,28 @@ def test_what_the_window_put_right_goes_into_the_script(study):
     assert "roles={'extra/press_mm_PFL.nii.gz': ''}" in graph.script()
 
 
+#**************#
+#   basis add   #
+#**************#
+@needs_challenge
+@pytest.mark.skipif(not (externals.path("basic") / "basis_converter").exists(),
+                    reason="BasiC submodule not checked out")
+def test_a_spectrum_wired_into_a_basis_set_becomes_one_of_its_functions():
+    graph = Graph()
+    data, basis, add = graph.add("ismrm2016"), graph.add("basis"), graph.add("basis-add")
+    graph.set(data, "n", 1)
+    graph.set(basis, "files", [str(challenge2016.BASIS)])
+    graph.connect(basis, "basis", add, "basis")
+    graph.connect(data, "water", add, "spectrum")
+    graph.set(add, "name", "W")
+
+    assert graph.run()
+    assert graph.output(add).names[-1] == "W" and len(graph.output(add).names) == 22
+    assert "io.add_to_basis(basis, ismrm2016_water, name='W')" in graph.script()
+    fit = graph.add("lcm-fit")
+    graph.connect(add, "basis", fit, "basis")                   # a basis port takes it
+
+
 #***********#
 #   files   #
 #***********#
@@ -692,8 +714,8 @@ def test_a_call_blocks_line_fits_its_function(key):
     for f in b.fields:
         graph.set(id, f.name, f.choices[0] if f.choices else 1)
     for p in b.inputs:
-        key, output = {blocks.RESULTS: ("lcm-fit", "out"),
-                       blocks.BASIS: ("basis", "basis")}.get(p.kind, ("ismrm2016", "truth"))
+        key, output = {blocks.RESULTS: ("lcm-fit", "out"), blocks.BASIS: ("basis", "basis"),
+                       blocks.SPECTRA: ("ismrm2016", "spectra")}.get(p.kind, ("ismrm2016", "truth"))
         graph.connect(graph.add(key), output, id, p.name)
 
     call = ast.parse(graph.code(id)[0]).body[0].value

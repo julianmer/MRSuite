@@ -235,6 +235,35 @@ def test_a_basis_sets_basis_file_is_written_once_and_another_gets_its_own():
     assert io.basis(samples("JMRUI", "NAA.txt")).lcmodel() != path
 
 
+#***********#
+#   added   #
+#***********#
+def test_a_measured_spectrum_becomes_a_basis_function_on_the_basis_own_axis():
+    """Measured at twice the bandwidth and points, its peak lands where it was; one with
+    coils or averages left is refused."""
+    from nifti_mrs.create_nmrs import gen_nifti_mrs
+    from nifti_mrs_plus import NIfTI_MRS_Plus
+    from mrsuite.core.basis import Basis, added
+
+    sf, t = 123.2, np.arange(2048) / 4000
+    naa = np.exp(2j * np.pi * (2.01 - 4.65) * sf * t - t / 0.05)
+    basis = Basis(["NAA"], naa[None], 4000.0, sf)
+    t2 = np.arange(4096) / 8000
+    mm = np.exp(2j * np.pi * (0.9 - 4.65) * sf * t2 - t2 / 0.02).reshape(1, 1, 1, -1)
+    measured = gen_nifti_mrs(mm, 1 / 8000, sf)
+
+    out = added(basis, NIfTI_MRS_Plus([measured]), "MM")
+
+    assert out.names == ["NAA", "MM"] and out.fids.shape == (2, 2048)
+    assert peak(out, "MM") == pytest.approx(0.9, abs=0.01) and peak(out, "NAA") == \
+        pytest.approx(2.01, abs=0.01)
+    assert out.source["added"][0]["name"] == "MM" and "nifti_mrs" in out.source["added"][0]
+    assert out.checksum() != basis.checksum() and basis.names == ["NAA"]
+    with pytest.raises(ValueError, match="one spectrum, coil combined"):
+        added(basis, gen_nifti_mrs(np.stack([mm[..., 0, :]] * 2, -1).reshape(1, 1, 1, -1, 2),
+                                   1 / 8000, sf, dim_tags=["DIM_COIL", None, None]))
+
+
 #***************#
 #   nifti-mrs   #
 #***************#
@@ -338,11 +367,11 @@ def test_what_the_files_do_not_state_is_asked_for_and_taken_as_given():
     with pytest.raises(RuntimeError, match=r"do not state sw or sf: give sw=, sf=$"):
         io.basis(raw)
     basis = io.basis(raw, sw=4000, sf=123.2, te=30)
-    fsl = io.basis(samples("FSL-MRS", "*.json"), sf=123.2)            # no sf
+    fsl = io.basis(samples("FSL-MRS", "*.json"))          # basis_centre is sf, in MHz
 
     assert (basis.bandwidth, basis.frequency, basis.te) == (4000, 123.2, 30)
     assert " HZPPPM = 123.200000," in basis.lcmodel().read_text()
-    assert fsl.frequency == 123.2
+    assert fsl.frequency == 123.261803 and fsl.centre is None
 
 
 #************#

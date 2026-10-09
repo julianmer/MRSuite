@@ -27,7 +27,7 @@ from pathlib import Path
 # name -> (git url, commit), as the checkout's submodules pin them (a test holds them equal)
 REGISTRY = {
     "basic": ("https://github.com/julianmer/BasiC.git",
-              "07aec21485214e47ad947174bf6106e605bd049e"),
+              "3d7ae2ecb9d3918582d5cba7e7576c07b6494de6"),
     "fid-a": ("https://github.com/CIC-methods/FID-A.git",
               "1eaa2075625745beb7632f608dc2947b73295309"),
     "mrs-sim": ("https://github.com/JohnLaMaster/MRS-Sim.git",

@@ -16,6 +16,10 @@
 #*************#
 #   imports   #
 #*************#
+import numpy as np
+import pytest
+
+from mrsuite.octave import shim_path
 from tests.conftest import needs_octave
 from tests.octave.conftest import run_octave
 
@@ -151,3 +155,123 @@ def test_nlinfit_covariance_is_usable_under_noise():
     assert abs(out["centre"] - 0.35) < 4 * out["se"]    # within four standard errors
     assert 0 < out["mse"] < 1e-2                        # close to the 4e-4 noise variance
     assert out["sepos"] and out["rshape"]
+
+
+#**************#
+#   fftshift   #
+#**************#
+def test_fftshift_is_octaves_own_bit_for_bit():
+    """The shim exists for speed, so it is held to Octave's own fftshift exactly, in every
+    call form Osprey uses: a matrix along dim 1, both axes, row and column vectors, 3-D."""
+    out = run_octave(f"""
+        shims = '{shim_path()}';
+        m = complex(reshape(1:4001*5, 4001, 5), -reshape(1:4001*5, 4001, 5) / 3);
+        x = reshape(1:2*3*5, 2, 3, 5); v = 1:7;
+        cases = {{ {{m, 1}}, {{m, 2}}, {{m}}, {{m(:, 1)}}, {{v}}, {{v.'}}, ...
+                  {{x, 1}}, {{x, 3}}, {{x}} }};
+        same = true;
+        for c = 1:numel(cases)
+            a = fftshift(cases{{c}}{{:}});
+            rmpath(shims); b = fftshift(cases{{c}}{{:}}); addpath(shims);
+            same = same && isequal(a, b) && isequal(size(a), size(b)) ...
+                   && strcmp(class(a), class(b)) && iscomplex(a) == iscomplex(b);
+        end
+        out = struct('same', same, 'shim', strcmp(fileparts(which('fftshift')), shims));
+    """)
+
+    assert out["shim"], "the shim must be the fftshift Octave resolves"
+    assert out["same"]
+
+
+#*********************#
+#   fftshift errors   #
+#*********************#
+def test_fftshift_refuses_what_octaves_own_refuses():
+    """Same errors, so a call Octave would stop on is not quietly run by the shim."""
+    out = run_octave(f"""
+        shims = '{shim_path()}';
+        cases = {{ {{{{1, 2, 3}}}}, {{struct('a', 1)}}, {{magic(4), 0}}, {{magic(4), 1.5}}, ...
+                  {{magic(4), [1 2]}}, {{magic(4), 3}}, {{1:5, 3}} }};
+        same = true;
+        for c = 1:numel(cases)
+            a = ''; b = '';
+            try, fftshift(cases{{c}}{{:}}); catch err, a = err.message; end
+            rmpath(shims);
+            try, fftshift(cases{{c}}{{:}}); catch err, b = err.message; end
+            addpath(shims);
+            same = same && ~isempty(b) && strcmp(a, b);
+        end
+        out = struct('same', same);
+    """)
+
+    assert out["same"]
+
+
+#**************#
+#   padarray   #
+#**************#
+# (Octave arguments, numpy's pad widths per dimension, constant): op_zeropad's form first
+PADS = [("m, 3, 'post'", [(0, 3), (0, 0)], 0), ("m, [1 2]", [(1, 1), (2, 2)], 0),
+        ("m, [2 1], 'pre'", [(2, 0), (1, 0)], 0), ("m, [1 1], 5, 'post'", [(0, 1), (0, 1)], 5),
+        ("m, [1 1], 'post', 5", [(0, 1), (0, 1)], 5), ("m, [1 0 1]", [(1, 1), (0, 0), (1, 1)], 0),
+        ("x, [0 0 2]", [(0, 0), (0, 0), (2, 2)], 0),
+        ("v, [0 2], 'zeros', 'pre'", [(0, 0), (2, 0)], 0), ("m, 0", [(0, 0), (0, 0)], 0)]
+
+
+def test_padarray_pads_as_numpy_does():
+    """Held to numpy's constant pad in every call form, with no reference engine."""
+    out = run_octave(f"""
+        m = complex(reshape(1:12, 4, 3), -reshape(12:-1:1, 4, 3));
+        x = reshape(1:12, 2, 3, 2); v = 1:4;
+        calls = {{ {', '.join('@() padarray(' + call + ')' for call, _, _ in PADS)} }};
+        for c = 1:numel(calls)
+            b = calls{{c}}();
+            got{{c}} = struct('size', size(b), 're', real(b(:)).', 'im', imag(b(:)).');
+        end
+        out = struct('got', {{got}}, 'int', strcmp(class(padarray(int16(v), 1)), 'int16'), ...
+                     'shim', strcmp(fileparts(which('padarray')), '{shim_path()}'));
+    """)
+    m = (np.arange(1, 13).reshape(4, 3, order="F")
+         - 1j * np.arange(12, 0, -1).reshape(4, 3, order="F"))
+    inputs = {"m": m, "x": np.arange(1, 13).reshape(2, 3, 2, order="F"),
+              "v": np.arange(1, 5).reshape(1, 4)}
+
+    assert out["shim"], "the shim must be the padarray Octave resolves"
+    assert out["int"], "the class is kept"
+    for (call, widths, value), got in zip(PADS, out["got"]):
+        a = inputs[call[0]]
+        a = a.reshape(a.shape + (1,) * (len(widths) - a.ndim))
+        want = np.pad(a, widths, constant_values=value)
+        assert list(want.shape) == got["size"], call
+        assert np.array_equal(np.ravel(want, order="F"),
+                              np.array(got["re"]) + 1j * np.array(got["im"])), call
+
+
+def test_padarray_is_the_image_packages_own_where_it_is_installed():
+    """Where Octave's image package is installed, the shim gives what its padarray gives,
+    bit for bit, and refuses what it cannot do instead of padding wrongly."""
+    out = run_octave(f"""
+        shims = '{shim_path()}';
+        out = struct('have', true);
+        try, pkg load image; catch, out.have = false; end
+        if out.have
+            m = complex(reshape(1:4001*2, 4001, 2), 1 ./ reshape(1:4001*2, 4001, 2));
+            cases = {{ {{m, 4001, 'post'}}, {{m, [3 2]}}, {{m, [1 0 2], -1, 'pre'}}, ...
+                      {{int8(magic(3)), [1 1], 'both', 7}}, {{single(1:5), [0 3], 'zeros'}} }};
+            same = true;
+            for c = 1:numel(cases)
+                a = padarray(cases{{c}}{{:}});
+                rmpath(shims); b = padarray(cases{{c}}{{:}}); addpath(shims);
+                same = same && isequal(a, b) && isequal(size(a), size(b)) ...
+                       && strcmp(class(a), class(b)) && iscomplex(a) == iscomplex(b);
+            end
+            refused = false;
+            try, padarray(m, 2, 'symmetric'); catch, refused = true; end
+            out = struct('have', true, 'same', same, 'refused', refused);
+        end
+    """)
+    if not out["have"]:
+        pytest.skip("Octave's image package is not installed here")
+
+    assert out["same"]
+    assert out["refused"], "a pattern pad is refused, not done as a constant one"

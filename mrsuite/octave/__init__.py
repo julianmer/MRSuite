@@ -25,6 +25,7 @@ import tempfile
 from functools import lru_cache
 from typing import Optional
 
+from octave_kernel.kernel import STDIN_PROMPT
 from oct2py import Oct2Py
 
 from mrsuite.octave import docker, matlab
@@ -47,13 +48,42 @@ def shim_path() -> str:
 
 
 #**************************************************************************************************#
+#                                         Class Unprompted                                         #
+#**************************************************************************************************#
+#                                                                                                  #
+# An Oct2Py session in which a toolbox asking for input fails at once.                             #
+#                                                                                                  #
+#**************************************************************************************************#
+class Unprompted(Oct2Py):
+    """An Oct2Py session in which a toolbox asking for input fails at once.
+
+    oct2py answers Octave's ``input(...)`` with Python's ``input()``, which reads the
+    terminal: a call MRSuite makes, from the GUI or a script, would wait there for good.
+    FID-A asks so where an argument is left out (op_ecc, op_autophase on edited data).
+    The answer is an Octave error, so the function stops inside Octave and the session
+    is free for the next call (raising in Python instead left Octave waiting, and the
+    next call was read as the answer).
+
+    Overrides oct2py's private ``_handle_stdin``, the one path such a prompt takes.
+    """
+
+    #******************#
+    #   handle stdin   #
+    #******************#
+    def _handle_stdin(self, line: str) -> str:
+        asked = line.replace(STDIN_PROMPT, "").strip().replace("'", "''")
+        return (f"error('MRSuite:prompt', 'Octave asked for input (%s): MRSuite cannot "
+                f"answer it; give the argument the function asks about', '{asked}')")
+
+
+#**************************************************************************************************#
 #                                     Class FreshExchange                                          #
 #**************************************************************************************************#
 #                                                                                                  #
 # An Oct2Py session that passes each call through files Octave has not seen before.                #
 #                                                                                                  #
 #**************************************************************************************************#
-class FreshExchange(Oct2Py):
+class FreshExchange(Unprompted):
     """An Oct2Py session that passes each call through files Octave has not seen before.
 
     oct2py hands every call over in writer.mat, rewriting one open file in place. A local
@@ -191,7 +221,7 @@ def session(root: str, runtime: Optional[str] = None, verbose: bool = False) -> 
             else:
                 os.environ["OCTAVE_EXECUTABLE"] = previous
     else:
-        oc = Oct2Py()
+        oc = Unprompted()
 
     if not verbose:
         oc.eval("warning('off', 'all');")

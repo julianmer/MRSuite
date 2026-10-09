@@ -15,6 +15,8 @@
 #*************#
 #   imports   #
 #*************#
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -85,3 +87,29 @@ def test_a_study_loads_role_by_role_in_group_order(study, spectrum):
 def test_a_folder_without_spectra_says_so(tmp_path):
     with pytest.raises(ValueError, match="no MRS files found"):
         collect.load(tmp_path)
+
+
+#**********#
+#   cows   #
+#**********#
+COWS = Path(__file__).resolve().parents[1] / "data" / "openneuro_ds006812" / "sub-01" / "mrs" \
+    / "sourcedata"
+
+
+@pytest.mark.skipif(not (COWS / "sub-01_acq-01_svs_slaser_vapor7_metab_PFL.dat").exists(),
+                    reason="COWS raw data not fetched (git annex get)")
+def test_a_cows_subjects_twix_files_load_by_their_roles():
+    """Siemens Twix through spec2nii, metabolite and macromolecule acquisitions apart."""
+    entries = [e for e in collect.discover(COWS) if "acq-01_" in e.group or "acq-02_" in e.group]
+    assert [e.role for e in entries] == ["svs", "mm"] and all(e.format == "twix" for e in entries)
+
+    out = collect.load(entries)
+
+    assert list(out) == ["svs", "mm"]
+    svs, mm = out["svs"].list()[0], out["mm"].list()[0]
+    # the README's 2048 points at 4000 Hz, kept oversampled twice as Siemens stores them,
+    # 32 coils, 32 averages and a loop of 2 spec2nii cannot name, as acquired
+    assert svs.shape == mm.shape == (1, 1, 1, 4096, 32, 32, 2)
+    assert svs.dim_tags == ["DIM_COIL", "DIM_DYN", "DIM_USER_0"]
+    assert svs.dwelltime == pytest.approx(125e-6) and svs.spectrometer_frequency[0] == \
+        pytest.approx(123.26, abs=0.01)

@@ -186,7 +186,9 @@ def load(what: Union[str, Path, List[Entry]], roles: Optional[Dict[str, str]] = 
         if e.format == "nifti":
             found.setdefault(e.role, []).extend(io.read(e.path).list())
             continue
-        for name, value in io.load(e.path, format=e.format).items():
+        # Twix: the image data, as spec2nii's own auto mode takes it (evalinfo 'image')
+        options = {"evalinfo": "image"} if e.format == "twix" else {}
+        for name, value in io.load(e.path, format=e.format, **options).items():
             if not isinstance(value, NIfTI_MRS_Plus):     # an image, e.g. DICOM's voi
                 continue
             words = set(re.split(r"[^a-z0-9]+", name.lower()))

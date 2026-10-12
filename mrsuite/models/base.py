@@ -283,8 +283,8 @@ class Model(Method, ModelHubMixin, **HUB):
     #   learn   #
     #***********#
     def learn(self, source: Any, steps: int, objective: Optional[str] = None, batch: int = 16,
-              lr: float = 1e-4, every: Optional[int] = None, to: Optional[str] = None
-              ) -> List[float]:
+              lr: float = 1e-4, every: Optional[int] = None, to: Optional[str] = None,
+              resume: Optional[str] = None) -> List[float]:
         """
         Learn from a source of spectra and their truth, in one Keras loop for every framework.
 
@@ -304,7 +304,10 @@ class Model(Method, ModelHubMixin, **HUB):
                 ``steps``. All of them by default.
             to (Optional[str]): Folder to save a checkpoint to every ``every`` steps, as
                 ``step-<n>``, each loadable with ``from_pretrained`` or
-                ``mrsuite.models.load``, and each with its recipe.
+                ``mrsuite.models.load``, and each with its recipe and Adam's state. ``n``
+                counts every step the weights took, those they were loaded with included.
+            resume (Optional[str]): A checkpoint this model was loaded from, whose Adam
+                state - its moments and step count - learning continues from, at ``lr``.
 
         The model's ``recipe`` becomes the source's (see ``Source.recipe``) with the
         training stated: objective, steps, batch, learning rate, and what the weights
@@ -330,7 +333,7 @@ class Model(Method, ModelHubMixin, **HUB):
             raise ValueError(f"{type(self).__name__} takes single spectra; the source gives "
                              f"{[t for t in source.dim_tags if t]} too")
         self._compare(source.acquisition)
-        return learn(self, source, steps, objective, batch, lr, every, to)
+        return learn(self, source, steps, objective, batch, lr, every, to, resume)
 
     #*************#
     #   version   #

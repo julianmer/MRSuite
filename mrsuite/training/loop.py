@@ -20,15 +20,21 @@
 import copy
 import os
 import queue
+import shutil
 import sys
 import threading
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
+
+from safetensors.numpy import load_file, save_file
 
 from mrsuite.models.base import classpath
 
 # batches prepared ahead of the one being learned from
 AHEAD = 16
+
+# Adam's state beside each checkpoint's weights, so learning resumes where it stopped
+OPTIMIZER = "optimizer.safetensors"
 
 
 #**************#
@@ -61,7 +67,7 @@ def keras_on(backend: str) -> Any:
 #   learn   #
 #***********#
 def learn(model: Any, source: Any, steps: int, objective: str, batch: int, lr: float,
-          every: Optional[int], to: Optional[str]) -> List[float]:
+          every: Optional[int], to: Optional[str], resume: Optional[str] = None) -> List[float]:
     """
     Train ``model`` on batches from ``source``; see Model.learn.
 
@@ -79,6 +85,7 @@ def learn(model: Any, source: Any, steps: int, objective: str, batch: int, lr: f
     training = {"model": classpath(type(model)), "objective": objective, "steps": 0,
                 "batch": batch, "learning_rate": lr,
                 "from": before if any(before.values()) else None}
+    start = learned(before["training"])         # checkpoints count every step the weights took
 
     class Stream(keras.utils.PyDataset):
         """Endless batches, prepared as the model prepares real data, by one thread of
@@ -125,11 +132,46 @@ def learn(model: Any, source: Any, steps: int, objective: str, batch: int, lr: f
 
         def on_epoch_end(self, epoch, logs=None):
             if to:
-                model.save_pretrained(Path(to) / f"step-{training['steps']}")
+                folder = Path(to) / f"step-{start + training['steps']}"
+                writing = folder.with_name(folder.name + ".partial")    # step-<n> only whole
+                model.save_pretrained(writing)
+                state = {}
+                trainable.optimizer.save_own_variables(state)
+                save_file(state, str(writing / OPTIMIZER))
+                shutil.rmtree(folder, ignore_errors=True)
+                os.replace(writing, folder)
 
     trainable = model.as_keras(keras)
     trainable.compile(optimizer=keras.optimizers.Adam(learning_rate=lr),
                       loss=lambda target, out: model.loss(target, out, objective))
+    if resume:
+        state = load_file(str(Path(resume) / OPTIMIZER))
+        trainable.optimizer.build(trainable.trainable_variables)
+        if len(state) != len(trainable.optimizer.variables):
+            raise ValueError(f"{resume} holds {len(state)} optimizer variables, Adam on "
+                             f"{type(model).__name__} has {len(trainable.optimizer.variables)}")
+        trainable.optimizer.load_own_variables(state)
+        trainable.optimizer.learning_rate = lr          # the rate given, not the one saved
     history = trainable.fit(Stream(), steps_per_epoch=every, epochs=steps // every,
                             shuffle=False, callbacks=[Keep()])
     return history.history["loss"]
+
+
+#*************#
+#   learned   #
+#*************#
+def learned(training: Optional[Dict[str, Any]]) -> int:
+    """Steps the weights took in total: a training's own and those of what it started from;
+    a converted checkpoint's training states none (see mrsuite.models.convert)."""
+    if not training:
+        return 0
+    return training.get("steps", 0) + learned((training.get("from") or {}).get("training"))
+
+
+#*********************#
+#   last checkpoint   #
+#*********************#
+def last_checkpoint(folder: Any) -> Path:
+    """The checkpoint learning wrote last into ``folder``, by its step count."""
+    steps = [path for path in Path(folder).glob("step-*") if path.name[len("step-"):].isdigit()]
+    return max(steps, key=lambda path: int(path.name[len("step-"):]))

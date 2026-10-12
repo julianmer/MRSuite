@@ -12,9 +12,11 @@
 #          its water and lipids as a component of their own, to take out before fitting. Settings  #
 #          as the published runs (batch 16, Adam 1e-4, the steps of their checkpoints, their       #
 #          losses as far as MRS-Sim's truth carries them; see MODELS); each run writes loadable    #
-#          checkpoints with their recipe.json to data/runs/<name>.                                 #
+#          checkpoints with their recipe.json and Adam's state to data/runs/<name>; --resume       #
+#          learns on from the run's last checkpoint.                                               #
 #                                                                                                  #
 #          Usage: python scripts/train/challenge_models.py <name> [--steps N] [--ahead K]          #
+#                 [--resume]                                                                       #
 #                                                                                                  #
 ####################################################################################################
 
@@ -31,10 +33,12 @@ from typing import Any, Dict, Optional, Sequence, Tuple
 import numpy as np
 import torch
 
+from mrsuite import models
 from mrsuite.datasets import challenge2016, mrsi_challenge
 from mrsuite.models import MLP, WAND
 from mrsuite.simulators import mrs_sim
 from mrsuite.training import Source
+from mrsuite.training.loop import OPTIMIZER, last_checkpoint
 
 RUNS = Path(__file__).resolve().parents[2] / "data" / "runs"
 
@@ -202,15 +206,17 @@ def config(challenge: str, model: str, voxels: int = 2000) -> Dict[str, Any]:
 #***********#
 def train(name: str, steps: Optional[int] = None, every: Optional[int] = None,
           to: Path = RUNS, batch: int = BATCH, seed: int = 0, chunk: Optional[int] = None,
-          ahead: int = 0, voxels: int = 2000, subjects: Sequence[str] = SUBJECTS) -> Any:
+          ahead: int = 0, voxels: int = 2000, subjects: Sequence[str] = SUBJECTS,
+          resume: bool = False) -> Any:
     """
-    Train one of MODELS from scratch, saving to ``to / name`` every ``every`` steps.
+    Train one of MODELS from scratch, or on from its run's last checkpoint, saving to
+    ``to / name`` every ``every`` steps.
 
     Args:
         name (str): One of MODELS.
-        steps (Optional[int]): The published run's by default.
-        every (Optional[int]): Steps between checkpoints; a sixteenth of the run by default,
-            or the whole run where a sixteenth does not divide it.
+        steps (Optional[int]): Steps to learn; the published run's by default.
+        every (Optional[int]): Steps between checkpoints; a sixteenth of the published run
+            by default, or all the steps where that does not divide them.
         to (Path): Where the run's folder goes.
         batch (int): Spectra per step.
         seed (int): Seeds the training data and the initial weights.
@@ -218,29 +224,38 @@ def train(name: str, steps: Optional[int] = None, every: Optional[int] = None,
         ahead (int): MRS-Sim chunks simulated in the background (see mrs_sim.Source).
         voxels (int): Brain voxels the MRSI config's ranges are read from.
         subjects (Sequence[str]): Whose water and lipids WAND learns, on the MRSI challenge.
+        resume (bool): Learn on from the run's last checkpoint, with Adam's state where it
+            was saved with one (runs before it was saved start Adam afresh), on spectra
+            seeded past ``seed`` by the steps already taken, so none are seen again.
 
     Returns:
-        The trained model, as also saved in ``to / name / step-<steps>``.
+        The trained model, as also saved in ``to / name / step-<steps taken>``.
     """
     challenge, kind, objective, published = MODELS[name]
     steps = steps or published
     simulation = config(challenge, kind, voxels)
-    sixteenth = max(steps // 16, 1)
+    sixteenth = max(published // 16, 1)
     every = every or (sixteenth if steps % sixteenth == 0 else steps)
-    simulator = mrs_sim.Source(simulation, seed=seed, chunk=chunk or CHUNK[challenge],
+    checkpoint = last_checkpoint(Path(to) / name) if resume else None
+    start = int(checkpoint.name[len("step-"):]) if checkpoint else 0
+    simulator = mrs_sim.Source(simulation, seed=seed + start, chunk=chunk or CHUNK[challenge],
                                components=kind == "wand", ahead=ahead)
     try:
         data = simulator
         first, last = window(data.acquisition, *WINDOW[kind])
         torch.manual_seed(seed)                 # the initial weights, so a run replays
-        if kind == "mlp":
+        if kind == "wand":
+            data = Nuisance(data, subjects, seed + start)
+        if checkpoint:
+            model = models.load(str(checkpoint))
+        elif kind == "mlp":
             model = MLP(simulation["metabolites"], first, last, data.acquisition)
         else:
-            data = Nuisance(data, subjects, seed)
             model = WAND(simulation["metabolites"], first, last, data.acquisition,
                          nuisance=["nuisance"])
+        state = checkpoint if checkpoint and (checkpoint / OPTIMIZER).exists() else None
         model.learn(data, steps=steps, objective=objective, batch=batch, lr=LR, every=every,
-                    to=str(Path(to) / name))
+                    to=str(Path(to) / name), resume=str(state) if state else None)
     finally:
         simulator.close()                       # no chunks simulated for nobody
     return model
@@ -258,9 +273,11 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--ahead", type=int, default=0,
                         help="MRS-Sim chunks simulated in the background, in parallel")
+    parser.add_argument("--resume", action="store_true",
+                        help="learn on from the run's last checkpoint")
     args = parser.parse_args()
     # deterministic kernels, so a run on a GPU replays bit for bit (about 5% slower)
     os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
     torch.use_deterministic_algorithms(True)
     train(args.name, steps=args.steps, every=args.every, to=args.to, seed=args.seed,
-          ahead=args.ahead)
+          ahead=args.ahead, resume=args.resume)

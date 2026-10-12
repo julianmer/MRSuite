@@ -24,11 +24,14 @@ import json
 
 import numpy as np
 import pytest
+from safetensors.numpy import load_file
 
 from nifti_mrs_plus import NIfTI_MRS_Plus
 from mrsuite.models import MLP, WAND
 from mrsuite.models.base import spectra
 from mrsuite.training import Source, Truth
+from mrsuite.training import loop
+from mrsuite.training.loop import OPTIMIZER, last_checkpoint
 
 from tests.models.test_models import (MLP_ACQUISITION, MLP_METABOLITES, WAND_ACQUISITION,
                                       WAND_METABOLITES)
@@ -192,6 +195,55 @@ def test_a_model_learns_in_place(tmp_path):
     assert first["from"] == {"source": {"name": "step-150", "revision": None},
                              "training": recipe["training"]}
     assert tuned.source is None             # the weights are no longer the ones loaded
+
+
+def test_learning_resumes_with_adams_state_and_counts_on(tmp_path):
+    source = ToySource(MLP_METABOLITES, MLP_ACQUISITION)
+    MLP(MLP_METABOLITES, 602, 957, MLP_ACQUISITION).learn(source, steps=20, every=10, lr=1e-3,
+                                                          to=str(tmp_path))
+    resumed = MLP.from_pretrained(tmp_path / "step-20")
+    resumed.learn(source, steps=10, lr=1e-4, to=str(tmp_path), resume=str(tmp_path / "step-20"))
+
+    def scalars(step):          # Adam's step count (an integer) and its learning rate
+        state = load_file(str(tmp_path / step / OPTIMIZER))
+        return {v.dtype.kind: v.item() for v in state.values() if v.ndim == 0}
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["step-10", "step-20", "step-30"]
+    assert scalars("step-20")["i"] == 20 and scalars("step-30")["i"] == 30
+    assert scalars("step-30")["f"] == pytest.approx(1e-4)
+
+
+def test_a_checkpoint_is_there_only_once_written_whole(tmp_path, monkeypatch):
+    source = ToySource(MLP_METABOLITES, MLP_ACQUISITION)
+
+    def learn():
+        MLP(MLP_METABOLITES, 602, 957, MLP_ACQUISITION).learn(source, steps=2, every=2,
+                                                              to=str(tmp_path))
+
+    def stopped(*args):                     # learning stops between the weights and Adam's state
+        raise RuntimeError("stopped")
+    monkeypatch.setattr(loop, "save_file", stopped)
+    with pytest.raises(RuntimeError, match="stopped"):
+        learn()
+    assert [p.name for p in tmp_path.iterdir()] == ["step-2.partial"]
+
+    monkeypatch.undo()
+    learn()
+    learn()                                 # a new training into the same folder replaces it
+    assert [p.name for p in tmp_path.iterdir()] == ["step-2"]
+    assert (tmp_path / "step-2" / OPTIMIZER).exists()
+
+
+def test_the_last_checkpoint_is_the_highest_step_written_whole(tmp_path):
+    for name in ("step-10", "step-200", "step-30", "step-400.partial"):
+        (tmp_path / name).mkdir()
+    assert last_checkpoint(tmp_path) == tmp_path / "step-200"
+
+
+def test_a_converted_model_learns_on_from_step_zero(tmp_path):
+    mlp = MLP(MLP_METABOLITES, 602, 957, MLP_ACQUISITION)
+    mlp.recipe = {"training": {"model": "mrsuite.models.mlp.MLP", "checkpoint": {}}}  # as convert
+    mlp.learn(ToySource(MLP_METABOLITES, MLP_ACQUISITION), steps=4, every=2, to=str(tmp_path))
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["step-2", "step-4"]
 
 
 #***********************#

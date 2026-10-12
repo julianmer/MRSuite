@@ -27,10 +27,14 @@ from mrsvalidate.analysis import agreement
 from nifti_mrs_plus import NIfTI_MRS_Plus
 from mrsuite.benchmark import bias, mae
 from mrsuite.bridges import fsl_mrs, lcmodel, osprey, pyamares, spant, tarquin, vespa
+from mrsuite.core.method import method
+from mrsuite.core.provenance import mrsuite_version
 from mrsuite.datasets import challenge2016, mrsi_challenge
+from mrsuite.training.loop import last_checkpoint
 
 MRSI_BASIS = Path(mrsi_challenge.DATA_DIR).parent / "basis_sets" / "mrsi_challenge_2024.BASIS"
 WAND = "MRSuite/wand-ismrm2016"
+RUNS = Path(__file__).resolve().parents[2] / "data" / "runs"      # scripts/train writes them
 
 
 #**************************************************************************************************#
@@ -142,6 +146,44 @@ def wand(data: NIfTI_MRS_Plus) -> NIfTI_MRS_Plus:
     return _wand()(data, remove=["artifacts"])
 
 
+#***********#
+#   model   #
+#***********#
+@lru_cache(maxsize=None)
+def _model(checkpoint: str) -> Any:
+    """A model trained here, loaded once per checkpoint."""
+    from mrsuite import models
+    return models.load(checkpoint)
+
+
+#*************#
+#   weights   #
+#*************#
+@lru_cache(maxsize=None)
+def weights(name: str) -> str:
+    """The weights of a training run's last checkpoint when first asked, so one session
+    scores one checkpoint while training writes on; a job records them by SHA-256, so
+    results of other weights are never resumed into."""
+    return str(last_checkpoint(RUNS / name) / "model.safetensors")
+
+
+#*************#
+#   trained   #
+#*************#
+@method("MRSuite", version=mrsuite_version, batched=True)
+def trained(data: NIfTI_MRS_Plus, weights: str) -> List[Any]:
+    """A model trained here (scripts/train), by its checkpoint's weights, on the batch."""
+    return _model(str(Path(weights).parent)).run(data)
+
+
+#***************#
+#   wand mrsi   #
+#***************#
+def wand_mrsi(data: NIfTI_MRS_Plus) -> NIfTI_MRS_Plus:
+    """WAND trained here on the MRSI challenge removing its water and lipids."""
+    return _model(str(Path(weights("wand-mrsi2024")).parent))(data, remove=["nuisance"])
+
+
 #*************#
 #   methods   #
 #*************#
@@ -164,20 +206,46 @@ METHODS["pyamares"] = Fit(pyamares.fit, args=lambda dataset: (challenge2016.pyam
                                                         "ftol": 1e-6}}}, chunk=1)
 METHODS.update({f"wand-{name}": replace(entry, before=(wand,))
                 for name, entry in list(METHODS.items())})
+# the models trained here (scripts/train), each by its run's last checkpoint, and fitters
+# after the WAND trained on the MRSI challenge
+TRAINED = {name: Fit(trained, args=lambda dataset, name=name: (weights(name),), chunk=1000)
+           for name in ("mlp-supervised-ismrm2016", "mlp-selfsupervised-ismrm2016",
+                        "mlp-supervised-mrsi2024", "mlp-selfsupervised-mrsi2024")}
+TRAINED.update({f"wand-mrsi2024-{name}": replace(METHODS[name], before=(wand_mrsi,))
+                for name in ("lcmodel", "fsl_mrs")})
+METHODS.update(TRAINED)
 
 
 #************#
 #   stages   #
 #************#
-SUBJECTS = ("TestSub10", "TestSub11", "TestSub12")
+SUBJECTS = ("TestSub10", "TestSub11", "TestSub12")              # track 2: no water, no lipids
+TRACK1 = ("TestSub1", "TestSub2", "TestSub3", "TestSub4", "TestSub5")    # with water and lipids
 OSPREY_VOXELS = 100
+MODEL_VOXELS = 1000
 
-DATASETS = {"challenge2016": challenge, **{s: partial(mrsi, s) for s in SUBJECTS}}
+# each subject as an evenly spread few voxels, for the trained models: WAND on CPU takes
+# ~0.2 s per voxel, and takes them all before a job's own subsample is drawn
+SAMPLED = {s: f"{s}-{MODEL_VOXELS}" for s in (*SUBJECTS, *TRACK1)}
+
+DATASETS = {"challenge2016": challenge, **{s: partial(mrsi, s) for s in SUBJECTS},
+            **{name: partial(mrsi, s, MODEL_VOXELS) for s, name in SAMPLED.items()}}
 
 STAGES = {
-    "2016": [Job("challenge2016", name) for name in METHODS],
+    "2016": [Job("challenge2016", name) for name in METHODS if name not in TRAINED],
     "mrsi": [Job(s, name) for s in SUBJECTS for name in ("fsl_mrs", "lcmodel", "tarquin", "spant")]
             + [Job(s, "osprey", spectra=OSPREY_VOXELS) for s in SUBJECTS],
+    # the trained models against the fitters on the same spectra
+    "models-2016": [Job("challenge2016", name) for name in
+                    ("lcmodel", "fsl_mrs", "mlp-supervised-ismrm2016",
+                     "mlp-selfsupervised-ismrm2016")],
+    "models-mrsi": [Job(SAMPLED[s], name) for s in SUBJECTS for name in
+                    ("lcmodel", "fsl_mrs", "mlp-supervised-mrsi2024", "mlp-selfsupervised-mrsi2024",
+                     "wand-mrsi2024-lcmodel", "wand-mrsi2024-fsl_mrs")],
+    # WAND where there is water and lipid to take out
+    "models-mrsi-track1": [Job(SAMPLED[s], name) for s in TRACK1 for name in
+                           ("lcmodel", "fsl_mrs", "wand-mrsi2024-lcmodel",
+                            "wand-mrsi2024-fsl_mrs")],
 }
 
 
@@ -187,5 +255,9 @@ STAGES = {
 # No default reference: water where the truth is in mM and the fits are water-scaled; on
 # MRSI, whose truth is on the basis' own scale, tCr, the optimal scale and none at all.
 REFERENCES = {"challenge2016": ("water", "tCr", "optimal"),
-              **{s: ("tCr", "optimal", "none") for s in SUBJECTS}}
+              **{s: ("tCr", "optimal", "none") for s in (*SUBJECTS, *SAMPLED.values())}}
+# the challenge's 24 brain-like datasets apart from its four tumour-like ones (lipids, lactate,
+# acetate), which no brain-like simulation covers
+SUBSETS = {"challenge2016": {"brain-like": [f"dataset{i}" for i in range(1, 25)],
+                             "tumour-like": [f"dataset{i}" for i in range(25, 29)]}}
 METRICS = {"mae": mae, "bias": bias, "lin_ccc": agreement.lin_ccc}

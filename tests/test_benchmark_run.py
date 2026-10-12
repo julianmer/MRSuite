@@ -156,6 +156,26 @@ def test_a_failed_spectrum_is_recorded_scored_as_omitted_and_retried(tmp_path):
 
 
 @needs_2016
+def test_a_named_group_of_spectra_is_scored_in_a_table_of_its_own(tmp_path):
+    _toy_run(tmp_path)
+    tables = score.score_run(tmp_path, {"challenge2016": ("optimal",)}, {"mae": mae},
+                             {"challenge2016": {"first": ["dataset1", "dataset2"]}})
+    assert sorted(tables) == ["challenge2016", "challenge2016-first"]
+    used = {name: t.query("metabolite == 'all'").iloc[0].n_used for name, t in tables.items()}
+    assert used == {"challenge2016": 9, "challenge2016-first": 6}      # 3 metabolites each
+
+
+@needs_2016
+def test_a_group_where_no_spectrum_was_fitted_is_left_out_and_the_others_scored(tmp_path):
+    data, _, _ = challenge2016.load(3)
+    BROKEN.update(float(abs(item[:].ravel()[0])) for item in data.list()[:2])
+    _toy_run(tmp_path)
+    tables = score.score_run(tmp_path, {"challenge2016": ("optimal",)}, {"mae": mae},
+                             {"challenge2016": {"first": ["dataset1", "dataset2"]}})
+    assert sorted(tables) == ["challenge2016"]
+
+
+@needs_2016
 def test_where_one_workers_part_fails_only_its_spectra_are_fitted_again(tmp_path, monkeypatch):
     data, _, _ = challenge2016.load(3)
     monkeypatch.setenv("MRSUITE_TEST_FAIL", str(float(abs(data.list()[1][:].ravel()[0]))))
@@ -307,9 +327,16 @@ def test_every_stage_names_what_the_config_defines():
         for job in jobs:
             assert job.dataset in config.DATASETS and job.method in config.METHODS
             assert job.dataset in config.REFERENCES
-    assert {j.method for j in config.STAGES["2016"]} == set(config.METHODS)
+    assert {j.method for j in config.STAGES["2016"]} == set(config.METHODS) - set(config.TRAINED)
     assert config.METHODS["wand-tarquin-water"].before == (config.wand,)
     assert config.METHODS["tarquin-water"].water == challenge2016.WATER["tarquin"]
+
+
+def test_a_trained_model_is_its_runs_last_checkpoint_by_step(tmp_path):
+    for step in (942208, 7537664, 471104):
+        (tmp_path / "run" / f"step-{step}").mkdir(parents=True)
+    with mock.patch.object(config, "RUNS", tmp_path):
+        assert config.weights("run") == str(tmp_path / "run" / "step-7537664" / "model.safetensors")
 
 
 #**************#

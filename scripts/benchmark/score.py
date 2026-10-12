@@ -42,7 +42,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parser.parse_args(argv)
 
     config = run.load_config(args.config)
-    for name, table in score_run(args.folder, config.REFERENCES, config.METRICS).items():
+    for name, table in score_run(args.folder, config.REFERENCES, config.METRICS,
+                                 config.SUBSETS).items():
         pooled = table[table.metabolite == "all"]
         print(f"\n{name}\n" + pooled[["method", "reference", "metric", "value", "rho_c",
                                        "n_used", "n_omitted"]].to_string(index=False))
@@ -53,7 +54,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 #   score run   #
 #***************#
 def score_run(folder: str, references: Dict[str, Sequence[str]],
-              metrics: Dict[str, Callable[..., Any]]) -> Dict[str, pd.DataFrame]:
+              metrics: Dict[str, Callable[..., Any]],
+              subsets: Optional[Dict[str, Dict[str, Sequence[str]]]] = None
+              ) -> Dict[str, pd.DataFrame]:
     """
     Every finished job of a run, scored dataset by dataset; written to ``scores/`` in the
     run folder, one table per dataset, with MRSValidate's own run beside them.
@@ -68,6 +71,9 @@ def score_run(folder: str, references: Dict[str, Sequence[str]],
         folder (str): The run folder.
         references (Dict[str, Sequence[str]]): Dataset to the references to score on.
         metrics (Dict[str, Callable[..., Any]]): As mrsuite.benchmark.score takes them.
+        subsets (Optional[Dict[str, Dict[str, Sequence[str]]]]): Dataset to named groups of
+            its spectrum IDs, each scored in a table of its own besides the whole,
+            as '<table>-<group>'.
 
     Returns:
         Dict[str, pd.DataFrame]: Table name to mrsuite.benchmark.score's table, all
@@ -90,12 +96,20 @@ def score_run(folder: str, references: Dict[str, Sequence[str]],
                 print(f"{data.name}/{job.name}: unfinished, not scored", flush=True)
 
         for ids in sorted({tuple(p) for p, _ in jobs.values()}, key=len, reverse=True):
-            methods = {name: [results.get(i) for i in ids]
-                       for name, (planned, results) in jobs.items() if set(ids) <= set(planned)}
             name = data.name if len(ids) == len(record["ids"]) else f"{data.name}-{len(ids)}"
-            tables[name] = _score(methods, [truth[i] for i in ids], list(ids),
-                                  references[data.name], metrics, out / "mrsvalidate")
-            tables[name].to_csv(out / f"{name}.csv", index=False)
+            groups = {name: list(ids)}
+            for group, members in (subsets or {}).get(data.name, {}).items():
+                groups[f"{name}-{group}"] = [i for i in ids if i in members]
+            for table, kept in groups.items():
+                methods = {m: [results.get(i) for i in kept]
+                           for m, (planned, results) in jobs.items()
+                           if set(ids) <= set(planned) and any(i in results for i in kept)}
+                if methods:
+                    tables[table] = _score(methods, [truth[i] for i in kept], kept,
+                                           references[data.name], metrics, out / "mrsvalidate")
+                    tables[table].to_csv(out / f"{table}.csv", index=False)
+                elif kept:
+                    print(f"{table}: no method fitted any spectrum, not scored", flush=True)
     return tables
 
 

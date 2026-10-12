@@ -17,13 +17,15 @@
 #*************#
 #   imports   #
 #*************#
+import os
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
 from nifti_mrs_plus import NIfTI_MRS_Plus
 from mrsuite.core import provenance
+from mrsuite.training import Source, Truth
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "mrsi_challenge"
 
@@ -58,6 +60,11 @@ TISSUE = {'asp': (3.70, 2.07, 200, 200), 'gaba': (1.86, 0.88, 200, 200),
 
 # The training subjects' noise SD per channel (the paper's Table 6).
 NOISE_SD = 1.0e-3
+
+# The release's 24 training subjects, as Augmentrum splits them: 19 to learn from, 5 to
+# validate on; the test subjects of both tracks stay apart.
+TRAIN = tuple(f'Sub{i}' for i in range(1, 20))
+VALIDATION = tuple(f'Sub{i}' for i in range(20, 25))
 
 
 #************#
@@ -136,6 +143,125 @@ def load(subject: str, signal: str = 'all', voxels: Optional[int] = None,
     data = NIfTI_MRS_Plus(spectra)
     truth = [dict(zip(NAMES.values(), map(float, aux['metaMap'][x, y, z]))) for x, y, z in index]
     return data, truth, index
+
+
+#**************************************************************************************************#
+#                                          Class Release                                           #
+#**************************************************************************************************#
+#                                                                                                  #
+# The release's own training subjects as a training source: brain voxels drawn at random.          #
+#                                                                                                  #
+#**************************************************************************************************#
+class Release(Source):
+    """The release's own training subjects as a training source: brain voxels drawn at random.
+
+    Each spectrum is one brain voxel of one of ``subjects``, drawn uniformly over all their
+    brain voxels, as the release simulated it: ``signal`` 'all' keeps its water and lipids
+    (as track 1), 'all-nuisance' takes them out (as track 2). The truth is the voxel's
+    metaMap, the amplitudes of the release's basis; with ``components`` also the voxel's
+    metabolites and, where the signal holds them, its water and lipids on their own
+    ('metabolites', 'nuisance'). The training subjects ship nothing else apart: their
+    macromolecules, baseline and noise are only in the sum.
+
+    Each subject's brain voxels are kept once per signal as a (voxels, points) array in
+    ``data_dir/_mrsuite_cache`` and read memory-mapped, so a batch reads its own voxels
+    alone and runs learning side by side share them.
+
+        source = mrsi_challenge.Release(mrsi_challenge.TRAIN, 'all-nuisance')
+        mlp.learn(source, steps=10_000, objective='scaled')
+
+    Args:
+        subjects (Sequence[str]): Training subjects to draw from; TRAIN by default.
+        signal (str): 'all' or 'all-nuisance'.
+        components (bool): Give the metabolites and nuisance on their own, as WAND learns
+            them.
+        seed (int): Seeds which voxels are drawn.
+        data_dir (Path): Where the release lives.
+    """
+
+    #**********#
+    #   init   #
+    #**********#
+    def __init__(self, subjects: Sequence[str] = TRAIN, signal: str = 'all',
+                 components: bool = False, seed: int = 0, data_dir: Path = DATA_DIR) -> None:
+        if signal not in ('all', 'all-nuisance'):
+            raise ValueError(f"signal is 'all' or 'all-nuisance', not {signal!r}")
+        self.subjects, self.signal, self.components = tuple(subjects), signal, components
+        self.seed, self.data_dir = seed, Path(data_dir)
+        self.rng = np.random.default_rng(seed)
+        module = _module(data_dir)
+        parts = [signal] + (['meta'] + (['nuisance'] if signal == 'all' else [])
+                            if components else [])
+        self._voxels = {part: [_brain(module, s, part, self.data_dir) for s in self.subjects]
+                        for part in parts}
+        aux = [module.read_aux(s, signal='meta') for s in self.subjects]
+        self._truth = [a['metaMap'][a['brainMask'] > 0] for a in aux]
+        self._doi = module.DOI
+        self._starts = np.cumsum([0] + [len(t) for t in self._truth])
+        acquisition = module.read_acquisition(self.subjects[0])
+        self.acquisition = {'points': acquisition['n_points'],
+                            'bandwidth': 1 / acquisition['dwell_time_s'],
+                            'frequency': acquisition['spectrometer_frequency_mhz'],
+                            'centre': acquisition['ppm_offset']}
+        self.dim_tags = []
+
+    #**********#
+    #   draw   #
+    #**********#
+    def draw(self, n: int) -> Tuple[np.ndarray, Truth]:
+        drawn = self.rng.integers(self._starts[-1], size=n)
+        subject = np.searchsorted(self._starts, drawn, side='right') - 1
+        voxel = drawn - self._starts[subject]
+        pick = lambda arrays: np.stack([arrays[s][v] for s, v in zip(subject, voxel)])
+        maps = pick(self._truth)
+        names = {'meta': 'metabolites', 'nuisance': 'nuisance'}
+        return pick(self._voxels[self.signal]), Truth(
+            concentrations={name: maps[:, i] for i, name in enumerate(NAMES.values())},
+            components={names[part]: pick(arrays) for part, arrays in self._voxels.items()
+                        if part in names})
+
+    #***********#
+    #   basis   #
+    #***********#
+    @property
+    def basis(self) -> Dict[str, np.ndarray]:
+        """The release's basis on the data's time points (see ``basis_fids``)."""
+        return basis_fids(self.subjects[0], self.data_dir)
+
+    #************#
+    #   ranges   #
+    #************#
+    @property
+    def ranges(self) -> Dict[str, Tuple[float, float]]:
+        """Each metabolite's lowest and highest amplitude over the subjects' brain voxels."""
+        maps = np.concatenate(self._truth)
+        return {name: (float(maps[:, i].min()), float(maps[:, i].max()))
+                for i, name in enumerate(NAMES.values())}
+
+    #************#
+    #   recipe   #
+    #************#
+    def recipe(self) -> Dict[str, Any]:
+        """What the spectra are: which subjects' brain voxels, of which signal."""
+        return {'generation': {'release': f'2024 MRSI challenge (doi:{self._doi})',
+                               'subjects': list(self.subjects), 'signal': self.signal,
+                               'voxels': int(self._starts[-1]), 'seed': self.seed}}
+
+
+#***********#
+#   brain   #
+#***********#
+def _brain(module: Any, subject: str, signal: str, data_dir: Path) -> np.ndarray:
+    """A subject's brain voxels of one signal as a (voxels, points) array, in the brain
+    mask's own order (as ``load`` indexes them), written once and read memory-mapped."""
+    path = data_dir / '_mrsuite_cache' / f'{subject}_{module.canonical_signal(signal)}.npy'
+    if not path.exists():
+        path.parent.mkdir(exist_ok=True)
+        mask = module.read_aux(subject, signal='meta')['brainMask'] > 0
+        writing = path.with_name(f'{path.stem}.{os.getpid()}.partial.npy')   # one per run
+        np.save(writing, module.load([subject], signal=signal)[0][0][:][mask])
+        os.replace(writing, path)
+    return np.load(path, mmap_mode='r')
 
 
 #***********#

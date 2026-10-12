@@ -146,6 +146,49 @@ def test_the_mrsi_truth_is_the_named_map_of_that_voxel():
             [float(named[tuple(i)]) for i in index], name
 
 
+#*************#
+#   release   #
+#*************#
+@needs_mrsi
+def test_the_release_keeps_the_loaders_voxels_in_its_order():
+    """What a model learns from is what it is tested on: the voxels load gives, as they are."""
+    module = mrsi_challenge._module(mrsi_challenge.DATA_DIR)
+    voxels = mrsi_challenge._brain(module, MRSI_SUBJECT, "all", mrsi_challenge.DATA_DIR)
+    data, _, _ = mrsi_challenge.load(MRSI_SUBJECT, voxels=5)
+    rows = np.linspace(0, len(voxels) - 1, 5).astype(int)
+    np.testing.assert_array_equal(voxels[rows], [np.asarray(s[:]).ravel() for s in data.list()])
+
+
+@needs_mrsi
+def test_a_drawn_voxel_comes_with_its_own_truth_and_parts():
+    module = mrsi_challenge._module(mrsi_challenge.DATA_DIR)
+    brain = {part: mrsi_challenge._brain(module, MRSI_SUBJECT, part, mrsi_challenge.DATA_DIR)
+             for part in ("all", "meta", "nuisance")}
+    aux = module.read_aux(MRSI_SUBJECT, signal="meta")
+    maps = aux["metaMap"][aux["brainMask"] > 0]
+
+    source = mrsi_challenge.Release((MRSI_SUBJECT,), "all", components=True, seed=3)
+    fids, truth = source.draw(6)
+    rows = [int(np.flatnonzero((brain["all"] == fid).all(axis=1))[0]) for fid in fids]
+    for i, name in enumerate(mrsi_challenge.NAMES.values()):
+        np.testing.assert_array_equal(truth.concentrations[name], maps[rows, i])
+    np.testing.assert_array_equal(truth.components["metabolites"], brain["meta"][rows])
+    np.testing.assert_array_equal(truth.components["nuisance"], brain["nuisance"][rows])
+
+    clean, clean_truth = mrsi_challenge.Release((MRSI_SUBJECT,), "all-nuisance",
+                                                components=True, seed=3).draw(6)
+    np.testing.assert_allclose(clean, fids - truth.components["nuisance"],   # complex64,
+                               atol=1e-6 * np.abs(fids).max())     # as Augmentrum caches it
+    assert set(clean_truth.components) == {"metabolites"}       # no nuisance left to give
+    assert source.acquisition["points"] == fids.shape[1] == len(source.basis["NAA"])
+    assert all(low <= high for low, high in source.ranges.values())
+
+
+def test_the_release_has_two_signals_only():
+    with pytest.raises(ValueError, match="'all' or 'all-nuisance'"):
+        mrsi_challenge.Release((MRSI_SUBJECT,), "meta")
+
+
 #****************#
 #   mrsi basis   #
 #****************#

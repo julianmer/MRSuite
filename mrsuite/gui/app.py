@@ -17,6 +17,8 @@
 #   imports   #
 #*************#
 import asyncio
+import base64
+import io
 import json
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -24,12 +26,14 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from nicegui import app as nicegui, background_tasks, run, ui
 
 from nifti_mrs_plus import NIfTI_MRS_Plus
+from mrsuite import collect
 from mrsuite.core.basis import Basis
 from mrsuite.gui import blocks, catalog
 from mrsuite.gui.blocks import ANY, BLOCKS, GROUPS
 from mrsuite.gui.canvas import Canvas, view
 from mrsuite.gui.files import Picker
-from mrsuite.gui.graph import Graph, brief, export, exports, meets, results, table, traces
+from mrsuite.gui.graph import (Graph, brief, drawn, export, exports, meets, results, table,
+                               traces)
 
 HERE = Path(__file__).parent
 STATIC = "/mrsuite-static"
@@ -85,6 +89,8 @@ class App:
         with ui.element("div").classes("mr-splash"):
             ui.element("img").props(f"src={STATIC}/logo.png alt=MRSuite")
             ui.label("MRSuite")
+        # where windows opened from the inspector live, so its redraw does not delete them
+        self.windows = ui.element("div")
         self._header()
         # the blocks, the canvas over the preview, and the inspector, each edge dragged to size
         with ui.splitter(value=264, limits=(180, 420)).props("unit=px") \
@@ -96,7 +102,7 @@ class App:
                 with ui.splitter(value=320, limits=(220, 480)).props("unit=px reverse") \
                         .classes("w-full h-full") as right:
                     with right.before:
-                        with ui.splitter(horizontal=True, value=58, limits=(25, 95)) \
+                        with ui.splitter(horizontal=True, value=70, limits=(25, 95)) \
                                 .classes("w-full h-full") as split:
                             with split.before:
                                 self.canvas = Canvas().classes("w-full h-full")
@@ -320,7 +326,8 @@ class App:
             self._join(before, id)
         self.select(id)
         if _chooses(blocks.block(key)):
-            ui.timer(0, lambda: self.choose_files(id), once=True)
+            ui.timer(0, lambda: self.collect(id) if key == "load" else self.choose_files(id),
+                     once=True)
         return id
 
     #***********#
@@ -586,26 +593,34 @@ class App:
             ui.label(node.name).classes("font-mono text-xs mr-muted ml-auto")
         if b.help:
             ui.label(b.help).classes("text-xs mr-muted")
-        if b.step and len(b.options) > 1:
-            ui.select({i: blocks.label(o) for i, o in enumerate(b.options)}, value=node.option,
-                      label="Toolbox", on_change=lambda e: self._choose(node.id, e.value)) \
+        if len(b.offers) > 1:
+            ui.select({i: blocks.label(o) for i, o in enumerate(b.offers)}, value=node.option,
+                      label="Toolbox" if b.step else "Analysis",
+                      on_change=lambda e: self._choose(node.id, e.value)) \
                 .classes("w-full").props("dense outlined").mark("toolbox")
-        if _chooses(b) and not self._wired(node.id, "files"):
-            study = node.block == "folder"
-            for f in ([node.values["folder"]] if study and "folder" in node.values
-                      else node.values.get("files", [])):
+        if node.block == "load":
+            entries = node.values.get("entries") or []
+            counts: Dict[str, int] = {}
+            for _, name, _, _ in entries:
+                counts[name] = counts.get(name, 0) + 1
+            for name in collect.order(counts):
+                ui.label(f"{name}: {counts[name]} file{'s' * (counts[name] != 1)}") \
+                    .classes("text-xs font-mono")
+            ui.button("Add or name files…", icon="folder_open",
+                      on_click=lambda: self.collect(node.id)) \
+                .props("outline dense no-caps").classes("w-full").mark("collect") \
+                .tooltip("Files and folders to load, each named, e.g. data, water, mm, truth")
+        elif _chooses(b) and not self._wired(node.id, "files"):
+            for f in node.values.get("files", []):
                 ui.label(str(f)).classes("text-xs font-mono break-all")
-            ui.button("Choose folder…" if study else "Choose files…", icon="folder_open",
+            ui.button("Choose files…", icon="folder_open",
                       on_click=lambda: self.choose_files(node.id)) \
                 .props("outline dense no-caps").classes("w-full")
-            if study:
-                ui.button("Collect…", icon="rule", on_click=lambda: self.collect(node.id)) \
-                    .props("outline dense no-caps").classes("w-full").mark("collect") \
-                    .tooltip("What the folder holds: put each file's role and group right")
-            if nicegui.native.main_window is not None and not study:   # the browser's picker
-                ui.button("Choose folder…", icon="folder",
-                          on_click=lambda: self.choose_files(node.id, folder=True)) \
-                    .props("outline dense no-caps").classes("w-full").mark("choose-folder")
+        if node.block == "basis-add":
+            ui.button("Choose functions…", icon="checklist",
+                      on_click=lambda: self.functions_kept(node.id)) \
+                .props("outline dense no-caps").classes("w-full").mark("keep") \
+                .tooltip("Which functions the merged basis keeps; one per name")
         if node.error:
             ui.label(node.error).classes("text-xs text-negative break-words")
         ui.label("Settings").classes("mr-section pt-2")
@@ -630,14 +645,27 @@ class App:
             source = blocks.PIPELINE.get(option, ({}, ""))[1]
             if source:
                 ui.label(f"Set as {source} runs it.").classes("text-xs mr-muted")
+        elif b.analyses:
+            option = b.analyses[node.option]
+            try:
+                fields = self.graph.fields(node.id)
+                found, help_ = catalog.about(*option)
+            except Exception as err:                   # noqa: BLE001 - said, not hidden
+                ui.label(brief(err)).classes("text-xs mr-muted")
+                return
+            signature = f"{option[1]}{found}"
         else:
             fields, signature, help_ = list(b.fields), "", ""
         paths = catalog.paths(help_, [f.name for f in fields])
         for f in fields:
-            if _chooses(b) and f.name in ("files", "folder", "roles", "groups") \
-                    and not self._wired(node.id, "files"):
+            if (_chooses(b) and f.name == "files" and not self._wired(node.id, "files")) or \
+                    (node.block == "basis-add" and f.name == "keep"):
                 continue
             self._field(node, f, f.name in paths)
+        if b.analyses:
+            with ui.expansion("Help", icon="help_outline").classes("w-full").props("dense"):
+                ui.label(signature).classes("font-mono text-xs break-all")
+                ui.code(help_ or "No help.", language="text").classes("w-full text-xs")
         if b.step:
             more = node.values.get(catalog.MORE)
             box = ui.input("further arguments", placeholder="{'name': value}",
@@ -738,7 +766,7 @@ class App:
     #************#
     async def _choose(self, id: str, option: int) -> None:
         b = blocks.block(self.graph.nodes[id].block)
-        await run.io_bound(catalog.read, *b.options[option])     # a toolbox can take seconds
+        await run.io_bound(catalog.read, *b.offers[option])      # a toolbox can take seconds
         if id in self.graph.nodes:
             self.graph.choose(id, option)
             self._changed()
@@ -748,65 +776,53 @@ class App:
     #*****************#
     async def _choose_path(self, id: str, name: str) -> None:
         """A file for an argument, from the same dialog files are read with."""
-        chosen = await self._pick("Choose a file", formats=False)
+        chosen = await self._pick("Choose a file")
         if chosen and id in self.graph.nodes:
-            self.folder = _folder(chosen[0][0])
-            self._set(id, name, str(chosen[0][0]))
+            self.folder = _folder(chosen[0])
+            self._set(id, name, str(chosen[0]))
 
     #***********#
     #   files   #
     #***********#
-    async def choose_files(self, id: str, folder: bool = False) -> None:
-        """Files, or a folder (DICOM), for a block that takes them, from the system's own
-        dialog where there is one; a read block's then read in, so its outputs show."""
-        block = self.graph.nodes[id].block
-        read, study = block in ("files", "folder"), block == "folder"
-        chosen = await self._pick(formats=block == "files", folder=folder or study)
+    async def choose_files(self, id: str) -> None:
+        """Files for a block that takes them, e.g. a basis set's, from the system's own
+        dialog where there is one."""
+        chosen = await self._pick("Choose files")
         if not chosen or id not in self.graph.nodes:
             return
-        paths, format = chosen
-        self.folder = _folder(paths[0])
-        if read:
-            await self._idle()                       # so the files are read straight away
-            if id not in self.graph.nodes:
-                return
-        if study:
-            self.graph.set(id, "folder", str(paths[0]))
-        else:
-            if block == "files":
-                self.graph.set(id, "format", None if format == "auto" else format)
-            self.graph.set(id, "files", [str(p) for p in paths])
+        self.folder = _folder(chosen[0])
+        self.graph.set(id, "files", [str(p) for p in chosen])
         self._changed()
-        if read:
-            await self.run(id)
 
     #*************#
     #   collect   #
     #*************#
     async def collect(self, id: str) -> None:
-        """The window over what to load: a folder discovered, files chosen anywhere, in any
-        layout; rows selected get a role and a group at once, or go; then loaded."""
-        from mrsuite import collect as study
-
-        node = self.graph.nodes[id]
+        """The window over what a load loads: files and folders added from anywhere, a folder
+        searched; rows selected get a name, a group or a format at once, or go; kept in
+        order by group and name, then loaded."""
         rows: List[Dict[str, str]] = []
 
-        def add(found: List[Any]) -> None:
+        def add(found: List[collect.Entry]) -> None:
             known = {r["path"] for r in rows}
-            rows.extend({"path": str(e.path), "file": e.path.name, "role": e.role,
+            rows.extend({"path": str(e.path), "file": e.path.name, "name": e.name,
                          "group": e.group, "format": e.format}
                         for e in found if str(e.path) not in known)
-            table.rows = list(rows)                    # the table keeps a list of its own
+            show()
 
-        async def add_from(folder: bool) -> None:
-            chosen = await self._pick("Add to the collection", formats=False, folder=folder)
+        def show() -> None:
+            order = collect.sort([collect.Entry(Path(r["path"]), r["name"], r["group"],
+                                                r["format"]) for r in rows])
+            place = {str(e.path): k for k, e in enumerate(order)}
+            rows.sort(key=lambda r: place[r["path"]])
+            table.rows = list(rows)                    # the table keeps a list of its own
+            name.set_autocomplete(collect.order([*collect.NAMES, *(r["name"] for r in rows)]))
+
+        async def add_from() -> None:
+            chosen = await self._pick("Add files and folders", both=True)
             if chosen:
-                paths = chosen[0]
-                found = []
-                for p in paths:
-                    found += study.discover(p) if p.is_dir() and study._format(p) != "dicom" \
-                        else study.entries([p])
-                add(found)
+                self.folder = _folder(chosen[0])
+                add(_found(chosen))
 
         def chosen_rows() -> List[Dict[str, str]]:
             picked = {r["path"] for r in table.selected}
@@ -814,85 +830,162 @@ class App:
 
         def apply() -> None:
             for r in chosen_rows():
-                r["role"] = role.value
-                if group.value:
-                    r["group"] = group.value
-            table.rows = list(rows)
+                r["name"] = (name.value or "").strip() or r["name"]
+                r["group"] = (group.value or "").strip() or r["group"]
+                r["format"] = format.value or r["format"]
+            show()
 
         def remove() -> None:
             gone = {r["path"] for r in chosen_rows()}
             rows[:] = [r for r in rows if r["path"] not in gone]
             table.selected = []
-            table.rows = list(rows)
+            show()
 
-        try:
-            first = study.as_entries(node.values["entries"]) if node.values.get("entries") \
-                else study.discover(node.values["folder"]) if node.values.get("folder") else []
-        except Exception as err:                       # noqa: BLE001 - said, not hidden
-            ui.notify(brief(err), type="negative", multi_line=True)
-            return
-        with ui.dialog() as dialog, ui.card().classes("w-[64rem] max-w-full gap-2"):
+        def load() -> None:
+            unread = [r["file"] for r in rows if not r["format"]]
+            if unread:
+                ui.notify(f"Give a format to {', '.join(unread[:5])}", type="warning")
+                return
+            dialog.submit(True)
+
+        with self.windows, ui.dialog() as dialog, \
+                ui.card().classes("w-[64rem] max-w-full gap-2"):
             with ui.row().classes("w-full items-center gap-2"):
-                ui.label("Collect").classes("text-base font-semibold")
-                ui.button("Add folder…", icon="folder", on_click=lambda: add_from(True)) \
-                    .props("outline dense no-caps").mark("collect-folder")
-                ui.button("Add files…", icon="note_add", on_click=lambda: add_from(False)) \
-                    .props("outline dense no-caps").mark("collect-files")
+                ui.label("Load data").classes("text-base font-semibold")
+                ui.button("Add…", icon="add", on_click=add_from) \
+                    .props("outline dense no-caps").mark("collect-add") \
+                    .tooltip("Files and folders, any number of each; a folder is searched")
                 ui.space()
                 search = ui.input(placeholder="search").props("dense outlined clearable") \
                     .classes("w-48").mark("collect-search")
             columns = [{"name": c, "label": c, "field": c, "sortable": True, "align": "left"}
-                       for c in ("file", "group", "role", "format")]
+                       for c in ("file", "group", "name", "format")]
             table = ui.table(columns=columns, rows=rows, row_key="path", selection="multiple",
                              pagination=0).classes("w-full").props("dense flat") \
                 .style("max-height: 55vh").mark("collect-table")
             search.bind_value_to(table, "filter")
             with ui.row().classes("w-full items-center gap-2"):
-                role = ui.select({r: r for r in study.ROLES}, value="svs", label="role") \
-                    .props("dense outlined").classes("w-28").mark("collect-role")
-                group = ui.input(label="group").props("dense outlined").classes("w-48") \
+                name = ui.input(label="name", autocomplete=list(collect.NAMES)) \
+                    .props("dense outlined").classes("w-36").mark("collect-name")
+                group = ui.input(label="group").props("dense outlined").classes("w-44") \
                     .mark("collect-group")
+                format = ui.select({None: "as found", **{f: f for f in blocks.FORMATS}},
+                                   value=None, label="format") \
+                    .props("dense outlined").classes("w-32").mark("collect-format")
                 ui.button("Apply to selected", on_click=apply).props("outline dense no-caps") \
                     .mark("collect-apply")
                 ui.button("Remove selected", on_click=remove).props("outline dense no-caps") \
                     .mark("collect-remove")
                 ui.space()
                 ui.button("Cancel", on_click=lambda: dialog.submit(False)).props("flat")
-                ui.button("Load", on_click=lambda: dialog.submit(True)) \
-                    .props("unelevated no-caps").mark("collect-load")
-            add(first)
-        load = await dialog
-        kept = [(r["path"], r["role"], r["group"]) for r in rows]
+                ui.button("Load", on_click=load).props("unelevated no-caps").mark("collect-load")
+            add([collect.Entry(Path(p), n, g, f)
+                 for p, n, g, f in self.graph.nodes[id].values.get("entries") or []])
+        if not rows:
+            ui.timer(0, add_from, once=True)            # nothing yet: straight to the files
+        loaded = await dialog
+        kept = [(r["path"], r["name"], r["group"], r["format"]) for r in rows]
         dialog.delete()
-        if not load or id not in self.graph.nodes:
+        if not loaded or id not in self.graph.nodes:
             return
         if not kept:
-            ui.notify("Nothing to load: add a folder or files", type="info")
+            ui.notify("Nothing to load: add files or folders", type="info")
+            return
+        await self._idle()                           # so they are loaded straight away
+        if id not in self.graph.nodes:
             return
         self.graph.set(id, "entries", kept)
         self._changed()
         await self.run(id)
 
+    #********************#
+    #   functions kept   #
+    #********************#
+    async def functions_kept(self, id: str) -> None:
+        """Which functions a merged basis keeps: every wired basis set's and spectrum's,
+        ticked; a name in two places can be ticked in one only."""
+        wired = [("basis", e) for e in self.graph.edges if (e.target, e.input) == (id, "basis")]
+        wired += self.graph.labels(id, "more")
+        if not wired:
+            ui.notify("Wire a basis set in first", type="info")
+            return
+        for _, e in wired:                              # what they hold, made if need be
+            if e.source in self.graph.nodes and self.graph.nodes[e.source].made is None:
+                await self.run(e.source)
+            if id not in self.graph.nodes or e.source not in self.graph.nodes or \
+                    self.graph.nodes[e.source].made is None:
+                return
+        parts = {}
+        for label, e in wired:
+            value = self.graph.output(e.source, e.output)
+            parts[label] = list(value.names) if isinstance(value, Basis) else [label]
+        kept = self.graph.nodes[id].values.get("keep")
+        if kept is None:                                # all, a shared name from its first
+            keep: Dict[str, str] = {}
+            for where, names in parts.items():
+                for n in names:
+                    keep.setdefault(n, where)
+        else:                                           # what is still wired in
+            keep = {n: w for n, w in kept.items() if n in parts.get(w, [])}
+        boxes: Dict[Tuple[str, str], Any] = {}
+
+        def tick(where: str, n: str, on: bool) -> None:
+            if on:
+                keep[n] = where
+                for (w, m), box in boxes.items():       # elsewhere off: one per name
+                    if m == n and w != where:
+                        box.set_value(False)
+            elif keep.get(n) == where:
+                del keep[n]
+
+        with self.windows, ui.dialog() as dialog, \
+                ui.card().classes("w-[56rem] max-w-full gap-2"):
+            ui.label("Functions the basis keeps").classes("text-base font-semibold")
+            ui.label("A name two inputs share is kept from one of them.") \
+                .classes("text-xs mr-muted")
+            with ui.row().classes("w-full gap-6 items-start no-wrap overflow-auto"):
+                for where, names in parts.items():
+                    with ui.column().classes("gap-0 max-h-[55vh] overflow-auto no-wrap"):
+                        ui.label(where).classes("mr-section")
+                        for n in names:
+                            boxes[where, n] = ui.checkbox(
+                                n, value=keep.get(n) == where,
+                                on_change=lambda ev, w=where, m=n: tick(w, m, ev.value)) \
+                                .props("dense").mark(f"keep-{where}-{n}")
+            with ui.row().classes("w-full"):
+                ui.space()
+                ui.button("Cancel", on_click=lambda: dialog.submit(False)).props("flat")
+                ui.button("Keep", on_click=lambda: dialog.submit(True)) \
+                    .props("unelevated no-caps").mark("keep-done")
+        done = await dialog
+        dialog.delete()
+        if not done or id not in self.graph.nodes:
+            return
+        every = [(n, w) for w, names in parts.items() for n in names]
+        whole = len({n for n, _ in every}) == len(every) and keep == dict(every)
+        self._set(id, "keep", None if whole else keep)
+
     #**********#
     #   pick   #
     #**********#
-    async def _pick(self, title: str = "Open data", formats: bool = True,
-                    folder: bool = False) -> Optional[Tuple[List[Path], str]]:
+    async def _pick(self, title: str = "Open data", both: bool = False) \
+            -> Optional[List[Path]]:
+        """Files from the system's own dialog where there is one; files and folders together
+        from the page's own, as the system's dialogs choose one or the other."""
         window = nicegui.native.main_window
-        if window is not None:
+        if window is not None and not both:
             # NiceGUI's default dialog is Open; pywebview's OPEN_DIALOG cannot cross to the window
-            import webview
-            kind = {"dialog_type": webview.FileDialog.FOLDER} if folder else {}
             found = await window.create_file_dialog(allow_multiple=True,
-                                                    directory=str(self.folder), **kind)
-            return ([Path(p) for p in found], "auto") if found else None
+                                                    directory=str(self.folder))
+            return [Path(p) for p in found] if found else None
         done: asyncio.Future = asyncio.get_running_loop().create_future()
 
-        async def chosen(paths: List[Path], format: str) -> None:
+        async def chosen(paths: List[Path]) -> None:
             if not done.done():
-                done.set_result((paths, format))
+                done.set_result(paths)
 
-        picker = Picker(self.folder, chosen, title, formats)
+        with self.windows:
+            picker = Picker(self.folder, chosen, title)
         picker.on_value_change(lambda e: e.value or done.done() or done.set_result(None))
         picker.open()
         out = await done
@@ -957,9 +1050,16 @@ class App:
         """The spectrum or fit chosen, refreshed alone so the spectrum box keeps its focus."""
         self.index = min(self.index, max(count - 1, 0))      # typed past the last
         if isinstance(value, NIfTI_MRS_Plus):
-            ui.plotly(self._figure(value.list()[self.index])).classes("w-full grow min-h-[24rem]")
+            ui.plotly(self._figure(value.list()[self.index])) \
+                .classes("w-full grow basis-0 min-h-[12rem]")
         elif isinstance(value, Basis):
-            ui.plotly(self._figure(value)).classes("w-full grow min-h-[24rem]")
+            ui.plotly(self._figure(value)).classes("w-full grow basis-0 min-h-[12rem]")
+        elif drawn(value) is not None:
+            picture = io.StringIO()
+            drawn(value).savefig(picture, format="svg")
+            data = base64.b64encode(picture.getvalue().encode()).decode()
+            ui.image(f"data:image/svg+xml;base64,{data}").props("fit=contain") \
+                .classes("w-full grow basis-0 min-h-[12rem]").mark("figure")
         elif results(value):
             columns, rows = table(value[self.index])
             ui.table(columns=[{"name": c, "label": c, "field": c, "align": "left"}
@@ -1131,9 +1231,24 @@ class App:
 #   chooses   #
 #*************#
 def _chooses(b: blocks.Block) -> bool:
-    """Whether a block's files, or folder, are chosen with a button rather than typed: a
-    call's."""
-    return not b.step and (b.key == "folder" or any(f.name == "files" for f in b.fields))
+    """Whether a block's files are chosen with a button rather than typed: a load's, or a
+    call's that takes files."""
+    return not b.step and (b.key == "load" or any(f.name == "files" for f in b.fields))
+
+
+#***********#
+#   found   #
+#***********#
+def _found(paths: List[Any]) -> List[collect.Entry]:
+    """Files and folders chosen, as entries, each once: a folder searched (one a format
+    reads as a whole, a DICOM series or a Varian .fid, taken as one file), a file as it
+    is."""
+    found: Dict[Path, collect.Entry] = {}
+    for path in map(Path, paths):
+        for e in collect.discover(path) if path.is_dir() and not collect._format(path) \
+                else collect.entries([path]):
+            found.setdefault(e.path, e)                 # a file in a folder chosen too: once
+    return list(found.values())
 
 
 #************#
@@ -1150,7 +1265,7 @@ def _folder(path: Any) -> Path:
 #*************#
 def _matches(b: blocks.Block, text: str) -> bool:
     """Whether a block answers a search: its name, its help, or a toolbox it offers."""
-    words = [b.title, b.help, *[f"{blocks.label(o)} {o[1]}" for o in b.options]]
+    words = [b.title, b.help, *[f"{blocks.label(o)} {o[1]}" for o in b.offers]]
     return not text or any(text in w.lower() for w in words)
 
 
@@ -1202,15 +1317,16 @@ def page() -> None:
 #   drop   #
 #**********#
 def drop(event: Any) -> None:
-    """Files dropped on the native window, read in as a block by the page last opened."""
+    """Files and folders dropped on the native window, loaded by a block of the page last
+    opened, each named by its file name."""
     paths = [str(p) for p in event.args.get("files", []) if p]
     if paths and LATEST:
         app = LATEST[0]
 
         async def read() -> None:
             xs = [n.position[0] for n in app.graph.nodes.values()]
-            id = app.graph.add("files", (min(xs) - 280 if xs else 80, 80))
-            app.graph.set(id, "files", paths)
+            id = app.graph.add("load", (min(xs) - 280 if xs else 80, 80))
+            app.graph.set(id, "entries", collect.as_tuples(_found(paths)))
             app.selected = id
             app._changed()
             await app.run(id)

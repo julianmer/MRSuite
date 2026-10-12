@@ -21,6 +21,7 @@ import json
 import os
 import shutil
 import tempfile
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -123,49 +124,102 @@ class Basis:
         return path
 
 
-#***********#
-#   added   #
-#***********#
-def added(basis: Basis, spectrum: Any, name: str = "MM") -> Basis:
+#************#
+#   merged   #
+#************#
+def merged(basis: Basis, more: Dict[str, Any], keep: Optional[Dict[str, str]] = None) -> Basis:
     """
-    A basis with a measured spectrum as one more function, e.g. a macromolecule
-    acquisition, as LCModel's manual and FSL-MRS's basis tools take one: the spectrum put
-    on the basis' own ppm axis, resampled where its bandwidth or points differ, and taken
-    back to an FID at the basis' dwell time.
+    A basis with more functions: other basis sets', and measured spectra, e.g. a
+    macromolecule acquisition, as LCModel's manual and FSL-MRS's basis tools take one.
+    Each is put on the basis' own ppm axis, resampled where its bandwidth or points
+    differ, and taken back to an FID at the basis' dwell time, its amplitude kept.
 
     Args:
-        basis (Basis): The basis set.
-        spectrum: One NIfTI-MRS spectrum (or a batch of one), processed as the data it
-            will help fit: coil combined, averaged, its residual water removed, phased.
-        name (str): The function's name.
+        basis (Basis): The basis set whose axis the others take; its functions come from
+            'basis'.
+        more (Dict[str, Any]): Name -> another basis set, or one NIfTI-MRS spectrum (or a
+            batch of one) processed as the data it will help fit: coil combined, averaged,
+            its residual water removed, phased. A spectrum's function takes its name.
+        keep (Optional[Dict[str, str]]): The functions to keep, each name -> where it comes
+            from: 'basis' or a name of ``more``. Every function by default, which a name
+            in two places refuses.
 
     Returns:
         Basis: A new one; its source notes what was added and where it came from.
 
     Raises:
-        ValueError: For a spectrum with coils, averages or other higher dimensions.
+        ValueError: For a name in two places that keep does not settle, a function keep
+            names that is not there, or a spectrum with coils, averages or other higher
+            dimensions.
+    """
+    from mrsuite.core import provenance
+
+    if "basis" in more:
+        raise ValueError("'basis' names the basis set itself; give the others other names")
+    own = basis.ppm()
+    parts: Dict[str, Dict[str, np.ndarray]] = {"basis": dict(zip(basis.names, basis.fids))}
+    added = []
+    for where, value in more.items():
+        if isinstance(value, Basis):
+            if None not in (value.te, basis.te) and value.te != basis.te:
+                warnings.warn(f"{where} is for TE {value.te} ms, the basis for {basis.te} ms")
+            spectra, ppm, names = value.spectra(), value.ppm(), value.names
+            bandwidth = value.bandwidth
+            added.append({"from": where, "names": list(names), "source": value.source})
+        else:
+            spectrum = _one(value)
+            fid = np.asarray(spectrum[:]).reshape(-1)
+            spectra = np.fft.fftshift(np.fft.fft(fid))[None]
+            hz = np.fft.fftshift(np.fft.fftfreq(fid.size, spectrum.dwelltime))
+            ppm = hz / spectrum.spectrometer_frequency[0] + spectrum.SpecFreqChemShift
+            names, bandwidth = [where], 1 / spectrum.dwelltime
+            added.append({"from": where, "names": [where], **provenance.describe(spectrum)})
+        # zero beyond what was measured; a spectrum's values grow with its bandwidth (its
+        # points per second of signal), so they are scaled to the basis' to keep the FID's
+        moved = [(np.interp(own, ppm, s.real, left=0, right=0)
+                  + 1j * np.interp(own, ppm, s.imag, left=0, right=0))
+                 * basis.bandwidth / bandwidth for s in spectra]
+        parts[where] = {n: np.fft.ifft(np.fft.ifftshift(m)) for n, m in zip(names, moved)}
+
+    if keep is None:
+        places: Dict[str, List[str]] = {}
+        for where, functions in parts.items():
+            for name in functions:
+                places.setdefault(name, []).append(where)
+        twice = {n: p for n, p in places.items() if len(p) > 1}
+        if twice:
+            raise ValueError("a name in two places, keep one: " + "; ".join(
+                f"{n} in {', '.join(p)}" for n, p in twice.items()))
+        keep = {n: p[0] for n, p in places.items()}
+    gone = [f"{n} in {w}" for n, w in keep.items() if n not in parts.get(w, {})]
+    if gone:
+        raise ValueError(f"not there to keep: {', '.join(gone)}")
+    chosen = [(n, w) for w, functions in parts.items() for n in functions if keep.get(n) == w]
+    source = {**basis.source, "added": [*basis.source.get("added", []), *added]}
+    return Basis([n for n, _ in chosen], np.array([parts[w][n] for n, w in chosen]),
+                 basis.bandwidth, basis.frequency, basis.centre, basis.te, basis.seq, source)
+
+
+#*********#
+#   one   #
+#*********#
+def _one(spectrum: Any) -> Any:
+    """One spectrum, from a batch of one as the GUI hands it.
+
+    Raises:
+        ValueError: For several, or one with coils, averages or other higher dimensions.
     """
     from nifti_mrs_plus import NIfTI_MRS_Plus
-    from mrsuite.core import provenance
-    if isinstance(spectrum, NIfTI_MRS_Plus):           # a batch of one, as the GUI hands it
+
+    if isinstance(spectrum, NIfTI_MRS_Plus):
         if len(spectrum.list()) != 1:
-            raise ValueError(f"a basis takes one spectrum, not {len(spectrum.list())}")
+            raise ValueError(f"a basis function is one spectrum, not {len(spectrum.list())}")
         spectrum = spectrum.list()[0]
-    data = np.asarray(spectrum[:])
-    if data.shape[:3] != (1, 1, 1) or data.ndim != 4:
-        raise ValueError(f"a basis takes one spectrum, coil combined and averaged, not "
-                         f"one of shape {data.shape}")
-    fid = data.reshape(-1)
-    spec = np.fft.fftshift(np.fft.fft(fid))
-    hz = np.fft.fftshift(np.fft.fftfreq(fid.size, spectrum.dwelltime))
-    ppm = hz / spectrum.spectrometer_frequency[0] + spectrum.SpecFreqChemShift
-    own = basis.ppm()                                          # zero beyond what was measured
-    moved = np.interp(own, ppm, spec.real, left=0, right=0) \
-        + 1j * np.interp(own, ppm, spec.imag, left=0, right=0)
-    source = {**basis.source, "added": [*basis.source.get("added", []),
-                                        {"name": name, **provenance.describe(spectrum)}]}
-    return Basis([*basis.names, name], np.vstack([basis.fids, np.fft.ifft(np.fft.ifftshift(moved))[None]]),
-                 basis.bandwidth, basis.frequency, basis.centre, basis.te, basis.seq, source)
+    shape = np.asarray(spectrum[:]).shape
+    if shape[:3] != (1, 1, 1) or len(shape) != 4:
+        raise ValueError(f"a basis function is one spectrum, coil combined and averaged, not "
+                         f"one of shape {shape}")
+    return spectrum
 
 
 #*************#

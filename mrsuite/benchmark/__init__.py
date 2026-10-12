@@ -16,9 +16,9 @@
 #*************#
 #   imports   #
 #*************#
-from mrsuite.benchmark.radar import radar
-from mrsuite.benchmark.scoring import (REFERENCES, bias, coverage, mae, observations,
-                                       optimal_scale, score)
+from mrsuite.benchmark.radar import plot_scores, radar
+from mrsuite.benchmark.scoring import (REFERENCES, analyses, bias, coverage, figure, mae,
+                                       observations, optimal_scale, score)
 
-__all__ = ["REFERENCES", "observations", "optimal_scale", "score", "coverage", "mae", "bias",
-           "radar"]
+__all__ = ["REFERENCES", "observations", "optimal_scale", "score", "analyses", "figure",
+           "coverage", "mae", "bias", "radar", "plot_scores"]

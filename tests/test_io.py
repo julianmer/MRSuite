@@ -9,7 +9,8 @@
 # Purpose: Raw scanner data through spec2nii into NIfTI-MRS+, on the GE P-file FID-A ships as      #
 #          example data: every output, every dimension, the conversion in the history, and a       #
 #          pipeline straight after. Basis sets through BasiC, on the 2016 challenge's, Osprey's    #
-#          and the samples BasiC ships, compared by FSL-MRS.                                       #
+#          and the samples BasiC ships, compared by FSL-MRS, and merged. Ground truth from every   #
+#          file it comes in.                                                                       #
 #                                                                                                  #
 ####################################################################################################
 
@@ -235,33 +236,157 @@ def test_a_basis_sets_basis_file_is_written_once_and_another_gets_its_own():
     assert io.basis(samples("JMRUI", "NAA.txt")).lcmodel() != path
 
 
-#***********#
-#   added   #
-#***********#
+#************#
+#   merged   #
+#************#
 def test_a_measured_spectrum_becomes_a_basis_function_on_the_basis_own_axis():
     """Measured at twice the bandwidth and points, its peak lands where it was; one with
     coils or averages left is refused."""
     from nifti_mrs.create_nmrs import gen_nifti_mrs
     from nifti_mrs_plus import NIfTI_MRS_Plus
-    from mrsuite.core.basis import Basis, added
+    from mrsuite.core.basis import merged
 
-    sf, t = 123.2, np.arange(2048) / 4000
-    naa = np.exp(2j * np.pi * (2.01 - 4.65) * sf * t - t / 0.05)
-    basis = Basis(["NAA"], naa[None], 4000.0, sf)
-    t2 = np.arange(4096) / 8000
-    mm = np.exp(2j * np.pi * (0.9 - 4.65) * sf * t2 - t2 / 0.02).reshape(1, 1, 1, -1)
-    measured = gen_nifti_mrs(mm, 1 / 8000, sf)
+    basis, mm = naa_basis(), mm_spectrum()
 
-    out = added(basis, NIfTI_MRS_Plus([measured]), "MM")
+    out = io.merge_basis(basis, {"MM": NIfTI_MRS_Plus([mm])})
 
     assert out.names == ["NAA", "MM"] and out.fids.shape == (2, 2048)
+    assert abs(out.fids[1, 10]) == pytest.approx(np.exp(-10 / 4000 / 0.02), rel=0.02), \
+        "amplitude kept"
     assert peak(out, "MM") == pytest.approx(0.9, abs=0.01) and peak(out, "NAA") == \
         pytest.approx(2.01, abs=0.01)
-    assert out.source["added"][0]["name"] == "MM" and "nifti_mrs" in out.source["added"][0]
+    assert out.source["added"][0]["names"] == ["MM"] and "nifti_mrs" in out.source["added"][0]
     assert out.checksum() != basis.checksum() and basis.names == ["NAA"]
     with pytest.raises(ValueError, match="one spectrum, coil combined"):
-        added(basis, gen_nifti_mrs(np.stack([mm[..., 0, :]] * 2, -1).reshape(1, 1, 1, -1, 2),
-                                   1 / 8000, sf, dim_tags=["DIM_COIL", None, None]))
+        merged(basis, {"MM": gen_nifti_mrs(np.stack([mm[:][..., 0, :]] * 2, -1)
+                                           .reshape(1, 1, 1, -1, 2), 1 / 8000, 123.2,
+                                           dim_tags=["DIM_COIL", None, None])})
+
+
+def test_basis_sets_merge_on_the_first_ones_axis_and_a_shared_name_is_kept_once():
+    """Another set at twice the bandwidth lands where it was; a name in both is refused
+    until keep says which one, and keep leaves out what it does not name."""
+    from mrsuite.core.basis import Basis, merged
+
+    basis, sf = naa_basis(), 123.2
+    t = np.arange(4096) / 8000
+    other = Basis(["NAA", "Cr"], np.array([np.exp(2j * np.pi * (f - 4.65) * sf * t - t / 0.05)
+                                           for f in (2.5, 3.03)]), 8000.0, sf, te=30.0)
+
+    with pytest.raises(ValueError, match="NAA in basis, other"):
+        merged(basis, {"other": other})
+    out = merged(basis, {"other": other}, keep={"NAA": "other", "Cr": "other"})
+
+    assert out.names == ["NAA", "Cr"] and out.fids.shape == (2, 2048)
+    decayed = np.exp(-10 / 4000 / 0.05)                     # the lines' own, 10 points in
+    assert np.abs(out.fids[:, 10]) == pytest.approx([decayed] * 2, rel=0.02), "amplitude kept"
+    assert peak(out, "NAA") == pytest.approx(2.5, abs=0.01)          # the other's NAA
+    assert peak(out, "Cr") == pytest.approx(3.03, abs=0.01)
+    assert out.source["added"] == [{"from": "other", "names": ["NAA", "Cr"], "source": {}}]
+    with pytest.raises(ValueError, match="not there to keep: Cr in basis"):
+        merged(basis, {"other": other}, keep={"Cr": "basis"})
+    with pytest.raises(ValueError, match="'basis' names the basis set"):
+        merged(basis, {"basis": other})
+    with pytest.warns(UserWarning, match="TE 30.0 ms, the basis for 20.0 ms"):
+        merged(Basis(["NAA"], basis.fids, 4000.0, sf, te=20.0), {"other": other},
+               keep={"NAA": "basis"})
+
+
+def naa_basis():
+    """One function, NAA at 2.01 ppm, 2048 points at 4000 Hz."""
+    from mrsuite.core.basis import Basis
+
+    sf, t = 123.2, np.arange(2048) / 4000
+    return Basis(["NAA"], np.exp(2j * np.pi * (2.01 - 4.65) * sf * t - t / 0.05)[None],
+                 4000.0, sf)
+
+
+def mm_spectrum():
+    """A measured spectrum, a peak at 0.9 ppm, 4096 points at 8000 Hz."""
+    from nifti_mrs.create_nmrs import gen_nifti_mrs
+
+    sf, t = 123.2, np.arange(4096) / 8000
+    return gen_nifti_mrs(np.exp(2j * np.pi * (0.9 - 4.65) * sf * t - t / 0.02)
+                         .reshape(1, 1, 1, -1), 1 / 8000, sf)
+
+
+#***********#
+#   truth   #
+#***********#
+def test_ground_truth_is_read_from_every_file_it_comes_in(tmp_path):
+    """One spectrum's, a list, by metabolite, a table, the 2016 challenge's sheet layout,
+    a MATLAB struct and a Python file, each as one dictionary per spectrum."""
+    import pickle
+
+    import pandas as pd
+    from scipy.io import savemat
+
+    two = [{"NAA": 12.0, "Cr": 8.0}, {"NAA": 11.0, "Cr": 7.5}]
+    (tmp_path / "one.json").write_text('{"NAA": 12, "Cr": 8}')
+    (tmp_path / "list.json").write_text(json.dumps(two))
+    (tmp_path / "wrapped.json").write_text(json.dumps({"truth": two, "note": "sim"}))
+    (tmp_path / "columns.pkl").write_bytes(pickle.dumps({"NAA": np.array([12, 11]),
+                                                         "Cr": [8, 7.5]}))
+    (tmp_path / "frame.pickle").write_bytes(pickle.dumps(pd.DataFrame(two)))
+    pd.DataFrame(two).assign(spectrum=["a", "b"]).to_csv(tmp_path / "wide.csv", index=False)
+    notes = pd.DataFrame([["fitting output", None], ["Metabolites", "concentration"],
+                          ["NAA", 12.0], ["Cr", 8.0], [None, None], ["total", 20.0]])
+    notes.to_excel(tmp_path / "sheet.xlsx", header=False, index=False)
+    savemat(tmp_path / "struct.mat", {"conc": {"NAA": [12.0, 11.0], "Cr": [8.0, 7.5]}})
+    (tmp_path / "config.py").write_text("import math\nscale = 2\n"
+                                        "truth = {'NAA': 6 * scale, 'Cr': 8.0}\n")
+
+    for name, expected in [("one.json", two[:1]), ("list.json", two), ("wrapped.json", two),
+                           ("columns.pkl", two), ("frame.pickle", two), ("wide.csv", two),
+                           ("sheet.xlsx", two[:1]), ("struct.mat", two),
+                           ("config.py", two[:1])]:
+        assert io.truth(tmp_path / name) == expected, name
+
+
+def test_truth_tables_and_variables_in_every_layout_give_the_spectra_they_hold(tmp_path):
+    """A metabolite column with a concentration column per spectrum, in CSV too; a row per
+    spectrum with an index and an id column left out; a variable per metabolite."""
+    import pandas as pd
+    from scipy.io import savemat
+
+    two = [{"NAA": 12.0, "Cr": 8.0}, {"NAA": 11.0, "Cr": 7.5}]
+    (tmp_path / "long.csv").write_text("Metabolite,Concentration\nNAA,12.0\nCr,8\n")
+    (tmp_path / "columns.tsv").write_text("metabolite\tconc_1\tconc_2\nNAA\t12\t11\n"
+                                          "Cr\t8\t7.5\n")
+    pd.DataFrame(two).assign(subject=[1, 2]).to_csv(tmp_path / "indexed.csv")
+    savemat(tmp_path / "variables.mat", {"NAA": 12.0, "Cr": 8.0})
+    (tmp_path / "variables.py").write_text("NAA = 12.0\nCr = 8\n")
+
+    for name, expected in [("long.csv", two[:1]), ("columns.tsv", two), ("indexed.csv", two),
+                           ("variables.mat", two[:1]), ("variables.py", two[:1])]:
+        assert io.truth(tmp_path / name) == expected, name
+
+
+def test_a_table_that_cannot_be_read_right_is_refused(tmp_path):
+    (tmp_path / "repeated.csv").write_text("spectrum,metabolite,concentration\n1,NAA,12\n"
+                                           "2,NAA,11\n")
+    (tmp_path / "bare.csv").write_text("12.0,8.0\n11.0,7.5\n")
+
+    with pytest.raises(ValueError, match="NAA twice in one spectrum"):
+        io.truth(tmp_path / "repeated.csv")
+    with pytest.raises(ValueError, match="a table needs a header"):
+        io.truth(tmp_path / "bare.csv")
+
+
+def test_truth_that_cannot_be_told_says_what_it_found(tmp_path):
+    from scipy.io import savemat
+
+    savemat(tmp_path / "two.mat", {"a": {"NAA": 1.0}, "b": {"NAA": 2.0}})
+    (tmp_path / "words.json").write_text('["NAA", "Cr"]')
+    (tmp_path / "notes.txt").write_text("")
+
+    with pytest.raises(ValueError, match="two.mat: say which holds the truth"):
+        io.truth(tmp_path / "two.mat")
+    assert io.truth(tmp_path / "two.mat", key="b") == [{"NAA": 2.0}]
+    with pytest.raises(ValueError, match="no concentrations found: it holds list of 2"):
+        io.truth(tmp_path / "words.json")
+    with pytest.raises(ValueError, match="ground truth is read from"):
+        io.truth(tmp_path / "notes.txt")
 
 
 #***************#

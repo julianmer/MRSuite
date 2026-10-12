@@ -19,6 +19,7 @@
 #*************#
 import csv
 import os
+from functools import partial
 from pathlib import Path
 
 import numpy as np
@@ -26,10 +27,12 @@ import pandas as pd
 import pytest
 
 pytest.importorskip("mrsvalidate")   # the 'benchmark' extra
-from mrsvalidate.analysis import agreement, errors, regression, resampling
+from mrsvalidate.analysis import (agreement, descriptive, errors, method_comparison, regression,
+                                  resampling)
 from mrsvalidate.exceptions import AlignmentError
 
-from mrsuite.benchmark import bias, coverage, mae, observations, optimal_scale, radar, score
+from mrsuite.benchmark import (analyses, bias, coverage, figure, mae, observations,
+                               optimal_scale, plot_scores, radar, score)
 from mrsuite.core.result import FitResult
 
 # MRSValidate's repository, for its toy example, which its package does not ship
@@ -368,6 +371,96 @@ def test_radar_draws_one_polygon_per_method_within_its_limits():
     assert [line.get_label() for line in lines] == ["lcmodel", "tarquin"]
     assert list(lines[0].get_ydata()) == pytest.approx([0.5, 0.0, 0.5, 0.5])
     assert list(lines[1].get_ydata()) == pytest.approx([0.0, 1.0, 1.0, 0.0])
+
+
+def test_score_tables_draw_on_one_radar():
+    """A spoke per metric, from each table's score column, a polygon per method; a
+    reference not scored, or a metric twice, is said."""
+    truth = [{"NAA": 1.0}, {"NAA": 2.0}, {"NAA": 1.5}, {"NAA": 3.0}]
+    methods = {"a": [built(NAA=v) for v in (1.1, 2.2, 1.4, 3.1)],
+               "b": [built(NAA=v) for v in (1.0, 2.5, 1.9, 2.6)]}
+    tables = {"mae": score(methods, truth, ["none"], {"mae": mae}),
+              "ccc": score(methods, truth, ["none"], {"ccc": agreement.lin_ccc})}
+
+    ax = plot_scores(tables, "none")
+
+    assert [line.get_label() for line in ax.get_lines()] == ["a", "b"]
+    assert [t.get_text().split("\n")[0] for t in ax.get_xticklabels()] == ["ccc", "mae"]
+    with pytest.raises(ValueError, match="no scores on water for all"):
+        plot_scores(tables, "water")
+    with pytest.raises(ValueError, match="given twice: mae"):
+        plot_scores({"x": tables["mae"], "y": tables["mae"]}, "none")
+
+
+#**************#
+#   analyses   #
+#**************#
+def test_every_analysis_runs_on_its_own_argument_names():
+    """bland_altman takes the fits as 'candidate', deming as 'test' and needs arguments of
+    its own, by partial; a describing one runs on the errors, fits minus truth; the score
+    column is each result's first number; with no folder given, one of its own."""
+    truth = [{"NAA": 1.0, "Cr": 2.0}, {"NAA": 2.0, "Cr": 1.0}, {"NAA": 1.5, "Cr": 1.5}]
+    methods = {"m": [built(NAA=1.1, Cr=2.0), built(NAA=2.1, Cr=1.2), built(NAA=1.4, Cr=1.6)]}
+    deming = partial(method_comparison.deming, reference_error_variance=1.0,
+                     test_error_variance=1.0)
+
+    table = score(methods, truth, ["none"], {"ba": method_comparison.bland_altman,
+                                             "median": descriptive.median, "deming": deming})
+
+    pooled = table.query("metabolite == 'all'").set_index("metric")
+    true = np.array([2.0, 1.0, 1.5, 1.0, 2.0, 1.5])               # Cr, then NAA
+    fit = np.array([2.0, 1.2, 1.6, 1.1, 2.1, 1.4])
+    ids = np.array([f"{s}/{m}" for m in ("Cr", "NAA") for s in "012"])
+    assert pooled.loc["ba", "score"] == pytest.approx(
+        method_comparison.bland_altman(true, fit, ids).bias)
+    assert pooled.loc["median", "score"] == pytest.approx(0.1)
+    assert pooled.loc["deming", "score"] == pytest.approx(
+        deming(true, fit, ids).slope) and pooled.loc["deming", "status"] == "valid"
+
+
+def test_analyses_are_those_that_compare_fits_with_truth():
+    found = analyses()
+
+    assert {"errors.rmse", "agreement.lin_ccc", "method_comparison.bland_altman",
+            "regression.regression_metrics", "descriptive.median",
+            "normality.shapiro_wilk"} <= set(found)
+    assert not {"error_consistency.error_consistency", "distribution.ecwas_kossler_mukherjee",
+                "normality.normality_test_suite", "information.standardized_error",
+                "monte_carlo.monte_carlo_condition"} & set(found)
+
+
+def test_what_says_nothing_of_the_fits_has_no_score_and_leaves_nothing_behind(tmp_path,
+                                                                            monkeypatch):
+    """An interval has two numbers, so no one score; a radar refuses a missing score; a
+    run without a folder of its own leaves none."""
+    monkeypatch.setenv("TMPDIR", str(tmp_path))
+    import tempfile
+    monkeypatch.setattr(tempfile, "tempdir", None)
+    truth = [{"NAA": 1.0}, {"NAA": 2.0}, {"NAA": 1.5}, {"NAA": 3.0}]
+    methods = {"a": [built(NAA=v) for v in (1.1, 2.2, 1.4, 3.1)]}
+
+    table = score(methods, truth, ["none"], {"tukey": descriptive.tukey_outlier_range})
+
+    assert table["score"].isna().all() and table["low"].notna().all()
+    assert list(tmp_path.iterdir()) == []
+    with pytest.raises(ValueError, match=r"no score for tukey \(a\)"):
+        plot_scores(table, "none")
+    assert not {"standardization.standardize", "descriptive.cv"} & set(analyses())
+
+
+def test_a_figure_draws_one_plot_per_method():
+    from mrsvalidate.viz.agreement import plot_bland_altman
+
+    truth = [{"NAA": 1.0}, {"NAA": 2.0}, {"NAA": 1.5}]
+    methods = {"a": [built(NAA=v) for v in (1.1, 2.2, 1.4)],
+               "b": [built(NAA=v) for v in (1.0, 2.5, 1.9)]}
+
+    fig = figure(methods, truth, "none", method_comparison.bland_altman, plot_bland_altman)
+
+    assert [ax.get_title() for ax in fig.axes][:2] == ["a · all", "b · all"]
+    with pytest.raises(ValueError, match="no 'Glu' scored"):
+        figure(methods, truth, "none", method_comparison.bland_altman, plot_bland_altman,
+               metabolite="Glu")
 
 
 #***************#

@@ -23,22 +23,27 @@ import re
 import shutil
 import threading
 from dataclasses import dataclass, field
+from inspect import Parameter
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 
 from nifti_mrs_plus import NIfTI_MRS_Plus
+from mrsuite import collect
 from mrsuite.core.basis import Basis
 from mrsuite.core.result import FitResult
 from mrsuite.gui import blocks, catalog
 from mrsuite.gui.blocks import Block, Port
 
 PIPELINE = "from mrsuite.core.pipeline import Pipeline"
+PARTIAL = "from functools import partial"
+KEYWORD_ONLY = Parameter.KEYWORD_ONLY
 
 # names the script's imports bind, which a block's name must not take
-TAKEN = {"io", "models", "Pipeline", "challenge2016", "mrsi_challenge", "mrs_sim", "scoring",
-         *catalog.BRIDGES}
+TAKEN = {"Pipeline", "partial", *catalog.BRIDGES,
+         *(line.split()[-1] for b in blocks.BLOCKS.values() for line in b.imports),
+         *(where.rsplit(".", 1)[-1] for b in blocks.BLOCKS.values() for where, _ in b.analyses)}
 
 
 #**************************************************************************************************#
@@ -62,7 +67,8 @@ class Node:
         shown (List[str]): Arguments with a default put on the block, to wire in (see
             ``Graph.show``); those without one are always on it.
         position (Tuple[float, float]): Where it sits on the canvas.
-        found (List[str]): The outputs a file read found.
+        found (List[str]): The outputs a load found when it last ran, beyond the names
+            it was given (a GE P-file's own water reference).
         made (Optional[Dict[str, Any]]): The names its line assigned, with their values;
             None until it has run since it or a block before it changed.
         error (Optional[str]): Why it failed, when it last ran.
@@ -199,7 +205,8 @@ class Graph:
     #*********#
     def set(self, id: str, name: str, value: Any = None) -> None:
         """
-        An argument in a block's form; None for its default.
+        An argument in a block's form; None for its default. The same again changes
+        nothing, so what the block made, and found, stays.
 
         Raises:
             ValueError: For a value Python text cannot give back, e.g. inf or nan, which
@@ -208,25 +215,30 @@ class Graph:
         node = self.nodes[id]
         if value is not None and not _written(value):
             raise ValueError(f"{name}: {value!r} cannot be written as Python and read back")
+        if node.values.get(name) == value:
+            return
         if value is None:
             node.values.pop(name, None)
         else:
             node.values[name] = value
         self.invalidate(id)                  # before wires go, so the blocks after it hear
-        if node.block in ("files", "folder"):
-            node.found = ["spectra"] if self._nifti(node) else []
+        if node.block == "load":
+            node.found = []
             self._drop_wires(node)
 
     #************#
     #   choose   #
     #************#
     def choose(self, id: str, option: int) -> None:
-        """Another toolbox for a step: its own form, so the arguments start over, and the
-        wires into arguments its function does not have go."""
+        """Another toolbox for a step, or analysis for a score: its own form, so its
+        function's arguments start over, and the wires into arguments it does not have go."""
         node = self.nodes[id]
+        b = blocks.block(node.block)
         self.invalidate(id)
         node.option = option
-        node.values = self._pipeline(node)
+        own = {f.name for f in b.fields}                # a score's, kept
+        node.values = self._pipeline(node) if b.step else \
+            {k: v for k, v in node.values.items() if k in own}
         self.ask(id)                         # before the wires its arguments take are kept
         named = {f.name for f in self.arguments(id)}
         node.shown = [n for n in node.shown if n in named]
@@ -263,8 +275,13 @@ class Graph:
         """A block's inputs - the arguments it needs, and those with a default put on it
         (see ``show``) - and its outputs."""
         node = self.nodes[id]
+        if node.block == "load":
+            entries = node.values.get("entries") or []
+            truths = {name for _, name, _, format in entries if format == "truth"}
+            names = collect.order([*(name for _, name, _, _ in entries), *node.found])
+            return [], [Port(n, blocks.TRUTH if n in truths else blocks.SPECTRA) for n in names]
         named = [f.name for f in self.arguments(id) if not f.default or f.name in node.shown]
-        return blocks.ports(blocks.block(node.block), named, node.found)
+        return blocks.ports(blocks.block(node.block), named)
 
     #***************#
     #   arguments   #
@@ -275,8 +292,8 @@ class Graph:
         toolbox; none where it cannot be asked (not installed), which its run says."""
         node = self.nodes[id]
         b = blocks.block(node.block)
-        if not (b.step or b.call) or node.block in ("files", "folder") or \
-                (b.step and not catalog.asked(*b.options[node.option])):
+        if not (b.step or b.call) or node.block == "load" or \
+                (b.offers and not catalog.asked(*b.offers[node.option])):
             return []
         try:
             return self.fields(id)
@@ -287,21 +304,26 @@ class Graph:
     #   ask   #
     #*********#
     def ask(self, id: str) -> None:
-        """Read a step's arguments from its toolbox, which can take seconds the first time:
-        its argument inputs exist from then on. A toolbox that cannot tell is said when the
-        block runs."""
+        """Read a step's arguments from its toolbox, which can take seconds the first time,
+        or a score's from its analysis: its argument inputs exist from then on. One that
+        cannot tell is said when the block runs."""
         b = blocks.block(self.nodes[id].block)
-        if b.step:
-            catalog.read(*b.options[self.nodes[id].option])
+        if b.offers:
+            catalog.read(*b.offers[self.nodes[id].option])
 
     #************#
     #   fields   #
     #************#
     def fields(self, id: str) -> List[catalog.Field]:
         """The arguments a block's form asks for: a step's, its function's (which may ask a
-        toolbox, so it can take seconds the first time)."""
+        toolbox, so it can take seconds the first time); a score's, its own and those its
+        analysis takes by name."""
         node = self.nodes[id]
         b = blocks.block(node.block)
+        if b.analyses:
+            signature = catalog.about(*b.analyses[node.option])[0]
+            return list(b.fields) + [f for f in catalog.fields(signature) if
+                                     signature.parameters[f.name].kind == KEYWORD_ONLY]
         if not b.step:
             return list(b.fields)
         return catalog.fields(catalog.about(*b.options[node.option])[0])
@@ -387,51 +409,80 @@ class Graph:
                 raise ValueError(f"{node.name}: give the model's name")
             line = f"Pipeline([models.load({node.values['name']!r}).step()]).run({wires['data']})"
             return f"{node.name} = {line}", {*b.imports, PIPELINE}, [node.name]
-        if node.block == "folder":
-            folder, chosen = node.values.get("folder"), node.values.get("entries")
-            if chosen:                                         # the window's own list
-                listed = ",\n    ".join(repr(tuple(e)) for e in chosen)
-                return f"{node.name} = collect.load([\n    {listed}])", set(b.imports), [node.name]
-            if not folder:
-                raise ValueError(f"{node.name}: choose a folder to load")
-            fixed = "".join(f", {k}={node.values[k]!r}" for k in ("roles", "groups")
-                            if node.values.get(k))             # what the window put right
-            return (f"{node.name} = collect.load({str(folder)!r}{fixed})", set(b.imports),
-                    [node.name])
-        if node.block == "files":
-            files = node.values.get("files")
-            if not files:
-                raise ValueError(f"{node.name}: choose files to read")
-            listed = ", ".join(repr(str(f)) for f in files)
-            if self._nifti(node):
-                return f"{node.name} = io.read({listed})", set(b.imports), [node.name]
-            fmt = node.values.get("format", "auto")
-            return (f"{node.name} = io.load({listed}, format={fmt!r})", set(b.imports),
-                    [node.name])
+        if node.block == "load":
+            chosen = node.values.get("entries")
+            if not chosen:
+                raise ValueError(f"{node.name}: add files or folders to load")
+            listed = ",\n    ".join(repr(tuple(e)) for e in chosen)
+            return f"{node.name} = collect.load([\n    {listed}])", set(b.imports), [node.name]
+        unset = [f.name for f in b.fields if not f.default and f.name not in node.values
+                 and f.name not in wires]
+        if unset:
+            raise ValueError(f"{node.name}: set {', '.join(unset)}")
         inputs = [catalog.Field(p.name, "value", [], "", True) for p in b.inputs]
         args = self._args(node, inputs + list(b.fields), wires, b.wrap)
-        args = ", ".join(filter(None, [args, *(f"{k}={v}" for k, v in b.fixed.items())]))
+        fixed = dict(b.fixed)
+        imports = set(b.imports)
+        if b.analyses:
+            where, function = b.analyses[node.option]
+            package, alias = where.rsplit(".", 1)
+            own = self.fields(id)[len(b.fields):]
+            unset = [f.name for f in own if not f.default and f.name not in node.values
+                     and f.name not in wires]
+            if unset:
+                raise ValueError(f"{node.name}: set {', '.join(unset)}")
+            given = self._args(node, own, wires, {})
+            metric = f"partial({alias}.{function}, {given})" if given else f"{alias}.{function}"
+            fixed["metrics"] = f"{{{function!r}: {metric}}}"
+            imports |= {f"from {package} import {alias}", *[PARTIAL] * bool(given)}
+        args = ", ".join(filter(None, [args, *(f"{k}={v}" for k, v in fixed.items())]))
         outputs = self.ports(id)[1]
         names = [node.name] if len(outputs) == 1 else [f"{node.name}_{p.name}" for p in outputs]
-        return f"{', '.join(names)} = {b.call}({args})", set(b.imports), names
+        return f"{', '.join(names)} = {b.call}({args})", imports, names
 
     #***********#
     #   wires   #
     #***********#
     def _wires(self, node: Node) -> Dict[str, str]:
-        """What comes in by wire, as code: an input taking many, a dictionary by block."""
+        """What comes in by wire, as code: an input taking many, a dictionary by name (see
+        ``labels``)."""
         ins = {p.name: p for p in self.ports(node.id)[0]}
         out: Dict[str, Any] = {}
         for e in self.edges:
-            if e.target != node.id:
+            if e.target == node.id and not ins[e.input].many:
+                out[e.input] = self.ref(e.source, e.output)
+        for name in {p.name for p in ins.values() if p.many}:
+            wired = self.labels(node.id, name)
+            if wired:
+                out[name] = "{" + ", ".join(f"{label!r}: {self.ref(e.source, e.output)}"
+                                            for label, e in wired) + "}"
+        return out
+
+    #************#
+    #   labels   #
+    #************#
+    def labels(self, id: str, input: str) -> List[Tuple[str, Edge]]:
+        """
+        The wires into an input taking many, each with its name there: its block's, or its
+        output's where the block has several or is a load (data, mm, ...), with the block's
+        before it, and a number after, where one would be taken - by another wire, or by
+        another input of the block (a merge's 'basis').
+        """
+        out = []
+        taken = {p.name for p in self.ports(id)[0]} - {input}
+        for e in self.edges:
+            if (e.target, e.input) != (id, input):
                 continue
-            ref = self.ref(e.source, e.output)
-            if ins[e.input].many:
-                out.setdefault(e.input, {})[self.nodes[e.source].name] = ref
-            else:
-                out[e.input] = ref
-        return {k: "{" + ", ".join(f"{n!r}: {r}" for n, r in v.items()) + "}"
-                if isinstance(v, dict) else v for k, v in out.items()}
+            source = self.nodes[e.source]
+            single = len(self.ports(e.source)[1]) == 1 and not self._indexed(source)
+            label = source.name if single else e.output
+            label = f"{source.name}_{e.output}" if label in taken else label
+            unique, k = label, 2
+            while unique in taken:
+                unique, k = f"{label}_{k}", k + 1
+            taken.add(unique)
+            out.append((unique, e))
+        return out
 
     #*********#
     #   ref   #
@@ -551,8 +602,7 @@ class Graph:
                     return False
                 node.made = {n: space[n] for n in names}
             if self._indexed(node):
-                node.found = [n for n, v in node.made[node.name].items()
-                              if isinstance(v, NIfTI_MRS_Plus)]
+                node.found = list(node.made[node.name])
                 self._drop_wires(node)
         return True
 
@@ -616,7 +666,7 @@ class Graph:
                 if not re.fullmatch(r"n\d+", n["id"]) or n["name"] in TAKEN or not all(
                         _identifier(k) for k in names if k != catalog.MORE):
                     raise ValueError("its id or a name is not one MRSuite writes")
-                if not 0 <= n["option"] < max(len(b.options), 1):
+                if not 0 <= n["option"] < max(len(b.offers), 1):
                     raise ValueError(f"no toolbox {n['option']}")
                 values = {k: ast.literal_eval(v) for k, v in n["values"].items()}
                 graph.nodes[n["id"]] = Node(n["id"], n["block"], n["name"], n["option"], values,
@@ -669,23 +719,13 @@ class Graph:
         b = blocks.block(node.block)
         return dict(blocks.PIPELINE.get(b.options[node.option], ({}, ""))[0]) if b.step else {}
 
-    #***********#
-    #   nifti   #
-    #***********#
-    @staticmethod
-    def _nifti(node: Node) -> bool:
-        """Whether a file read reads NIfTI-MRS as it is."""
-        files = node.values.get("files") or []
-        return node.values.get("format", "auto") == "auto" and bool(files) and all(
-            str(f).endswith((".nii", ".nii.gz")) for f in files)
-
     #*************#
     #   indexed   #
     #*************#
-    def _indexed(self, node: Node) -> bool:
-        """Whether a block's outputs are the keys of what it made, found when it ran: a folder
-        loaded, or files read through spec2nii."""
-        return node.block == "folder" or (node.block == "files" and not self._nifti(node))
+    @staticmethod
+    def _indexed(node: Node) -> bool:
+        """Whether a block's outputs are the keys of what it made: a load's names."""
+        return node.block == "load"
 
     #****************#
     #   drop wires   #
@@ -843,7 +883,20 @@ def thumb(value: Any, points: int = 120) -> Dict[str, Any]:
         return {"kind": "text", "text": f"{type(value).__name__} of {len(value)}"}
     if isinstance(value, Path):
         return {"kind": "text", "text": value.name}
+    if drawn(value) is not None:
+        return {"kind": "text", "text": "figure"}
     return {"kind": "text", "text": type(value).__name__}
+
+
+#***********#
+#   drawn   #
+#***********#
+def drawn(value: Any) -> Any:
+    """The matplotlib figure a value is, or is drawn on (an Axes); None for anything else."""
+    from matplotlib.figure import Figure
+
+    figure = value if isinstance(value, Figure) else getattr(value, "figure", None)
+    return figure if isinstance(figure, Figure) else None
 
 
 #************#
@@ -859,6 +912,8 @@ def exports(value: Any) -> List[str]:
         return ["results"]
     if hasattr(value, "to_csv"):
         return ["table"]
+    if drawn(value) is not None:
+        return ["figure"]
     return []
 
 
@@ -873,8 +928,8 @@ def export(value: Any, folder: Any, name: str, what: str, index: int = 0) -> Lis
         value: What a block made.
         folder: Where.
         name (str): The files' name, the block's.
-        what (str): 'spectra' (NIfTI-MRS), 'figure' (SVG), 'basis' (LCModel .BASIS),
-            'results' (JSON) or 'table' (CSV); see ``exports``.
+        what (str): 'spectra' (NIfTI-MRS), 'figure' (SVG, of a spectrum or a plot made),
+            'basis' (LCModel .BASIS), 'results' (JSON) or 'table' (CSV); see ``exports``.
         index (int): Which spectrum the figure shows.
 
     Returns:
@@ -886,6 +941,9 @@ def export(value: Any, folder: Any, name: str, what: str, index: int = 0) -> Lis
         raise ValueError(f"this cannot be written out as {what}")
     if what == "spectra":
         return [Path(p) for p in value.save_nifti(str(folder), prefix=name)]
+    if what == "figure" and drawn(value) is not None:
+        drawn(value).savefig(folder / f"{name}.svg")
+        return [folder / f"{name}.svg"]
     if what == "figure":
         return [figure(value, folder / f"{name}.svg", index)]
     if what == "basis":

@@ -21,20 +21,22 @@
 #*************#
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 from mrsuite.gui import catalog
 from mrsuite.gui.catalog import Field
 
-# spec2nii's formats that need no options of their own (its text and raw need dwell times
-# and such); 'auto' reads NIfTI-MRS as it is and lets spec2nii tell the rest apart
-FORMATS = ["auto", "twix", "ge", "philips", "dicom", "rda", "bruker", "varian", "jmrui", "uih"]
+# what a file to load is read as: NIfTI-MRS as it is, ground truth (io.truth), or spec2nii's
+# formats that need no options of their own (its text and raw need dwell times and such)
+FORMATS = ["nifti", "truth", "twix", "ge", "philips", "dicom", "rda", "bruker", "varian",
+           "jmrui", "uih"]
 
 # what flows along a wire; 'any' meets everything. A challenge's truth is concentrations per
 # spectrum, as scoring takes it; a simulation's is MRS-Sim's own (amplitudes, signals); a
-# basis is a basis set (mrsuite.core.basis); files are one written for another tool
-SPECTRA, RESULTS, TRUTH, SIMULATED, BASIS, FILES, ANY = \
-    "spectra", "results", "truth", "simulated", "basis", "files", "any"
+# basis is a basis set (mrsuite.core.basis); files are one written for another tool; scores
+# are scoring.score's table
+SPECTRA, RESULTS, TRUTH, SIMULATED, BASIS, FILES, SCORES, ANY = \
+    "spectra", "results", "truth", "simulated", "basis", "files", "scores", "any"
 
 
 #**************************************************************************************************#
@@ -63,9 +65,9 @@ class Group:
 
 GROUPS = {g.key: g for g in [
     Group("data", "Data", "#9fb0c6",
-          "Read spectra in: scanner files, NIfTI-MRS, the challenges; and basis sets, in any "
-          "format. Every block exports what it made; Convert basis set writes its files "
-          "itself."),
+          "Load spectra and ground truth from files and folders, named as you like, or the "
+          "challenges; and basis sets, in any format. Every block exports what it made; "
+          "Convert basis set writes its files itself."),
     Group("simulate", "Simulate", "#8ea4ff", "Synthetic spectra with known contents."),
     Group("preprocess", "Preprocess", "#5274f0",
           "Prepare the spectra for analysis: correct imperfections, reduce dimensionality "
@@ -75,8 +77,9 @@ GROUPS = {g.key: g for g in [
           "or, with a water reference, as the toolbox quantifies them (Near 2021; Kreis et "
           "al., NMR Biomed 2021, section 4.2)."),
     Group("evaluate", "Evaluate", "#7fe0e6",
-          "Judge the spectra and the fits: spectral quality (SNR, linewidth) and fits against "
-          "the ground truth."),
+          "Judge the spectra and the fits: spectral quality (SNR, linewidth), and fits against "
+          "the ground truth with every analysis of MRSValidate that compares the two (Kreis et "
+          "al., NMR Biomed 2021, section 4.3), its plots, and a radar of the scores."),
     Group("other", "Other", "#6f7f99",
           "Further operations the toolboxes offer: modelling peaks, cropping, conjugating, "
           "shifting, matching linewidths, resampling, adding and selecting."),
@@ -120,7 +123,8 @@ class Block:
     A step takes spectra and runs as a pipeline step, so a toolbox's side results ride
     along; its options are the toolboxes' functions that do it, as (bridge, function),
     and its form is the chosen function's arguments. A call is any other Python call,
-    written as ``call(...)`` with the fields it declares.
+    written as ``call(...)`` with the fields it declares; a score is a call of
+    scoring.score with one of its analyses, whose own arguments join its form.
 
     Attributes:
         key (str): Its name in code and in a saved graph.
@@ -136,6 +140,8 @@ class Block:
         outputs (Tuple[Port, ...]): What a call makes; several when it returns a tuple.
         fixed (Dict[str, str]): Arguments a call always gets, as code.
         wrap (Dict[str, str]): Code a field's value is put into, as '{}' marks.
+        analyses (Tuple[Tuple[str, str], ...]): A score's choice of analysis, as
+            (module, function).
         help (str): One line on what it does.
     """
 
@@ -151,6 +157,7 @@ class Block:
     outputs: Tuple[Port, ...] = (Port("out"),)
     fixed: Dict[str, str] = field(default_factory=dict)
     wrap: Dict[str, str] = field(default_factory=dict)
+    analyses: Tuple[Tuple[str, str], ...] = ()
     help: str = ""
 
     #**********#
@@ -159,6 +166,14 @@ class Block:
     @property
     def step(self) -> bool:
         return bool(self.options)
+
+    #************#
+    #   offers   #
+    #************#
+    @property
+    def offers(self) -> Tuple[Tuple[str, str], ...]:
+        """What it offers to choose between: a step's toolboxes, or a score's analyses."""
+        return self.options or self.analyses
 
 
 #***********#
@@ -266,6 +281,44 @@ _OTHER = [
 
 _CHALLENGE = "mrsuite.datasets.challenge2016"
 
+# MRSValidate's analyses that compare fits with the ground truth (scoring.analyses lists
+# them; a test keeps the two the same), a block per module of it, MRSuite's MAE and bias first
+_SCORING, _MRSV = "mrsuite.benchmark.scoring", "mrsvalidate.analysis"
+_SCORES = [
+    ("errors", "Errors",
+     [(_SCORING, "mae"), (_SCORING, "bias"),
+      *[(f"{_MRSV}.errors", f) for f in ("rmse", "rmese", "mpe", "mepe", "mape",
+                                         "bias_corrected_mape", "meape")]],
+     "How far the fits are from the truth: absolute, squared and percentage errors, and the "
+     "bias (Kreis 2021, section 4.3: accuracy)."),
+    ("agreement", "Agreement", [(f"{_MRSV}.agreement", f) for f in ("lin_ccc", "robust_ccc")],
+     "How closely the fits follow the truth: Lin's concordance correlation, plain and robust."),
+    ("regression", "Correlation & regression",
+     [(f"{_MRSV}.regression", f) for f in ("pearson_r", "median_centered_correlation",
+                                           "r_squared_direct", "adjusted_r_squared",
+                                           "concise_score_original", "concise_score_manuscript",
+                                           "theil_sen", "regression_metrics")],
+     "The fits against the truth: correlation, R², slope and intercept."),
+    ("method-comparison", "Method comparison",
+     [(f"{_MRSV}.method_comparison", f) for f in ("bland_altman", "passing_bablok", "deming",
+                                                  "equivalence_test_1", "equivalence_test_2",
+                                                  "equivalence_test_3")],
+     "The fits as a method compared with the truth: Bland-Altman limits of agreement, "
+     "Passing-Bablok and Deming regression, equivalence tests."),
+    ("error-spread", "Error distribution",
+     [(f"{_MRSV}.descriptive", f) for f in ("mean", "median", "variance", "robust_variance",
+                                            "robust_sd", "iqr", "tukey_outlier_range")],
+     "The errors, fits minus truth: their centre, spread and outlier range."),
+    ("normality", "Normality of errors",
+     [(f"{_MRSV}.normality", f) for f in ("shapiro_wilk", "kolmogorov_smirnov", "lilliefors",
+                                          "anderson_darling", "dagostino_pearson")],
+     "Whether the errors, fits minus truth, are normally distributed."),
+]
+_REFERENCES = ["optimal", "tCr", "water", "none"]
+_JUDGED = (Port("methods", RESULTS, many=True), Port("truth", TRUTH))
+_SCORED = (Port("scores", SCORES),)
+_SCORE = "from mrsuite.benchmark import scoring"
+
 # what a toolbox's own standard pipeline passes where its function has no default of its own
 # (FID-A at 1eaa207, Osprey at 98b2e35, plain single-voxel 1H): a new block's form starts with
 # them, so it runs as the toolbox runs it, and the script says so. Zero-filling and line
@@ -283,16 +336,11 @@ PIPELINE: Dict[Tuple[str, str], Tuple[Dict[str, Any], str]] = {
 
 BLOCKS: Dict[str, Block] = {b.key: b for b in [
     # data
-    Block("files", "data", "Read files", call="io.load", imports=("from mrsuite import io",),
-          fields=(_value("files"), _choice("format", FORMATS, "'auto'")),
-          outputs=(), help="Raw scanner data through spec2nii, or NIfTI-MRS as it is."),
-    Block("folder", "data", "Load dataset", call="collect.load",
-          imports=("from mrsuite import collect",),
-          fields=(_value("folder", positional=True), _value("roles", "None"),
-                  _value("groups", "None")),
-          outputs=(), help="A dataset from a folder, or files from anywhere (Collect…), each "
-                            "told its role by its name, BIDS (sub-*_svs, _mrsref) or words like "
-                            "ref, water, mm, to put right; one output per role, in group order."),
+    Block("load", "data", "Load data", call="collect.load",
+          imports=("from mrsuite import collect",), outputs=(),
+          help="Files and folders from anywhere, each file named as you like (data, water, mm, "
+               "truth, ...); a folder is searched and its files named by BIDS or by words in "
+               "their names. One output per name, in group order."),
     Block("ismrm2016", "data", "2016 fitting challenge", call="challenge2016.load",
           imports=("from mrsuite.datasets import challenge2016",),
           fields=(_value("n", "None"),),
@@ -309,12 +357,13 @@ BLOCKS: Dict[str, Block] = {b.key: b for b in [
           outputs=(Port("basis", BASIS),),
           help="A basis set in any format, told apart by BasiC, for any fit; sw (Hz), sf "
                "(MHz) and te (ms) where the files do not state them."),
-    Block("basis-add", "data", "Add spectrum to basis set", call="io.add_to_basis",
+    Block("basis-add", "data", "Add to basis set", call="io.merge_basis",
           imports=("from mrsuite import io",),
-          inputs=(Port("basis", BASIS), Port("spectrum", SPECTRA)), fields=(_value("name", "'MM'"),),
-          outputs=(Port("basis", BASIS),),
-          help="A measured spectrum, e.g. a macromolecule acquisition processed like the data, "
-               "as one more basis function."),
+          inputs=(Port("basis", BASIS), Port("more", ANY, many=True)),
+          fields=(_value("keep", "None"),), outputs=(Port("basis", BASIS),),
+          help="Other basis sets' functions, or measured spectra (e.g. a macromolecule "
+               "acquisition processed like the data, named as its wire), on the basis' axis; "
+               "Choose functions keeps which, one per name."),
     Block("basis-convert", "data", "Convert basis set", call="io.convert_basis",
           imports=("from mrsuite import io",), inputs=(Port("basis", BASIS),),
           fields=(_value("folder"), _value("tool"), _value("output", "'default'")),
@@ -353,15 +402,38 @@ BLOCKS: Dict[str, Block] = {b.key: b for b in [
     Block("linewidth", "evaluate", "Linewidth", out=ANY,
           options=(("fid_a", "op_getLW"), ("osprey", "op_getLW")),
           help="Full width at half maximum."),
-    Block("benchmark", "evaluate", "Benchmark score", call="scoring.score",
-          imports=("from mrsuite.benchmark import scoring",),
-          fields=(_choice("references", ["optimal", "tCr", "water", "none"]),
-                  _value("output_dir")),
-          inputs=(Port("methods", RESULTS, many=True), Port("truth", TRUTH)),
-          fixed={"metrics": "{'mae': scoring.mae, 'bias': scoring.bias}"},
-          wrap={"references": "[{}]"},
-          help="MAE and bias of each fit against the ground truth, on the reference "
-               "chosen (Kreis 2021, section 4.3: accuracy)."),
+    Block("mosae", "evaluate", "MOSAE", call="scoring.score", imports=(_SCORE,),
+          fields=(_value("output_dir", "None"),), inputs=_JUDGED, outputs=_SCORED,
+          fixed={"references": "['optimal']", "metrics": "{'mosae': scoring.mae}"},
+          help="Mean optimal-scale absolute error (Merkofer et al., arXiv:2511.23135, Eq. 16): "
+               "each fit scaled to match its truth best, then the MAE; 'all' pools the "
+               "metabolites."),
+    *[Block(key, "evaluate", title, call="scoring.score", imports=(_SCORE,),
+            fields=(_choice("references", _REFERENCES), _value("output_dir", "None")),
+            inputs=_JUDGED, outputs=_SCORED, wrap={"references": "[{}]"},
+            analyses=tuple(analyses), help=help)
+      for key, title, analyses, help in _SCORES],
+    Block("bland-altman", "evaluate", "Bland-Altman plot", call="scoring.figure",
+          imports=(_SCORE, "from mrsvalidate.analysis import method_comparison",
+                   "from mrsvalidate.viz.agreement import plot_bland_altman"),
+          fields=(_choice("reference", _REFERENCES), _value("metabolite", "'all'")),
+          inputs=_JUDGED, outputs=(Port("figure"),),
+          fixed={"analysis": "method_comparison.bland_altman", "plot": "plot_bland_altman"},
+          help="Each method's differences from the truth against the truth, with its bias and "
+               "limits of agreement."),
+    Block("regression-plot", "evaluate", "Regression plot", call="scoring.figure",
+          imports=(_SCORE, "from mrsvalidate.analysis import regression",
+                   "from mrsvalidate.viz.scatter import plot_regression_result"),
+          fields=(_choice("reference", _REFERENCES), _value("metabolite", "'all'")),
+          inputs=_JUDGED, outputs=(Port("figure"),),
+          fixed={"analysis": "regression.regression_metrics", "plot": "plot_regression_result"},
+          help="Each method's fits against the truth, with its regression line."),
+    Block("radar", "evaluate", "Radar", call="plot_scores",
+          imports=("from mrsuite.benchmark import plot_scores",),
+          inputs=(Port("scores", SCORES, many=True),),
+          fields=(_choice("reference", _REFERENCES), _value("metabolite", "'all'")),
+          outputs=(Port("figure"),),
+          help="Score tables on one radar: a spoke per metric, a polygon per method."),
     # other
     *[Block(key, "other", title, options=tuple(options), help=help)
       for key, title, options, help in _OTHER],
@@ -388,31 +460,29 @@ def label(option: Tuple[str, str]) -> str:
     """An option as a person reads it: the toolbox, and the function where a toolbox
     offers several."""
     where, function = option
+    where = "MRSValidate" if where.startswith(f"{_MRSV}.") else where
     return {"fsl_mrs": "FSL-MRS", "fid_a": "FID-A", "osprey": "Osprey", "spant": "spant",
             "mrspeclab": "MRSpecLAB", "lcmodel": "LCModel", "tarquin": "TARQUIN",
-            "pyamares": "pyAMARES", "vespa": "Vespa", _CHALLENGE: "2016 challenge"}.get(
-        where, where) + f" · {function}"
+            "pyamares": "pyAMARES", "vespa": "Vespa", _CHALLENGE: "2016 challenge",
+            _SCORING: "MRSuite"}.get(where, where) + f" · {function}"
 
 
 #***********#
 #   ports   #
 #***********#
-def ports(b: Block, arguments: List[str], outputs: Optional[List[str]] = None) \
-        -> Tuple[List[Port], List[Port]]:
+def ports(b: Block, arguments: List[str]) -> Tuple[List[Port], List[Port]]:
     """
     A block's inputs and outputs: a step takes spectra, and each of its arguments, which
-    a wire gives or else the form; it makes what it makes; a file read makes the outputs
-    it found. An argument named basis takes a basis set (every fit's does); one named
-    files takes files, as a block reads them.
+    a wire gives or else the form; it makes what it makes. An argument named basis takes
+    a basis set (every fit's does); one named files takes files, as a block reads them.
+    A load's outputs are its names, which the graph knows (``Graph.ports``).
 
     Args:
         b (Block): The block.
         arguments (List[str]): Its arguments, each an input of its own.
-        outputs (Optional[List[str]]): The outputs a read found.
     """
     given = [Port(n, BASIS if n == "basis" else FILES if n == "files" else ANY)
              for n in arguments]
     if b.step:
         return [Port("data", SPECTRA), *given], [Port("out", b.out)]
-    found = [Port(n, SPECTRA) for n in outputs or []]
-    return [*b.inputs, *given], found or list(b.outputs)
+    return [*b.inputs, *given], list(b.outputs)

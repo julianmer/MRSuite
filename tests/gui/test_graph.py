@@ -164,16 +164,18 @@ def test_what_a_block_makes_while_another_is_edited_is_kept(graph, monkeypatch, 
     assert graph.nodes["n1"].made is not None
 
 
-def test_a_file_read_changed_drops_what_the_blocks_after_it_made(tmp_path):
+def test_files_loaded_changed_drop_what_the_blocks_after_it_made(tmp_path):
     graph = Graph()
-    read, snr = graph.add("files"), graph.add("snr")
-    graph.set(read, "files", [str(tmp_path / "a.nii.gz")])
-    graph.connect(read, "spectra", snr, "data")
+    read, snr = graph.add("load"), graph.add("snr")
+    graph.set(read, "entries", [(str(tmp_path / "a.nii.gz"), "data", "a", "nifti")])
+    graph.connect(read, "data", snr, "data")
     graph.nodes[snr].made = {"snr": 1.0}
 
-    graph.set(read, "files", [str(tmp_path / "a.dat")])            # read otherwise now
+    graph.set(read, "entries", [(str(tmp_path / "a.dat"), "data", "a", "twix")])
 
-    assert graph.nodes[snr].made is None
+    assert graph.nodes[snr].made is None and graph.edges, "the name is still there"
+    graph.set(read, "entries", [(str(tmp_path / "a.dat"), "metab", "a", "twix")])
+    assert not graph.edges, "a name gone takes its wires"
 
 
 #***********#
@@ -211,51 +213,53 @@ def test_a_basis_set_block_gives_a_fit_its_basis(tmp_path, monkeypatch):
     assert said["kwargs"]["basis"]["basis"]["sha256"] == made.checksum()
 
 
-#************#
-#   folder   #
-#************#
-def test_a_folder_block_loads_a_study_and_shows_the_roles_it_found(study):
+#**********#
+#   load   #
+#**********#
+def test_a_load_block_has_an_output_per_name_before_it_runs(study):
+    """Its names, known ones first, truth as truth; what it loads, written out in full."""
     graph = Graph()
-    folder, fit = graph.add("folder"), graph.add("lcm-fit")
-    graph.set(folder, "folder", str(study))
-    assert graph.ports(folder)[1] == [], "its outputs are known once it ran"
+    load, fit = graph.add("load"), graph.add("lcm-fit")
+    (study / "truth.json").write_text('{"NAA": 1.0}')
+    chosen = [(str(study / "truth.json"), "truth", "one", "truth"),
+              (str(study / "extra/press_metab_PFL.nii.gz"), "metab", "one", "nifti"),
+              (str(study / "sub-02/mrs/sub-02_acq-press_mrsref.nii.gz"), "water", "one", "nifti")]
+    graph.set(load, "entries", chosen)
 
-    with pytest.warns(UserWarning, match="do not line up"):
-        assert graph.run(folder)
-
-    assert [p.name for p in graph.ports(folder)[1]] == ["svs", "mrsref", "mm"]
-    assert len(graph.output(folder, "mrsref").list()) == 3
-    graph.connect(folder, "svs", fit, "data")
+    assert [(p.name, p.kind) for p in graph.ports(load)[1]] == [
+        ("water", "spectra"), ("truth", "truth"), ("metab", "spectra")]
+    graph.connect(load, "metab", fit, "data")
     graph.ask(fit)
     graph.show(fit, "water")                        # a port once put on the block
-    graph.connect(folder, "mrsref", fit, "water")
-    assert f"collect.load({str(study)!r})" in graph.script()
-    assert f"{graph.nodes[folder].name}['mrsref']" in graph.script()
-
-
-def test_a_blocks_own_list_of_files_loads_and_is_written_out_in_full(study):
-    """What the window collected, from anywhere, as (path, role, group) triples."""
-    graph = Graph()
-    folder = graph.add("folder")
-    chosen = [(str(study / "extra/press_metab_PFL.nii.gz"), "svs", "one"),
-              (str(study / "sub-02/mrs/sub-02_acq-press_mrsref.nii.gz"), "mrsref", "one")]
-    graph.set(folder, "entries", chosen)
-
-    assert graph.run(folder)
-    assert [p.name for p in graph.ports(folder)[1]] == ["svs", "mrsref"]
+    graph.connect(load, "water", fit, "water")
+    assert graph.run(load)
+    assert graph.output(load, "truth") == [{"NAA": 1.0}]
+    assert len(graph.output(load, "metab").list()) == 1
     assert all(repr(c) in graph.script() for c in chosen)
-    assert Graph.from_dict(graph.to_dict()).nodes[folder].values["entries"] == chosen
+    assert f"{graph.nodes[load].name}['water']" in graph.script()
+    assert Graph.from_dict(graph.to_dict()).nodes[load].values["entries"] == chosen
 
 
-def test_what_the_window_put_right_goes_into_the_script(study):
+def test_a_load_given_the_same_files_again_keeps_what_it_found_and_its_wires(study):
+    """A GE P-file's own water reference, found when it ran, stays wired."""
     graph = Graph()
-    folder = graph.add("folder")
-    graph.set(folder, "folder", str(study))
-    graph.set(folder, "roles", {"extra/press_mm_PFL.nii.gz": ""})      # left out
+    load, step = graph.add("load"), graph.add("averaging")
+    entries = [(str(study / "extra/press_metab_PFL.nii.gz"), "data", "x", "nifti")]
+    graph.set(load, "entries", entries)
+    graph.nodes[load].found = ["data", "water"]
+    graph.connect(load, "water", step, "data")
 
-    assert graph.run(folder)
-    assert [p.name for p in graph.ports(folder)[1]] == ["svs", "mrsref"]
-    assert "roles={'extra/press_mm_PFL.nii.gz': ''}" in graph.script()
+    graph.set(load, "entries", list(entries))
+
+    assert graph.edges and graph.nodes[load].found == ["data", "water"]
+
+
+def test_a_load_without_files_says_so():
+    graph = Graph()
+    load = graph.add("load")
+
+    with pytest.raises(ValueError, match="add files or folders"):
+        graph.code(load)
 
 
 #**************#
@@ -264,20 +268,46 @@ def test_what_the_window_put_right_goes_into_the_script(study):
 @needs_challenge
 @pytest.mark.skipif(not (externals.path("basic") / "basis_converter").exists(),
                     reason="BasiC submodule not checked out")
-def test_a_spectrum_wired_into_a_basis_set_becomes_one_of_its_functions():
+def test_spectra_and_basis_sets_wired_into_a_basis_set_become_its_functions():
+    """Each by its name there; a name in two refused until one is kept, and the script
+    says which."""
     graph = Graph()
-    data, basis, add = graph.add("ismrm2016"), graph.add("basis"), graph.add("basis-add")
+    data, basis, other, add = (graph.add(k) for k in ("ismrm2016", "basis", "basis",
+                                                       "basis-add"))
     graph.set(data, "n", 1)
-    graph.set(basis, "files", [str(challenge2016.BASIS)])
+    for b in (basis, other):
+        graph.set(b, "files", [str(challenge2016.BASIS)])
     graph.connect(basis, "basis", add, "basis")
-    graph.connect(data, "water", add, "spectrum")
-    graph.set(add, "name", "W")
+    graph.connect(data, "water", add, "more")
 
     assert graph.run()
-    assert graph.output(add).names[-1] == "W" and len(graph.output(add).names) == 22
-    assert "io.add_to_basis(basis, ismrm2016_water, name='W')" in graph.script()
+    assert graph.output(add).names[-1] == "water" and len(graph.output(add).names) == 22
+    assert "io.merge_basis(basis, {'water': ismrm2016_water})" in graph.script()
+    graph.connect(other, "basis", add, "more")
+    with pytest.raises(ValueError, match="a name in two places"):
+        graph.run()
+    keep = {n: "basis" for n in graph.output(basis).names if n != "Cr"} | {"Cr": "basis_2"}
+    graph.set(add, "keep", keep)
+    assert graph.run() and graph.output(add).names == list(keep)            # no water
+    assert f"keep={keep!r}" in graph.script()
     fit = graph.add("lcm-fit")
     graph.connect(add, "basis", fit, "basis")                   # a basis port takes it
+
+
+def test_wires_into_one_input_are_named_by_block_or_by_output():
+    """A load's outputs by their names; two of the same name by their block's too."""
+    graph = Graph()
+    load, again, merge = graph.add("load"), graph.add("load"), graph.add("basis-add")
+    graph.set(load, "entries", [("a.nii.gz", "mm", "g", "nifti"),
+                                ("b.nii.gz", "water", "g", "nifti")])
+    graph.set(again, "entries", [("c.nii.gz", "mm", "g", "nifti")])
+    for source in (load, again):
+        graph.connect(source, "mm", merge, "more")
+    graph.connect(load, "water", merge, "more")
+
+    assert [label for label, _ in graph.labels(merge, "more")] == ["mm", "load_2_mm", "water"]
+    assert graph._wires(graph.nodes[merge])["more"] == \
+        "{'mm': load['mm'], 'load_2_mm': load_2['mm'], 'water': load['water']}"
 
 
 #***********#
@@ -436,7 +466,7 @@ def test_wires_keep_to_their_kinds_and_make_no_loops():
 def test_an_input_taking_many_gets_them_by_name():
     graph = Graph()
     data, one, two, score = (graph.add(k) for k in
-                             ("ismrm2016", "lcm-fit", "lcm-fit", "benchmark"))
+                             ("ismrm2016", "lcm-fit", "lcm-fit", "errors"))
     for fit in (one, two):
         graph.connect(data, "spectra", fit, "data")
         graph.connect(fit, "out", score, "methods")
@@ -445,9 +475,99 @@ def test_an_input_taking_many_gets_them_by_name():
     graph.set(score, "output_dir", "runs")
 
     assert graph.code(score)[0] == (
-        "benchmark = scoring.score({'lcm_fit': lcm_fit, 'lcm_fit_2': lcm_fit_2}, "
+        "errors_ = scoring.score({'lcm_fit': lcm_fit, 'lcm_fit_2': lcm_fit_2}, "
         "ismrm2016_truth, references=['optimal'], output_dir='runs', "
-        "metrics={'mae': scoring.mae, 'bias': scoring.bias})")
+        "metrics={'mae': scoring.mae})")
+
+
+#***************#
+#   analyses   #
+#***************#
+def test_a_score_offers_its_analyses_and_their_own_arguments():
+    """Another analysis keeps the reference and drops the last one's arguments; one that
+    needs arguments of its own says so, and gets them by partial."""
+    graph = Graph()
+    score = graph.add("method-comparison")
+    graph.connect(graph.add("lcm-fit"), "out", score, "methods")
+    graph.connect(graph.add("ismrm2016"), "truth", score, "truth")
+    graph.set(score, "references", "tCr")
+    graph.set(score, "scale", "sd")
+    b = blocks.BLOCKS["method-comparison"]
+
+    assert [f.name for f in graph.fields(score)] == ["references", "output_dir", "x_axis",
+                                                     "location", "scale", "conditional"]
+    assert "partial(method_comparison.bland_altman, scale='sd')" in graph.code(score)[0]
+    graph.choose(score, [f for _, f in b.analyses].index("deming"))
+    assert graph.nodes[score].values == {"references": "tCr"}
+    with pytest.raises(ValueError, match="set reference_error_variance, test_error_variance"):
+        graph.code(score)
+    graph.set(score, "reference_error_variance", 1.0)
+    graph.set(score, "test_error_variance", 2.0)
+    line, imports, _ = graph.code(score)
+    assert "metrics={'deming': partial(method_comparison.deming, reference_error_variance=1.0, " \
+        "test_error_variance=2.0)}" in line
+    assert {"from functools import partial",
+            "from mrsvalidate.analysis import method_comparison"} <= imports
+
+
+def test_a_saved_score_keeps_its_analysis_and_a_reference_left_unset_is_said(tmp_path):
+    graph = Graph()
+    score = graph.add("errors")
+    graph.connect(graph.add("lcm-fit"), "out", score, "methods")
+    graph.connect(graph.add("ismrm2016"), "truth", score, "truth")
+
+    with pytest.raises(ValueError, match="set references"):
+        graph.code(score)
+    graph.choose(score, 2)                                          # rmse
+    assert Graph.from_dict(graph.to_dict()).nodes[score].option == 2
+
+
+def test_wires_into_one_input_never_share_a_name_nor_take_another_inputs():
+    graph = Graph()
+    named, load, merge = graph.add("basis"), graph.add("load"), graph.add("basis-add")
+    again = graph.add("load")
+    graph.set(load, "entries", [("a.nii.gz", "load_2_x", "g", "nifti"),
+                                ("b.nii.gz", "x", "g", "nifti")])
+    graph.set(again, "entries", [("c.nii.gz", "x", "g", "nifti")])
+    for source, output in ((named, "basis"), (load, "load_2_x"), (load, "x"), (again, "x")):
+        graph.connect(source, output, merge, "more")
+
+    labels = [label for label, _ in graph.labels(merge, "more")]
+
+    assert labels == ["basis_basis", "load_2_x", "x", "load_2_x_2"]
+
+
+def test_every_analysis_score_runs_has_a_block():
+    from mrsuite.benchmark import scoring
+
+    offered = [(where.rsplit(".", 1)[-1], f) for b in blocks.BLOCKS.values()
+               for where, f in b.analyses]
+
+    assert sorted(offered) == sorted([("scoring", "mae"), ("scoring", "bias"),
+                                      *(tuple(k.split(".")) for k in scoring.analyses())])
+
+
+@needs_challenge
+def test_scores_of_fits_draw_on_a_radar_as_the_script_draws_them(graph):
+    """MOSAE and Lin's CCC of one fit, on one radar; the script makes the same tables."""
+    data, fit = "n1", "n3"
+    mosae, ccc, radar = graph.add("mosae"), graph.add("agreement"), graph.add("radar")
+    for score in (mosae, ccc):
+        graph.connect(fit, "out", score, "methods")
+        graph.connect(data, "truth", score, "truth")
+        graph.connect(score, "scores", radar, "scores")
+    graph.set(ccc, "references", "optimal")
+    graph.set(radar, "reference", "optimal")
+
+    assert graph.run()
+    namespace = {}
+    exec(graph.script(), namespace)
+
+    drawn = graph.output(radar)
+    assert [t.get_text().split("\n")[0] for t in drawn.get_xticklabels()] == ["lin_ccc", "mosae"]
+    for score in (mosae, ccc):
+        assert graph.output(score).equals(namespace[graph.nodes[score].name])
+    assert exports(drawn) == ["figure"] and thumb(drawn) == {"kind": "text", "text": "figure"}
 
 
 def test_another_toolbox_starts_its_form_and_keeps_the_wires_it_takes():
@@ -546,7 +666,7 @@ def test_a_saved_graph_comes_back_the_same(tmp_path):
 
 def test_a_saved_graph_keeps_its_toolboxes_wires_and_texts(tmp_path):
     graph = Graph()
-    data, fit, read = graph.add("ismrm2016"), graph.add("lcm-fit"), graph.add("files")
+    data, fit, read = graph.add("ismrm2016"), graph.add("lcm-fit"), graph.add("load")
     graph.choose(fit, 1)                                           # LCModel
     graph.set(fit, "basis", "a 'quoted' path.basis")
     graph.show(fit, "water")
@@ -597,23 +717,6 @@ def test_a_further_argument_named_as_a_python_keyword_is_spelt_out():
     line = graph.code(step)[0]
     assert "ok=2" in line and "**{'lambda': 1}" in line
     compile(line, "<line>", "exec")
-
-
-#*************#
-#   outputs   #
-#*************#
-@needs_challenge
-def test_files_read_show_what_they_hold(tmp_path):
-    data, _, _ = challenge2016.load(1)
-    data.list()[0].save(str(tmp_path / "scan.nii.gz"))
-    graph = Graph()
-    read = graph.add("files")
-    graph.set(read, "files", [str(tmp_path / "scan.nii.gz")])
-
-    assert [p.name for p in graph.ports(read)[1]] == ["spectra"]
-    graph.run()
-    assert len(graph.output(read)) == 1
-    assert graph.code(read)[0] == f"files = io.read({str(tmp_path / 'scan.nii.gz')!r})"
 
 
 #************#
@@ -713,7 +816,7 @@ def test_a_thumbnail_shows_from_half_a_ppm():
 #****************#
 #   call lines   #
 #****************#
-@pytest.mark.parametrize("key", [k for k, b in blocks.BLOCKS.items() if b.call and k != "files"])
+@pytest.mark.parametrize("key", [k for k, b in blocks.BLOCKS.items() if b.call and k != "load"])
 def test_a_call_blocks_line_fits_its_function(key):
     """Every field and input given, the line binds to the function it calls."""
     import ast
@@ -729,7 +832,8 @@ def test_a_call_blocks_line_fits_its_function(key):
         graph.set(id, f.name, f.choices[0] if f.choices else 1)
     for p in b.inputs:
         key, output = {blocks.RESULTS: ("lcm-fit", "out"), blocks.BASIS: ("basis", "basis"),
-                       blocks.SPECTRA: ("ismrm2016", "spectra")}.get(p.kind, ("ismrm2016", "truth"))
+                       blocks.SPECTRA: ("ismrm2016", "spectra"),
+                       blocks.SCORES: ("errors", "scores")}.get(p.kind, ("ismrm2016", "truth"))
         graph.connect(graph.add(key), output, id, p.name)
 
     call = ast.parse(graph.code(id)[0]).body[0].value
@@ -741,7 +845,7 @@ def test_a_call_blocks_line_fits_its_function(key):
 #***********#
 def test_what_flows_meets_only_what_takes_it():
     graph = Graph()
-    simulated, score = graph.add("simulation"), graph.add("benchmark")
+    simulated, score = graph.add("simulation"), graph.add("errors")
     model, averaging = graph.add("model"), graph.add("averaging")
 
     with pytest.raises(ValueError, match="cannot go into"):        # MRS-Sim's own truth

@@ -21,32 +21,29 @@ from typing import Any, Callable, List
 
 from nicegui import ui
 
-from mrsuite.gui.blocks import FORMATS
-
 
 #**************************************************************************************************#
 #                                           Class Picker                                           #
 #**************************************************************************************************#
 #                                                                                                  #
-# A dialog that chooses files, or a folder, on this machine, and the format to read them as.       #
+# A dialog that chooses files and folders on this machine, any number of each at once.             #
 #                                                                                                  #
 #**************************************************************************************************#
 class Picker(ui.dialog):
-    """A dialog that chooses files, or a folder, on this machine, and the format to read
-    them as.
+    """A dialog that chooses files and folders on this machine, any number of each at once:
+    the system's own dialogs choose one or the other.
 
     Args:
         start (Path): The folder it opens in.
-        on_choose (Callable): Called with the paths and the format, and awaited.
+        on_choose (Callable): Called with the paths, and awaited.
         title (str): What it is for.
-        formats (bool): Whether to ask the format to read them as ('auto' if not).
     """
 
     #**********#
     #   init   #
     #**********#
-    def __init__(self, start: Path, on_choose: Callable[[List[Path], str], Any],
-                 title: str = "Open data", formats: bool = True) -> None:
+    def __init__(self, start: Path, on_choose: Callable[[List[Path]], Any],
+                 title: str = "Open data") -> None:
         super().__init__()
         self.path, self.chosen, self.on_choose = Path(start), set(), on_choose
         with self, ui.card().classes("w-[44rem] max-w-full"):
@@ -59,8 +56,8 @@ class Picker(ui.dialog):
                 self.where.on("keydown.enter", lambda: self.show(Path(self.where.value)))
             self.listing = ui.column().classes("w-full h-80 overflow-auto gap-0")
             with ui.row().classes("w-full items-center"):
-                self.format = ui.select(FORMATS, value="auto", label="Format") \
-                    .classes("w-32").set_visibility(formats)
+                ui.label("Tick files and folders; open a folder by its name.") \
+                    .classes("text-xs mr-muted")
                 ui.space()
                 ui.button("Cancel", on_click=self.close).props("flat")
                 ui.button("This folder", on_click=lambda: self.choose([self.path])) \
@@ -73,7 +70,8 @@ class Picker(ui.dialog):
     #   show   #
     #**********#
     def show(self, path: Path) -> None:
-        """Show a folder: its folders first, to go into, then its files, to tick."""
+        """Show a folder: its folders first, then its files, each to tick; a folder opened
+        by its name."""
         if not path.is_dir():
             ui.notify(f"{path} is not a folder", type="warning")
             return
@@ -89,21 +87,24 @@ class Picker(ui.dialog):
             for entry in entries:
                 if entry.name.startswith("."):
                     continue
-                if entry.is_dir():
-                    ui.button(entry.name, icon="folder",
-                              on_click=lambda _, e=entry: self.show(e)) \
-                        .props("flat dense no-caps align=left").classes("w-full")
-                else:
-                    ui.checkbox(entry.name, on_change=lambda ev, e=entry: (
+                with ui.row().classes("w-full items-center no-wrap gap-0"):
+                    ui.checkbox(on_change=lambda ev, e=entry: (
                         self.chosen.add(e) if ev.value else self.chosen.discard(e))) \
-                        .mark(f"file-{entry.name}")
+                        .props("dense").mark(f"file-{entry.name}")
+                    if entry.is_dir():
+                        ui.button(entry.name, icon="folder",
+                                  on_click=lambda _, e=entry: self.show(e)) \
+                            .props("flat dense no-caps align=left").classes("grow") \
+                            .mark(f"open-{entry.name}")
+                    else:
+                        ui.label(entry.name).classes("px-2")
 
     #************#
     #   choose   #
     #************#
     async def choose(self, paths: List[Path]) -> None:
         if not paths:
-            ui.notify("tick a file, or open this folder", type="warning")
+            ui.notify("tick a file or a folder, or take this folder", type="warning")
             return
-        await self.on_choose(paths, self.format.value)      # before closing: closing says
+        await self.on_choose(paths)                         # before closing: closing says
         self.close()                                        # nothing was chosen

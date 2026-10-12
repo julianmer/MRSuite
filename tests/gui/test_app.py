@@ -27,8 +27,9 @@ import nicegui                                                          # noqa: 
 from nicegui import ui                                                  # noqa: E402
 from nicegui.testing.user_simulation import user_simulation            # noqa: E402
 
+from mrsuite import collect                                             # noqa: E402
 from mrsuite.datasets import challenge2016                              # noqa: E402
-from mrsuite.gui.app import App                                         # noqa: E402
+from mrsuite.gui.app import App, _found                                 # noqa: E402
 from mrsuite.gui.canvas import Canvas                                   # noqa: E402
 from mrsuite.gui.graph import Graph                                     # noqa: E402
 
@@ -227,37 +228,49 @@ def test_a_block_gone_before_its_toolbox_answered_is_let_go(caplog):
     assert "KeyError" not in caplog.text
 
 
-def test_a_folder_chosen_for_a_load_folder_block_is_set_and_loaded(tmp_path):
+def test_a_load_block_added_asks_for_files_and_folders_at_once_and_loads_them(study):
+    """Its window opens on the page's own picker, a folder and a file chosen together;
+    the folder is searched and every file named; Load loads them."""
     graph = Graph()
 
     async def script(user, app):
         asked, runs = [], []
 
-        async def pick(title="Open data", formats=True, folder=False):
-            asked.append((formats, folder))
-            return [tmp_path], "auto"
+        async def pick(title="Open data", both=False):
+            asked.append(both)
+            return [study / "sub-02", study / "extra/press_mm_PFL.nii.gz"]
 
         async def run(*args):
             runs.append(args)
         app._pick, app.run = pick, run
         with app.client:
-            id = app.add("folder")
+            id = app.add("load")
+        await user.should_see(marker="collect-table")
+        table = user.find(marker="collect-table").elements.pop()
+        await until(lambda: len(table.rows) == 3)
+        assert [(r["file"], r["name"]) for r in table.rows] == [
+            ("press_mm_PFL.nii.gz", "mm"), ("sub-02_acq-press_svs.nii.gz", "data"),
+            ("sub-02_acq-press_mrsref.nii.gz", "water")]
+        user.find(marker="collect-load").click()
         await until(lambda: runs)
-        assert graph.nodes[id].values == {"folder": str(tmp_path)}
-        assert asked == [(False, True)] and runs == [(id,)]
-        await user.should_see("Choose folder…")
-        await user.should_not_see(marker="field-folder")
+        assert asked == [True] and runs == [(id,)]
+        assert [e[1] for e in graph.nodes[id].values["entries"]] == ["mm", "data", "water"]
+        await user.should_see("Add or name files…")
+        await user.should_see("water: 1 file")
 
     simulate(graph, script)
 
 
-def test_the_collect_window_takes_files_from_anywhere_and_sets_many_at_once(study):
-    """A folder discovered, files added from elsewhere, rows chosen given a role and a
-    group together, one removed; what is left is the block's own list, and loads."""
+def test_the_load_window_names_many_files_at_once_in_order(study):
+    """Files added from elsewhere, rows chosen given a name and a group together, others
+    removed; a file nothing reads waits for its format; what is left is the block's own
+    list, kept in order by group and name, and loads."""
     graph = Graph()
-    folder = graph.add("folder")
-    graph.set(folder, "folder", str(study / "sub-02"))
-    elsewhere = [study / "extra/press_metab_PFL.nii.gz", study / "extra/press_mm_PFL.nii.gz"]
+    load = graph.add("load")
+    graph.set(load, "entries", collect.as_tuples(collect.discover(study / "sub-02")))
+    (study / "extra" / "notes.txt").write_text("")
+    elsewhere = [study / "extra/press_metab_PFL.nii.gz", study / "extra/press_mm_PFL.nii.gz",
+                 study / "extra/notes.txt"]
 
     async def script(user, app):
         runs = []
@@ -265,36 +278,260 @@ def test_the_collect_window_takes_files_from_anywhere_and_sets_many_at_once(stud
         async def run(*args):
             runs.append(args)
 
-        async def pick(title="Open data", formats=True, folder=False):
-            return elsewhere, "auto"
+        async def pick(title="Open data", both=False):
+            return elsewhere
         app.run, app._pick = run, pick
 
         async def opened():
             with app.client:
-                await app.collect(folder)
+                await app.collect(load)
         task = asyncio.create_task(opened())
         await user.should_see(marker="collect-table")
         table = user.find(marker="collect-table").elements.pop()
         assert [r["file"] for r in table.rows] == ["sub-02_acq-press_svs.nii.gz",
                                                    "sub-02_acq-press_mrsref.nii.gz"]
-        user.find(marker="collect-files").click()
-        await until(lambda: len(table.rows) == 4)
-        assert [r["role"] for r in table.rows] == ["svs", "mrsref", "svs", "mm"]
-        table.selected = [r for r in table.rows if "extra" in r["path"]]
-        user.find(marker="collect-role").elements.pop().set_value("mrsref")
+        user.find(marker="collect-add").click()
+        await until(lambda: len(table.rows) == 5)
+        assert [(r["file"], r["name"], r["format"]) for r in table.rows][:3] == [
+            ("notes.txt", "data", ""), ("press_metab_PFL.nii.gz", "data", "nifti"),
+            ("press_mm_PFL.nii.gz", "mm", "nifti")]
+        user.find(marker="collect-load").click()
+        await user.should_see("Give a format to notes.txt")
+        table.selected = [r for r in table.rows if r["file"] == "press_metab_PFL.nii.gz"]
+        user.find(marker="collect-name").elements.pop().set_value("water")
         user.find(marker="collect-group").elements.pop().set_value("water-run")
         user.find(marker="collect-apply").click()
-        table.selected = [r for r in table.rows if r["file"] == "press_mm_PFL.nii.gz"]
+        table.selected = [r for r in table.rows if r["file"] in ("press_mm_PFL.nii.gz",
+                                                                   "notes.txt")]
         user.find(marker="collect-remove").click()
         user.find(marker="collect-load").click()
         await task
 
-        assert graph.nodes[folder].values["entries"] == [
-            (str(study / "sub-02/mrs/sub-02_acq-press_svs.nii.gz"), "svs", "sub-02_acq-press"),
-            (str(study / "sub-02/mrs/sub-02_acq-press_mrsref.nii.gz"), "mrsref", "sub-02_acq-press"),
-            (str(elsewhere[0]), "mrsref", "water-run")]
-        assert runs == [(folder,)]
+        assert graph.nodes[load].values["entries"] == [
+            (str(study / "sub-02/mrs/sub-02_acq-press_svs.nii.gz"), "data", "sub-02_acq-press",
+             "nifti"),
+            (str(study / "sub-02/mrs/sub-02_acq-press_mrsref.nii.gz"), "water",
+             "sub-02_acq-press", "nifti"),
+            (str(elsewhere[0]), "water", "water-run", "nifti")]
+        assert runs == [(load,)]
         assert "collect.load([\n" in graph.script()
+
+    simulate(graph, script)
+
+
+#*****************#
+#   basis merge   #
+#*****************#
+def test_functions_kept_are_ticked_one_per_name():
+    """Each input's functions, a name both have kept from where it was ticked last; all
+    of them, one per name, is no choice at all."""
+    from mrsuite.core.basis import Basis
+
+    graph = Graph()
+    basis, other, merge = graph.add("basis"), graph.add("basis"), graph.add("basis-add")
+    graph.connect(basis, "basis", merge, "basis")
+    graph.connect(other, "basis", merge, "more")
+    fid = np.ones((1, 8), complex)
+    graph.nodes[basis].made = {"basis": Basis(["NAA", "Cr"], np.vstack([fid, fid]), 1.0, 1.0)}
+    graph.nodes[other].made = {"basis_2": Basis(["Cr"], fid, 1.0, 1.0)}
+
+    async def script(user, app):
+        async def chosen(answer):
+            async def kept():
+                with app.client:
+                    await app.functions_kept(merge)
+            task = asyncio.create_task(kept())
+            await user.should_see(marker="keep-done")
+            await answer()
+            await task
+
+        async def other_cr():
+            assert user.find(marker="keep-basis-Cr").elements.pop().value is True
+            user.find(marker="keep-basis_2-Cr").elements.pop().set_value(True)
+            assert user.find(marker="keep-basis-Cr").elements.pop().value is False
+            user.find(marker="keep-done").click()
+        await chosen(other_cr)
+        assert graph.nodes[merge].values["keep"] == {"NAA": "basis", "Cr": "basis_2"}
+
+        async def own_cr():
+            user.find(marker="keep-basis-Cr").elements.pop().set_value(True)
+            user.find(marker="keep-done").click()
+        await chosen(own_cr)
+        assert graph.nodes[merge].values["keep"] == {"NAA": "basis", "Cr": "basis"}
+
+    simulate(graph, script)
+
+
+def test_the_load_window_outlives_a_run_ending_while_it_is_open(study, monkeypatch):
+    """Opened from the inspector, which a run's end redraws: the window stays."""
+    graph = Graph()
+    data, load = graph.add("ismrm2016"), graph.add("load")
+    graph.set(data, "n", 1)
+    graph.set(load, "entries", collect.as_tuples(collect.discover(study / "sub-02")))
+    slow(monkeypatch, graph, data)
+
+    async def script(user, app):
+        with app.client:
+            app.select(load)
+        await user.should_see(marker="collect")
+        running = asyncio.create_task(app.run(data))
+        await until(lambda: app.running == data)
+        user.find(marker="collect").click()              # the inspector's button
+        await user.should_see(marker="collect-table")
+        await running
+        await asyncio.sleep(0.5)
+        await user.should_see(marker="collect-table")
+        user.find(marker="collect-load").click()
+
+    simulate(graph, script)
+
+
+def test_a_folder_and_a_file_in_it_chosen_together_are_one_row_each(study):
+    graph = Graph()
+    load = graph.add("load")
+    chosen = [study / "sub-02", study / "sub-02/mrs/sub-02_acq-press_svs.nii.gz"]
+
+    async def script(user, app):
+        async def pick(title="Open data", both=False):
+            return chosen
+        app._pick = pick
+
+        async def opened():
+            with app.client:
+                await app.collect(load)
+        task = asyncio.create_task(opened())
+        await user.should_see(marker="collect-table")
+        table = user.find(marker="collect-table").elements.pop()
+        await until(lambda: len(table.rows) >= 2)
+        await asyncio.sleep(0.3)
+        user.find(marker="collect-load").click()
+        await task
+        assert len(table.rows) == 2
+        assert len(_found(chosen)) == 2, "dropped, too"
+
+    simulate(graph, script)
+
+
+def test_functions_kept_are_those_still_wired_in_and_none_ticked_stays_so():
+    """A kept function whose input went is let go; keeping nothing reopens as nothing."""
+    from mrsuite.core.basis import Basis
+
+    graph = Graph()
+    basis, other, merge, third = (graph.add(k) for k in ("basis", "basis", "basis-add",
+                                                          "basis"))
+    graph.connect(basis, "basis", merge, "basis")
+    graph.connect(other, "basis", merge, "more")
+    fid = np.ones((1, 8), complex)
+    graph.nodes[basis].made = {"basis": Basis(["NAA", "Cr"], np.vstack([fid, fid]), 1.0, 1.0)}
+    graph.nodes[other].made = {"basis_2": Basis(["GABA"], fid, 1.0, 1.0)}
+    graph.nodes[third].made = {"basis_3": Basis(["Lac"], fid, 1.0, 1.0)}
+    graph.set(merge, "keep", {"NAA": "basis", "GABA": "basis_2"})
+
+    async def script(user, app):
+        app.removed("node", [other])
+        with app.client:
+            app.connect(third, "basis", merge, "more")
+
+        async def kept(answer):
+            async def opened():
+                with app.client:
+                    await app.functions_kept(merge)
+            task = asyncio.create_task(opened())
+            await user.should_see(marker="keep-done")
+            answer()
+            user.find(marker="keep-done").click()
+            await task
+
+        await kept(lambda: user.find(marker="keep-basis_3-Lac").elements.pop().set_value(True))
+        assert graph.nodes[merge].values["keep"] == {"NAA": "basis", "Lac": "basis_3"}
+        graph.set(merge, "keep", {})
+        ticked = []
+        await kept(lambda: ticked.extend(user.find(marker=m).elements.pop().value
+                                         for m in ("keep-basis-NAA", "keep-basis_3-Lac")))
+        assert ticked == [False, False] and graph.nodes[merge].values["keep"] == {}
+
+    simulate(graph, script)
+
+
+def test_a_basis_set_named_basis_wired_into_more_is_a_column_of_its_own():
+    from mrsuite.core.basis import Basis
+
+    graph = Graph()
+    first, second, merge = graph.add("basis"), graph.add("basis"), graph.add("basis-add")
+    graph.connect(second, "basis", merge, "basis")
+    graph.connect(first, "basis", merge, "more")
+    fid = np.ones((1, 8), complex)
+    graph.nodes[first].made = {"basis": Basis(["Lac"], fid, 1.0, 1.0)}
+    graph.nodes[second].made = {"basis_2": Basis(["NAA"], fid, 1.0, 1.0)}
+
+    async def script(user, app):
+        async def opened():
+            with app.client:
+                await app.functions_kept(merge)
+        task = asyncio.create_task(opened())
+        await user.should_see(marker="keep-done")
+        await user.should_see(marker="keep-basis-NAA")
+        await user.should_see(marker="keep-basis_basis-Lac")
+        user.find(marker="keep-done").click()
+        await task
+
+    simulate(graph, script)
+
+
+def test_a_block_gone_while_its_functions_are_made_is_let_go(study, monkeypatch):
+    from mrsuite.core.basis import Basis
+
+    graph = Graph()
+    basis, load, merge = graph.add("basis"), graph.add("load"), graph.add("basis-add")
+    graph.set(load, "entries", [(str(study / "extra/press_mm_PFL.nii.gz"), "mm", "x", "nifti")])
+    graph.connect(basis, "basis", merge, "basis")
+    graph.connect(load, "mm", merge, "more")
+    graph.nodes[basis].made = {"basis": Basis(["NAA"], np.ones((1, 8), complex), 1.0, 1.0)}
+    slow(monkeypatch, graph, load)
+
+    async def script(user, app):
+        async def opened():
+            with app.client:
+                await app.functions_kept(merge)
+        task = asyncio.create_task(opened())
+        await until(lambda: app.running == load)
+        app.removed("node", [load])
+        await task                                       # no KeyError
+
+    simulate(graph, script)
+
+
+#**************#
+#   analyses   #
+#**************#
+def test_a_score_shows_its_analysis_and_its_own_arguments():
+    graph = Graph()
+    score = graph.add("method-comparison")
+
+    async def script(user, app):
+        with app.client:
+            app.select(score)
+        await user.should_see("Analysis")
+        await user.should_see("bland_altman(reference")            # its help
+        await user.should_not_see(marker="field-reference_error_variance")
+        with app.client:
+            await app._choose(score, 2)                   # deming
+        await user.should_see(marker="field-reference_error_variance")
+
+    simulate(graph, script)
+
+
+def test_a_figure_made_is_shown_as_a_picture():
+    from matplotlib.figure import Figure
+
+    graph = Graph()
+    radar = graph.add("radar")
+    graph.nodes[radar].made = {"radar": Figure().add_subplot()}
+
+    async def script(user, app):
+        with app.client:
+            await app.act(radar, "preview")
+        await user.should_see(marker="figure")
 
     simulate(graph, script)
 
@@ -402,8 +639,8 @@ def test_a_spectrum_with_coils_offers_to_draw_them_apart_and_stacked(tmp_path):
     path, = NIfTI_MRS_Plus([gen_nifti_mrs(fids, 2.5e-4, 123.2, dim_tags=["DIM_COIL", None, None])]) \
         .save_nifti(str(tmp_path), prefix="coils")
     graph = Graph()
-    data = graph.add("files")
-    graph.set(data, "files", [path])
+    data = graph.add("load")
+    graph.set(data, "entries", [(path, "data", "coils", "nifti")])
 
     async def script(user, app):
         await app.run()
@@ -411,7 +648,7 @@ def test_a_spectrum_with_coils_offers_to_draw_them_apart_and_stacked(tmp_path):
             await app.act(data, "preview")
         await user.should_see(marker="spread")
         app._show(stack=1.0)
-        figure = app._figure(app.graph.output(data).list()[0])
+        figure = app._figure(app.graph.output(data, "data").list()[0])
         assert [d["name"] for d in figure["data"]] == ["coil 0", "coil 1"]
         assert max(figure["data"][1]["y"]) > 2 * max(figure["data"][0]["y"]), "stacked above"
 
@@ -447,29 +684,39 @@ def test_the_native_open_dialog_gets_what_can_reach_the_window(monkeypatch, tmp_
     async def script(user, app):
         with monkeypatch.context() as patch:               # the window only while picking
             patch.setattr(nicegui.app.native, "main_window", Window())
-            assert await app._pick() == ([tmp_path / "a.nii.gz"], "auto")
+            assert await app._pick() == [tmp_path / "a.nii.gz"]
 
     simulate(Graph(), script)
     assert len(asked) == 1
 
 
-def test_the_native_window_can_choose_a_folder_too(monkeypatch, tmp_path):
-    """A DICOM series is a folder; pywebview's dialog chooses files or a folder, not both."""
-    import webview
+def test_files_and_folders_together_come_from_the_pages_own_picker_in_the_window_too(
+        monkeypatch, tmp_path):
+    """pywebview's dialog chooses files or a folder, not both."""
+    from mrsuite.gui.files import Picker
     asked = []
 
     class Window:
         async def create_file_dialog(self, *args, **kwargs):
             asked.append(kwargs)
-            return (str(tmp_path),)
 
     async def script(user, app):
         with monkeypatch.context() as patch:
             patch.setattr(nicegui.app.native, "main_window", Window())
-            assert await app._pick(folder=True) == ([tmp_path], "auto")
+            app.folder = tmp_path
+
+            async def pick():
+                with app.client:
+                    return await app._pick(both=True)
+            task = asyncio.create_task(pick())
+            await until(lambda: any(isinstance(e, Picker) for e in app.client.elements.values()))
+            picker = next(e for e in app.client.elements.values() if isinstance(e, Picker))
+            with app.client:
+                await picker.choose([tmp_path, tmp_path / "a.nii.gz"])
+            assert await task == [tmp_path, tmp_path / "a.nii.gz"]
 
     simulate(Graph(), script)
-    assert asked[0]["dialog_type"] == webview.FileDialog.FOLDER
+    assert asked == []
 
 
 #*************#
@@ -554,20 +801,25 @@ def test_a_new_graph_during_a_run_is_its_own(monkeypatch):
 
 
 @needs_challenge
-def test_files_chosen_during_a_run_are_read(monkeypatch, tmp_path):
+def test_files_loaded_during_a_run_are_read(monkeypatch, tmp_path):
     graph = Graph()
-    data, read = graph.add("ismrm2016"), graph.add("files")
+    data, read = graph.add("ismrm2016"), graph.add("load")
     graph.set(data, "n", 1)
+    graph.set(read, "entries", [(str(tmp_path / "one.nii.gz"), "data", "one", "nifti")])
     slow(monkeypatch, graph, data)
     challenge2016.load(1)[0].list()[0].save(str(tmp_path / "one.nii.gz"))
 
     async def script(user, app):
-        async def pick(**_):
-            return [tmp_path / "one.nii.gz"], "auto"
-        app._pick = pick
         task = asyncio.create_task(app.run())
         await until(lambda: app.running == data)
-        await app.choose_files(read)
+
+        async def opened():
+            with app.client:
+                await app.collect(read)
+        loading = asyncio.create_task(opened())
+        await user.should_see(marker="collect-load")
+        user.find(marker="collect-load").click()
+        await loading
         assert graph.nodes[read].made is not None
         await task
 
@@ -582,9 +834,9 @@ def test_files_chosen_for_a_basis_set_are_set_and_not_read(tmp_path):
     async def script(user, app):
         asked, runs = [], []
 
-        async def pick(title="Open data", formats=True, folder=False):
-            asked.append(formats)
-            return chosen, "auto"
+        async def pick(title="Open data", both=False):
+            asked.append(both)
+            return chosen
 
         async def run(*args):
             runs.append(args)
@@ -607,7 +859,7 @@ def test_a_block_whose_files_are_chosen_is_not_wired_in_after_the_one_selected()
     data = graph.add("ismrm2016")
 
     async def script(user, app):
-        async def pick(**_):
+        async def pick(*_, **__):
             return None
         app._pick = pick
         with app.client:
@@ -743,13 +995,13 @@ def test_a_file_chosen_in_the_pages_own_picker_is_taken(tmp_path):
         app.folder = tmp_path
         async def pick():                              # as the folder button does
             with app.client:
-                return await app._pick("Choose a file", formats=False)
+                return await app._pick("Choose a file")
         task = asyncio.create_task(pick())
         await until(lambda: any(isinstance(e, Picker) for e in app.client.elements.values()))
         picker = next(e for e in app.client.elements.values() if isinstance(e, Picker))
         with app.client:
             await picker.choose([tmp_path / "set.BASIS"])
-        assert await task == ([tmp_path / "set.BASIS"], "auto")
+        assert await task == [tmp_path / "set.BASIS"]
 
     simulate(graph, script)
 

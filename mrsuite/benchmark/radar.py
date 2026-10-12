@@ -15,7 +15,7 @@
 #*************#
 #   imports   #
 #*************#
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -66,3 +66,51 @@ def radar(values: pd.DataFrame, limits: Optional[Dict[str, Tuple[float, float]]]
     ax.set_ylim(0, 1)
     ax.legend()
     return ax
+
+
+#*****************#
+#   plot scores   #
+#*****************#
+def plot_scores(scores: Union[pd.DataFrame, Dict[str, pd.DataFrame]], reference: str,
+                metabolite: str = "all",
+                limits: Optional[Dict[str, Tuple[float, float]]] = None, ax: Any = None) -> Any:
+    """
+    Score tables on a radar plot: one spoke per metric, each its 'score' (score's first
+    number of a result), one polygon per method, on one reference and metabolite.
+
+    Args:
+        scores (Union[pd.DataFrame, Dict[str, pd.DataFrame]]): One table of score's, or
+            several by name, e.g. one per metric.
+        reference (str): Which reference's scores.
+        metabolite (str): Which metabolite's, or 'all' pooled.
+        limits (Optional[Dict[str, Tuple[float, float]]]): As in radar.
+        ax (Any): A polar axes to draw on; else a new figure's, made without pyplot, so
+            drawing it in a thread is safe and nothing is left open.
+
+    Returns:
+        Any: The axes.
+
+    Raises:
+        ValueError: For no scores on that reference and metabolite, a method without a
+            score for a metric (one that failed, or an interval's), or one metric given
+            twice.
+    """
+    from matplotlib.figure import Figure
+
+    table = pd.concat(list(scores.values()) if isinstance(scores, dict) else [scores])
+    picked = table[(table["reference"] == reference) & (table["metabolite"] == metabolite)]
+    if picked.empty:
+        raise ValueError(f"no scores on {reference} for {metabolite}; there are "
+                         f"{sorted(set(table['reference']))} for "
+                         f"{sorted(set(table['metabolite']))[:12]}")
+    twice = picked[picked.duplicated(["method", "metric"])]["metric"].unique()
+    if len(twice):
+        raise ValueError(f"given twice: {', '.join(twice)}")
+    values = picked.pivot(index="method", columns="metric", values="score")
+    missing = [f"{metric} ({method})" for metric in values.columns
+               for method in values.index[values[metric].isna()]]
+    if missing:
+        raise ValueError(f"no score for {', '.join(missing)}")
+    if ax is None:
+        ax = Figure(figsize=(6, 6), layout="constrained").add_subplot(projection="polar")
+    return radar(values, limits, ax)

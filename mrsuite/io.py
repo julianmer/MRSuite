@@ -8,8 +8,9 @@
 #                                                                                                  #
 # Purpose: Reads raw scanner data into NIfTI-MRS+ through spec2nii, the reference converter to     #
 #          NIfTI-MRS, so data from any vendor reaches a pipeline the same way; NIfTI-MRS files     #
-#          themselves, each spectrum's history starting with the file it came from; and basis      #
-#          sets in any format through BasiC, as one Basis every fit takes.                         #
+#          themselves, each spectrum's history starting with the file it came from; ground truth   #
+#          from the files it comes in; and basis sets in any format through BasiC, as one Basis    #
+#          every fit takes.                                                                        #
 #                                                                                                  #
 ####################################################################################################
 
@@ -176,14 +177,191 @@ def basis(files: Any, format: str = "auto", sw: Optional[float] = None,
     return Basis(fids=fids, source=source, **said)
 
 
+#***********#
+#   truth   #
+#***********#
+# what ground truth comes in, by extension; and the names a file's truth goes by among others
+TRUTHS = (".json", ".pkl", ".pickle", ".mat", ".csv", ".tsv", ".xlsx", ".xls", ".py")
+TRUTH_WORDS = {"truth", "gt", "groundtruth", "ground_truth", "concentrations", "conc", "concs"}
+
+
+def truth(path: Any, key: Optional[str] = None) -> List[Dict[str, float]]:
+    """
+    Ground-truth concentrations from a file, one dictionary per spectrum.
+
+    A JSON, pickle, MATLAB (.mat, before v7.3) or Python file (run, its variables read)
+    may hold one spectrum's concentrations ({'NAA': 12.0, ...}, or a variable per
+    metabolite), a list of those, a mapping of each metabolite to one value per spectrum,
+    or a table. A table (CSV, TSV, Excel, or a pandas DataFrame in a pickle) has a row per
+    spectrum and a column per metabolite, or a metabolite column beside a concentration
+    column per spectrum, as the 2016 fitting challenge's spreadsheets do below their
+    header (see ``_table``).
+
+    Args:
+        path: The file.
+        key (Optional[str]): The variable or field that holds the truth, where the file
+            holds more; by default one named as TRUTH_WORDS, else the only one.
+
+    Returns:
+        List[Dict[str, float]]: Metabolite -> concentration, per spectrum, as scoring
+        takes it; a metabolite left blank for a spectrum is left out of its dictionary.
+
+    Raises:
+        ValueError: For a file it cannot tell the concentrations in, saying what it found.
+    """
+    path = Path(path)
+    suffix = path.suffix.lower()
+    if suffix in (".csv", ".tsv", ".xlsx", ".xls"):
+        return _concentrations(_table(path))
+    if suffix == ".json":
+        held = json.loads(path.read_text())
+    elif suffix in (".pkl", ".pickle"):
+        import pickle
+        with open(path, "rb") as f:
+            held = pickle.load(f)                      # noqa: S301 - the user's own file
+    elif suffix == ".mat":
+        from scipy.io import loadmat
+        held = {k: v for k, v in loadmat(path, simplify_cells=True).items()
+                if not k.startswith("__")}
+    elif suffix == ".py":
+        import runpy
+        held = {k: v for k, v in runpy.run_path(str(path)).items()
+                if not k.startswith("_") and (isinstance(v, (dict, list, tuple, np.ndarray))
+                                              or hasattr(v, "to_dict") or _number(v))}
+    else:
+        raise ValueError(f"{path.name}: ground truth is read from {', '.join(TRUTHS)}")
+    try:
+        return _concentrations(_picked(held, key, variables=suffix in (".mat", ".py")))
+    except ValueError as err:
+        raise ValueError(f"{path.name}: {err}") from None
+
+
+#************#
+#   picked   #
+#************#
+def _picked(held: Any, key: Optional[str], variables: bool) -> Any:
+    """The truth among what a file holds: by key, by its name, the only variable, or the
+    variables themselves where each is a number."""
+    if key is not None:
+        if not isinstance(held, dict) or key not in held:
+            raise ValueError(f"no {key!r} in it; it holds {_held(held)}")
+        return held[key]
+    if isinstance(held, dict):
+        named = [k for k in held if str(k).lower() in TRUTH_WORDS]
+        if len(named) == 1:
+            return held[named[0]]
+        if variables and held and all(_number(v) for v in held.values()):
+            return held                                  # each variable a metabolite
+        if variables:
+            if len(held) != 1:
+                raise ValueError(f"say which holds the truth (key): {_held(held)}")
+            return next(iter(held.values()))
+    return held
+
+
+#***********#
+#   table   #
+#***********#
+def _table(path: Path) -> Any:
+    """
+    A table's spectra. Below a header with a metabolite column, each concentration column
+    is one spectrum (the 2016 challenge's sheets have notes above theirs, and one column);
+    otherwise the first row names the metabolites and each row below is a spectrum, columns
+    that name no metabolite (id, subject, spectrum, an index without a name) left out.
+
+    Raises:
+        ValueError: For a metabolite twice in one spectrum, or a first row of numbers,
+            which names no metabolite.
+    """
+    import pandas as pd
+
+    sheet = pd.read_excel(path, header=None) if path.suffix.lower() in (".xlsx", ".xls") else \
+        pd.read_csv(path, header=None, sep="\t" if path.suffix.lower() == ".tsv" else ",")
+    for row, cells in sheet.iterrows():
+        words = [str(c).strip().lower() for c in cells]
+        names = next((k for k, w in enumerate(words) if w.startswith("metabolite")), None)
+        values = [k for k, w in enumerate(words) if w.startswith("conc")]
+        if names is not None and values:
+            below = sheet.iloc[row + 1:]
+            told = below.iloc[:, names].map(lambda v: isinstance(v, str) and bool(v.strip()))
+            below = below.iloc[:len(told) if told.all() else int(np.argmin(told.to_numpy()))]
+            metabolites = below.iloc[:, names].str.strip()
+            twice = sorted(set(metabolites[metabolites.duplicated()]))
+            if twice:
+                raise ValueError(f"{', '.join(twice)} twice in one spectrum: give a "
+                                 "concentration column per spectrum, or a row per spectrum")
+            return [dict(zip(metabolites, pd.to_numeric(below.iloc[:, k], errors="coerce")))
+                    for k in values]
+    header = [str(c).strip() for c in sheet.iloc[0]]
+    if all(pd.notna(pd.to_numeric(h, errors="coerce")) for h in header if h != "nan"):
+        raise ValueError("its first row is numbers: a table needs a header naming the "
+                         "metabolites")
+    sheet.columns = header
+    named = [c for c in header if c.lower() not in _IDS and not c.lower().startswith("unnamed")]
+    return sheet.iloc[1:][named].apply(pd.to_numeric, errors="coerce").dropna(axis=1, how="all")
+
+
+# a table's columns that name a spectrum, not a metabolite
+_IDS = {"", "nan", "id", "ids", "index", "subject", "spectrum", "sample", "dataset", "name",
+        "file"}
+
+
 #********************#
-#   add to a basis   #
+#   concentrations   #
 #********************#
-def add_to_basis(basis: Basis, spectrum: Any, name: str = "MM") -> Basis:
-    """A basis set with a measured spectrum as one more function, e.g. a macromolecule
-    acquisition as 'MM'; see ``mrsuite.core.basis.added``."""
-    from mrsuite.core.basis import added
-    return added(basis, spectrum, name)
+def _concentrations(held: Any) -> List[Dict[str, float]]:
+    """Concentrations per spectrum from what a file held (see ``truth``).
+
+    Raises:
+        ValueError: For anything else, saying what it was.
+    """
+    if hasattr(held, "to_dict") and hasattr(held, "columns"):         # a DataFrame
+        held = held.to_dict("records")
+    if isinstance(held, dict) and held:
+        values = list(held.values())
+        if all(_number(v) for v in values):
+            return [{str(k): float(v) for k, v in held.items() if not np.isnan(float(v))}]
+        if all(isinstance(v, dict) for v in values):                  # by spectrum
+            return [c for v in values for c in _concentrations(v)]
+        columns = [np.atleast_1d(np.asarray(v)) for v in values]
+        if all(c.ndim == 1 and c.dtype.kind in "iuf" for c in columns) and \
+                len({c.size for c in columns}) == 1:                  # by metabolite
+            return [{str(k): float(c[j]) for k, c in zip(held, columns) if not np.isnan(c[j])}
+                    for j in range(columns[0].size)]
+    if isinstance(held, (list, tuple, np.ndarray)) and len(held) and \
+            all(isinstance(v, dict) for v in held):
+        return [c for v in held for c in _concentrations(v)]
+    raise ValueError(f"no concentrations found: it holds {_held(held)}")
+
+
+#************#
+#   number   #
+#************#
+def _number(value: Any) -> bool:
+    return isinstance(value, (int, float, np.integer, np.floating)) and not isinstance(value, bool)
+
+
+#**********#
+#   held   #
+#**********#
+def _held(held: Any) -> str:
+    """What a file held, in a few words, for an error."""
+    if isinstance(held, dict):
+        return "{" + ", ".join(f"{k}: {type(v).__name__}" for k, v in list(held.items())[:8]) + \
+            (", ..." if len(held) > 8 else "") + "}"
+    return f"{type(held).__name__} of {len(held)}" if hasattr(held, "__len__") else \
+        type(held).__name__
+
+
+#*****************#
+#   merge basis   #
+#*****************#
+def merge_basis(basis: Basis, more: Dict[str, Any],
+                keep: Optional[Dict[str, str]] = None) -> Basis:
+    """A basis set with other basis sets' functions and measured spectra added, e.g. a
+    macromolecule acquisition as {'MM': mm}; see ``mrsuite.core.basis.merged``."""
+    from mrsuite.core.basis import merged
+    return merged(basis, more, keep)
 
 
 #*******************#

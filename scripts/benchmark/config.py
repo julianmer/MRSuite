@@ -184,6 +184,18 @@ def wand_mrsi(data: NIfTI_MRS_Plus) -> NIfTI_MRS_Plus:
     return _model(str(Path(weights("wand-mrsi2024")).parent))(data, remove=["nuisance"])
 
 
+#**************#
+#   wand run   #
+#**************#
+def wand_run(name: str, remove: Sequence[str]) -> Callable[[NIfTI_MRS_Plus], NIfTI_MRS_Plus]:
+    """A WAND trained here (scripts/train), by its run's last checkpoint, removing ``remove``
+    before a fit; the step is named after the run, as a job records it."""
+    def step(data: NIfTI_MRS_Plus) -> NIfTI_MRS_Plus:
+        return _model(str(Path(weights(name)).parent))(data, remove=list(remove))
+    step.__name__ = name.replace("-", "_")
+    return step
+
+
 #*************#
 #   methods   #
 #*************#
@@ -213,6 +225,18 @@ TRAINED = {name: Fit(trained, args=lambda dataset, name=name: (weights(name),), 
                         "mlp-supervised-mrsi2024", "mlp-selfsupervised-mrsi2024")}
 TRAINED.update({f"wand-mrsi2024-{name}": replace(METHODS[name], before=(wand_mrsi,))
                 for name in ("lcmodel", "fsl_mrs")})
+# the MRSI MLPs trained on the release's own subjects, and the WANDs trained on the MRSI
+# challenge afterwards, each before LCModel and FSL-MRS: taking out the water and lipids on
+# track 1, the artifacts on track 2 (as on the 2016 challenge)
+TRAINED.update({name: Fit(trained, args=lambda dataset, name=name: (weights(name),), chunk=1000)
+                for name in ("mlp-supervised-mrsi2024-release-track1",
+                             "mlp-supervised-mrsi2024-release-track2",
+                             "mlp-selfsupervised-mrsi2024-release-track2")})
+WANDS = {"wand-mrsi2024-full-track1": ["nuisance"], "wand-mrsi2024-full-track2": ["artifacts"],
+         "wand-mrsi2024-release-track1": ["nuisance"],
+         "wand-mrsi2024-release-track1-weighted": ["nuisance"]}
+TRAINED.update({f"{wand}-{name}": replace(METHODS[name], before=(wand_run(wand, remove),))
+                for wand, remove in WANDS.items() for name in ("lcmodel", "fsl_mrs")})
 METHODS.update(TRAINED)
 
 
@@ -246,6 +270,19 @@ STAGES = {
     "models-mrsi-track1": [Job(SAMPLED[s], name) for s in TRACK1 for name in
                            ("lcmodel", "fsl_mrs", "wand-mrsi2024-lcmodel",
                             "wand-mrsi2024-fsl_mrs")],
+    # the models trained on the release, and the later WANDs, on each track; on track 1 the
+    # MRS-Sim MLPs too, which never saw lipids
+    "models-mrsi-release": [Job(SAMPLED[s], name) for s in SUBJECTS for name in
+                            ("lcmodel", "fsl_mrs", "mlp-supervised-mrsi2024-release-track2",
+                             "mlp-selfsupervised-mrsi2024-release-track2",
+                             "wand-mrsi2024-full-track2-lcmodel",
+                             "wand-mrsi2024-full-track2-fsl_mrs")],
+    "models-mrsi-release-track1": [Job(SAMPLED[s], name) for s in TRACK1 for name in
+                                   ("lcmodel", "fsl_mrs", "mlp-supervised-mrsi2024",
+                                    "mlp-selfsupervised-mrsi2024",
+                                    "mlp-supervised-mrsi2024-release-track1",
+                                    *(f"{wand}-{fit}" for wand in WANDS if "track1" in wand
+                                      for fit in ("lcmodel", "fsl_mrs")))],
 }
 
 

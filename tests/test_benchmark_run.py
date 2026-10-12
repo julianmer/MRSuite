@@ -332,6 +332,16 @@ def test_every_stage_names_what_the_config_defines():
     assert config.METHODS["tarquin-water"].water == challenge2016.WATER["tarquin"]
 
 
+def test_each_wand_run_is_a_step_of_its_own_name():
+    """A job records its steps by name, so two WANDs never pass for one another."""
+    for wand, remove in config.WANDS.items():
+        for fit in ("lcmodel", "fsl_mrs"):
+            (step,) = config.METHODS[f"{wand}-{fit}"].before
+            assert run._name(step).endswith("." + wand.replace("-", "_"))
+    assert len({run._name(config.METHODS[f"{w}-lcmodel"].before[0]) for w in config.WANDS}) == \
+        len(config.WANDS)
+
+
 def test_a_trained_model_is_its_runs_last_checkpoint_by_step(tmp_path):
     for step in (942208, 7537664, 471104):
         (tmp_path / "run" / f"step-{step}").mkdir(parents=True)

@@ -23,7 +23,7 @@ import multiprocessing
 import os
 import shutil
 from concurrent.futures import ProcessPoolExecutor
-from typing import Any, List
+from typing import Any, Dict, List
 
 from nifti_mrs.nifti_mrs import NIFTI_MRS
 
@@ -59,6 +59,10 @@ def spread(method: Any, items: List[NIFTI_MRS], args: tuple, kwargs: dict,
 
     Returns:
         List[Any]: One output per spectrum, in the order of the batch.
+
+    Raises:
+        PartlyFailed: If some chunks failed, with the outputs of the others; if all of
+            them failed, the first chunk's error itself.
     """
     from mrsuite.octave import scratch
 
@@ -85,9 +89,46 @@ def spread(method: Any, items: List[NIFTI_MRS], args: tuple, kwargs: dict,
 
         context = multiprocessing.get_context("spawn")
         with ProcessPoolExecutor(max_workers=workers, mp_context=context) as pool:
-            return [r for part in pool.map(_run_chunk, chunks) for r in part]
+            futures = [pool.submit(_run_chunk, chunk) for chunk in chunks]
+        outputs, errors = {}, {}
+        for start, future in zip(range(0, len(items), size), futures):
+            try:
+                outputs.update(enumerate(future.result(), start))
+            except Exception as err:
+                errors[start] = err
+        if errors and not outputs:
+            raise next(iter(errors.values()))
+        if errors:
+            raise PartlyFailed(outputs, errors) from next(iter(errors.values()))
+        return [outputs[i] for i in range(len(items))]
     finally:
         shutil.rmtree(folder, ignore_errors=True)
+
+
+#**************************************************************************************************#
+#                                        Class PartlyFailed                                        #
+#**************************************************************************************************#
+#                                                                                                  #
+# Some chunks of a spread batch failed; what the others gave is kept.                              #
+#                                                                                                  #
+#**************************************************************************************************#
+class PartlyFailed(RuntimeError):
+    """Some chunks of a spread batch failed; what the others gave is kept.
+
+    Attributes:
+        outputs (Dict[int, Any]): The outputs of the chunks that ran, by position in the
+            batch; a position missing here belongs to a chunk that failed.
+        errors (Dict[int, Exception]): Each failed chunk's error, by its first position.
+    """
+
+    #**********#
+    #   init   #
+    #**********#
+    def __init__(self, outputs: Dict[int, Any], errors: Dict[int, Exception]) -> None:
+        first = next(iter(errors.values()))
+        super().__init__(f"{len(errors)} chunk(s) of the batch failed, the first with "
+                         f"{type(first).__name__}: {first}")
+        self.outputs, self.errors = outputs, errors
 
 
 #**************************************************************************************************#

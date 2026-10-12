@@ -69,6 +69,20 @@ def toy(spectrum, basis):
     return FitResult("toy", ["NAA", "Cr", "PCr"], {"raw": {"NAA": value, "Cr": 1.0, "PCr": 1.0}})
 
 
+#****************#
+#   toy spread   #
+#****************#
+@mrsuite.method(program="test", parallel=True)
+def toy_spread(spectrum, basis):
+    """The toy across processes, where the fixture's state does not reach: it fails for the
+    values in MRSUITE_TEST_FAIL, which does."""
+    value = float(abs(spectrum[:].ravel()[0]))
+    CALLS.append(value)                           # in this process only
+    if str(value) in os.environ.get("MRSUITE_TEST_FAIL", "").split(","):
+        raise ValueError("the toy cannot fit this one")
+    return FitResult("toy", ["NAA", "Cr", "PCr"], {"raw": {"NAA": value, "Cr": 1.0, "PCr": 1.0}})
+
+
 #*************#
 #   toy run   #
 #*************#
@@ -139,6 +153,20 @@ def test_a_failed_spectrum_is_recorded_scored_as_omitted_and_retried(tmp_path):
     BROKEN.clear()
     _toy_run(tmp_path, chunk=3)
     assert len(CALLS) == 1 and run.read(tmp_path / "challenge2016" / "toy")[1] == {}
+
+
+@needs_2016
+def test_where_one_workers_part_fails_only_its_spectra_are_fitted_again(tmp_path, monkeypatch):
+    data, _, _ = challenge2016.load(3)
+    monkeypatch.setenv("MRSUITE_TEST_FAIL", str(float(abs(data.list()[1][:].ravel()[0]))))
+
+    with mock.patch.object(run, "environment", lambda methods: {}):
+        run.run(tmp_path, [config.Job("challenge2016", "toy")],
+                {"challenge2016": partial(config.challenge, 3)},
+                {"toy": config.Fit(toy_spread, chunk=3)}, workers=3)
+    results, errors = run.read(tmp_path / "challenge2016" / "toy")
+    assert sorted(results) == ["dataset1", "dataset3"] and list(errors) == ["dataset2"]
+    assert len(CALLS) == 1, "only the failed spectrum is fitted again, in this process"
 
 
 #*************#

@@ -39,6 +39,7 @@ import numpy as np
 
 from nifti_mrs_plus import NIfTI_MRS_Plus
 from mrsuite.core import provenance, result
+from mrsuite.core.parallel import PartlyFailed
 from mrsuite.core.result import FitResult
 
 HERE = Path(__file__).resolve().parent
@@ -198,18 +199,22 @@ def _run_job(folder: Path, method: Any, dataset: Any, job: Any, workers: int, ra
 #***************#
 def _fit_chunk(fit: Any, indices: List[int], ids: List[str]
                ) -> Tuple[List[FitResult], List[str], Dict[str, str]]:
-    """A chunk's fits, and where the chunk fails, each spectrum alone, keeping the errors."""
+    """A chunk's fits, and where the chunk fails, each spectrum alone, keeping the errors;
+    where only some of its workers' parts fail, the spectra of those parts alone."""
     try:
         return fit(indices), [ids[i] for i in indices], {}
+    except PartlyFailed as err:
+        done = dict(err.outputs)
     except Exception:
-        results, kept, errors = [], [], {}
-        for i in indices:
-            try:
-                results += fit([i])
-                kept.append(ids[i])
-            except Exception as err:
-                errors[ids[i]] = f"{type(err).__name__}: {err}"
-        return results, kept, errors
+        done = {}
+    results, kept, errors = [], [], {}
+    for position, i in enumerate(indices):
+        try:
+            results += [done[position]] if position in done else fit([i])
+            kept.append(ids[i])
+        except Exception as err:
+            errors[ids[i]] = f"{type(err).__name__}: {err}"
+    return results, kept, errors
 
 
 #**********#

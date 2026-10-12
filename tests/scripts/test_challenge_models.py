@@ -30,6 +30,7 @@ import pytest
 import mrsuite.models
 from mrsuite.datasets import mrsi_challenge
 from mrsuite.simulators import mrs_sim
+from mrsuite.training import Source, Truth
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "train" / "challenge_models.py"
 spec = importlib.util.spec_from_file_location("challenge_models", SCRIPT)
@@ -74,11 +75,11 @@ def test_a_seed_replays_the_run(tmp_path):
 @pytest.mark.parametrize("name", list(challenge_models.MODELS))
 def test_a_run_trains_and_its_checkpoints_load(name, tmp_path):
     challenge, kind, objective, _ = challenge_models.MODELS[name]
-    if challenge == "mrsi" and not HAVE_MRSI:
+    if challenge in ("mrsi", *challenge_models.RELEASE) and not HAVE_MRSI:
         pytest.skip("MRSI challenge subjects Sub1 and Sub2 not on disk")
 
     model = challenge_models.train(name, steps=2, every=1, to=tmp_path, batch=2, chunk=4,
-                                   voxels=16, subjects=("Sub1",))
+                                   voxels=16, subjects=("Sub1",), release=("Sub1",))
 
     folder = tmp_path / name
     assert sorted(p.name for p in folder.iterdir()) == ["step-1", "step-2"]
@@ -89,17 +90,55 @@ def test_a_run_trains_and_its_checkpoints_load(name, tmp_path):
     recipe = json.loads((folder / "step-2" / "recipe.json").read_text())
     assert {k: recipe["training"][k] for k in ("objective", "steps", "batch", "learning_rate")
             } == {"objective": objective, "steps": 2, "batch": 2, "learning_rate": 1e-4}
-    water = recipe["MRSsynMRS"]["Artifacts"]["Residual Water"]
+    if challenge in challenge_models.RELEASE:
+        assert recipe["generation"]["subjects"] == ["Sub1"]
+        assert recipe["generation"]["signal"] == challenge_models.RELEASE[challenge]
     if kind == "wand":
+        assert ("nuisance" in loaded.components) == (challenge in ("mrsi", "release-track1"))
+        assert ("baseline" in loaded.components) == (challenge not in challenge_models.RELEASE)
+        assert loaded.zero_fill == (2 if name in challenge_models.ZERO_FILLED else 1)
+        assert bool(loaded.weights) == (name in challenge_models.WEIGHTED)
+    if kind == "wand" and challenge == "mrsi":
+        water = recipe["MRSsynMRS"]["Artifacts"]["Residual Water"]
         assert loaded.components[-3:] == ["nuisance", "baseline", "artifacts"]
         assert water["Applied"] is True and recipe["generation"]["nuisance"]["subjects"] == [
             "Sub1"]
         assert "resWater_cfg" not in recipe["generation"]["config"]     # one water, the release's
 
 
+@pytest.mark.skipif(not HAVE_MRSI, reason="MRSI challenge subjects Sub1 and Sub2 not on disk")
+def test_the_release_mlps_learn_what_the_release_holds(tmp_path):
+    """The supervised one what the release varies (it holds Lac and Lac41 at zero), the
+    self-supervised one rebuilds the whole signal, macromolecules included."""
+    learn = lambda name: challenge_models.train(name, steps=1, to=tmp_path, batch=2,
+                                                release=("Sub1",))
+    supervised = learn("mlp-supervised-mrsi2024-release-track2")
+    assert supervised.metabolites == [m for m in mrsi_challenge.NAMES.values()
+                                      if m not in ("Lac", "Lac41")]
+    assert learn("mlp-selfsupervised-mrsi2024-release-track2").metabolites == [
+        *mrsi_challenge.NAMES.values(), *mrsi_challenge.MACROMOLECULES]
+
+
 #**************#
 #   nuisance   #
 #**************#
+def test_the_nuisance_weight_brings_its_error_to_the_metabolites_size():
+    """Thirty times the metabolites in the window, and far more outside it, which counts
+    for nothing."""
+    class Thirtyfold(Source):
+        def draw(self, n):
+            rng = np.random.default_rng(n)
+            metabolites = rng.normal(size=(n, 64)) + 1j * rng.normal(size=(n, 64))
+            outside = np.zeros((n, 64), complex)
+            outside[:, 48:] = 1e3                       # on points the window leaves out
+            nuisance = 30 * metabolites + np.fft.ifft(outside, axis=1)
+            return metabolites + nuisance, Truth(
+                components={"metabolites": metabolites, "nuisance": nuisance})
+
+    assert challenge_models.nuisance_weight(Thirtyfold(), 8, 40) == pytest.approx(1 / 900)
+
+
+
 @pytest.mark.skipif(not HAVE_MRSI, reason="MRSI challenge subjects Sub1 and Sub2 not on disk")
 def test_the_nuisance_adds_up_and_stands_to_the_metabolites_as_in_its_voxel():
     config = challenge_models.config("mrsi", "wand", voxels=16)

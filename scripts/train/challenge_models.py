@@ -9,7 +9,8 @@
 # Purpose: Trains the benchmark's models on the two challenges' own acquisitions, with MRS-Sim:    #
 #          the supervised and self-supervised MLPs of the out-of-distribution paper for the 2016   #
 #          fitting challenge and the 2024 MRSI challenge, and WAND for the MRSI challenge with     #
-#          its water and lipids as a component of their own, to take out before fitting. Settings  #
+#          its water and lipids as a component of their own, to take out before fitting; and the   #
+#          MRSI MLPs on the release's own training subjects, with and without nuisance. Settings   #
 #          as the published runs (batch 16, Adam 1e-4, the steps of their checkpoints, their       #
 #          losses as far as MRS-Sim's truth carries them; see MODELS); each run writes loadable    #
 #          checkpoints with their recipe.json and Adam's state to data/runs/<name>; --resume       #
@@ -45,7 +46,9 @@ RUNS = Path(__file__).resolve().parents[2] / "data" / "runs"
 # name -> (challenge, model, objective, steps). The steps are those of the published
 # checkpoints, as Lightning counts them: one optimiser step on one batch of 16 (no
 # gradient accumulation), which is one step of Model.learn. Supervised MLP: wyoo5p40,
-# step 7537664; self-supervised: 48ke5d6u, step 3572224; WAND: t1axv47a, step 465664.
+# step 7537664; self-supervised: 48ke5d6u, step 3572224; WAND: t1axv47a, step 465664
+# (wand-mrsi2024; the paper's own WAND is sskt2pvt, step 1195264, which the later
+# WANDs follow).
 # The losses as their runs: self-supervised mse_specs, WAND mse, and the supervised MLPs
 # wyoo5p40's mae_all_scale as far as MRS-Sim's truth carries it ('scaled': the
 # concentrations, each over its sampling range; the original's signal parameters have no
@@ -56,7 +59,33 @@ MODELS = {
     "mlp-supervised-mrsi2024": ("mrsi", "mlp", "scaled", 7_537_664),
     "mlp-selfsupervised-mrsi2024": ("mrsi", "mlp", "spectra", 3_572_224),
     "wand-mrsi2024": ("mrsi", "wand", "components", 465_664),
+    # the MRSI MLPs again, on the release's own training subjects instead of MRS-Sim: with
+    # their water and lipids for track 1, without for track 2 (see mrsi_challenge.Release)
+    "mlp-supervised-mrsi2024-release-track1": ("release-track1", "mlp", "scaled", 7_537_664),
+    "mlp-supervised-mrsi2024-release-track2": ("release-track2", "mlp", "scaled", 7_537_664),
+    "mlp-selfsupervised-mrsi2024-release-track2": ("release-track2", "mlp", "spectra",
+                                                   3_572_224),
+    # WAND on the MRSI challenge again, as long as the published WAND (sskt2pvt, step
+    # 1195264): the full decomposition for each track - MRS-Sim's metabolites one by one,
+    # with the release's water and lipids for track 1 ('mrsi'), without for track 2
+    # ('mrsi-clean') - and for track 1 the release's own metabolites, summed, against its
+    # water and lipids, plain and with the nuisance's error weighed down to their size
+    "wand-mrsi2024-full-track1": ("mrsi", "wand", "components", 1_195_264),
+    "wand-mrsi2024-full-track2": ("mrsi-clean", "wand", "components", 1_195_264),
+    "wand-mrsi2024-release-track1": ("release-track1", "wand", "components", 1_195_264),
+    "wand-mrsi2024-release-track1-weighted": ("release-track1", "wand", "components",
+                                              1_195_264),
 }
+
+# the release's signal each release-trained model learns from
+RELEASE = {"release-track1": "all", "release-track2": "all-nuisance"}
+
+# WANDs on spectra zero-filled to twice their points, where the wavelet transform gives the
+# signal back (on the MRSI challenge's 384 points, ~1.7 times it), and those weighing the
+# nuisance's error (see nuisance_weight)
+ZERO_FILLED = {"wand-mrsi2024-full-track1", "wand-mrsi2024-full-track2",
+               "wand-mrsi2024-release-track1", "wand-mrsi2024-release-track1-weighted"}
+WEIGHTED = {"wand-mrsi2024-release-track1-weighted"}
 
 # as the published runs: batch 16, Adam at 1e-4
 BATCH, LR = 16, 1e-4
@@ -176,6 +205,34 @@ class Nuisance(Source):
         return recipe
 
 
+#*********************#
+#   nuisance weight   #
+#*********************#
+def nuisance_weight(source: Source, first: int, last: int, zero_fill: int = 1,
+                    n: int = 1024) -> float:
+    """
+    The fixed weight that brings the nuisance's squared error to the metabolites' size: one
+    over the median ratio of their power in the window, over ``n`` of the source's spectra.
+
+    Args:
+        source (Source): Gives the metabolites and nuisance apart ('metabolites', 'nuisance').
+        first (int): First point of the window.
+        last (int): The point after it.
+        zero_fill (int): The model's zero-filling, on whose grid the window counts.
+        n (int): Spectra to take the median over.
+
+    Returns:
+        float: The weight.
+    """
+    _, truth = source.draw(n)
+
+    def power(fids):
+        window = np.fft.fft(fids, n=fids.shape[1] * zero_fill, axis=1)[:, first:last]
+        return (np.abs(window) ** 2).sum(axis=1)
+    return float(1 / np.median(power(truth.components["nuisance"])
+                               / power(truth.components["metabolites"])))
+
+
 #************#
 #   config   #
 #************#
@@ -207,7 +264,7 @@ def config(challenge: str, model: str, voxels: int = 2000) -> Dict[str, Any]:
 def train(name: str, steps: Optional[int] = None, every: Optional[int] = None,
           to: Path = RUNS, batch: int = BATCH, seed: int = 0, chunk: Optional[int] = None,
           ahead: int = 0, voxels: int = 2000, subjects: Sequence[str] = SUBJECTS,
-          resume: bool = False) -> Any:
+          release: Sequence[str] = mrsi_challenge.TRAIN, resume: bool = False) -> Any:
     """
     Train one of MODELS from scratch, or on from its run's last checkpoint, saving to
     ``to / name`` every ``every`` steps.
@@ -224,6 +281,8 @@ def train(name: str, steps: Optional[int] = None, every: Optional[int] = None,
         ahead (int): MRS-Sim chunks simulated in the background (see mrs_sim.Source).
         voxels (int): Brain voxels the MRSI config's ranges are read from.
         subjects (Sequence[str]): Whose water and lipids WAND learns, on the MRSI challenge.
+        release (Sequence[str]): The training subjects the release-trained models draw
+            their voxels from.
         resume (bool): Learn on from the run's last checkpoint, with Adam's state where it
             was saved with one (runs before it was saved start Adam afresh), on spectra
             seeded past ``seed`` by the steps already taken, so none are seen again.
@@ -232,32 +291,52 @@ def train(name: str, steps: Optional[int] = None, every: Optional[int] = None,
         The trained model, as also saved in ``to / name / step-<steps taken>``.
     """
     challenge, kind, objective, published = MODELS[name]
+    zero_fill = 2 if name in ZERO_FILLED else 1
     steps = steps or published
-    simulation = config(challenge, kind, voxels)
     sixteenth = max(published // 16, 1)
     every = every or (sixteenth if steps % sixteenth == 0 else steps)
     checkpoint = last_checkpoint(Path(to) / name) if resume else None
     start = int(checkpoint.name[len("step-"):]) if checkpoint else 0
-    simulator = mrs_sim.Source(simulation, seed=seed + start, chunk=chunk or CHUNK[challenge],
-                               components=kind == "wand", ahead=ahead)
+    if challenge in RELEASE:
+        simulator = None
+        data = mrsi_challenge.Release(release, RELEASE[challenge], components=kind == "wand",
+                                      seed=seed + start)
+        # WAND learns the release's metabolites summed, as it gives them; the self-supervised
+        # fit rebuilds the whole signal; the supervised one learns what the release varies,
+        # as it holds Lac and Lac41 at zero
+        metabolites = (["metabolites"] if kind == "wand" else
+                       list(data.basis) if objective == "spectra" else
+                       [m for m, (low, high) in data.ranges.items() if high > low])
+    else:
+        simulated = challenge.removesuffix("-clean")
+        simulation = config(simulated, kind, voxels)
+        simulator = data = mrs_sim.Source(simulation, seed=seed + start,
+                                          chunk=chunk or CHUNK[simulated],
+                                          components=kind == "wand", ahead=ahead)
+        metabolites = simulation["metabolites"]
     try:
-        data = simulator
-        first, last = window(data.acquisition, *WINDOW[kind])
+        first, last = window({**data.acquisition,
+                              "points": data.acquisition["points"] * zero_fill}, *WINDOW[kind])
         torch.manual_seed(seed)                 # the initial weights, so a run replays
-        if kind == "wand":
+        if kind == "wand" and challenge == "mrsi":
             data = Nuisance(data, subjects, seed + start)
         if checkpoint:
             model = models.load(str(checkpoint))
         elif kind == "mlp":
-            model = MLP(simulation["metabolites"], first, last, data.acquisition)
+            model = MLP(metabolites, first, last, data.acquisition)
         else:
-            model = WAND(simulation["metabolites"], first, last, data.acquisition,
-                         nuisance=["nuisance"])
+            weights = ({"nuisance": nuisance_weight(
+                mrsi_challenge.Release(release, "all", components=True, seed=seed),
+                first, last, zero_fill)} if name in WEIGHTED else None)
+            model = WAND(metabolites, first, last, data.acquisition,
+                         nuisance=["nuisance"] if challenge in ("mrsi", "release-track1") else [],
+                         baseline=challenge not in RELEASE, zero_fill=zero_fill, weights=weights)
         state = checkpoint if checkpoint and (checkpoint / OPTIMIZER).exists() else None
         model.learn(data, steps=steps, objective=objective, batch=batch, lr=LR, every=every,
                     to=str(Path(to) / name), resume=str(state) if state else None)
     finally:
-        simulator.close()                       # no chunks simulated for nobody
+        if simulator:
+            simulator.close()                   # no chunks simulated for nobody
     return model
 
 

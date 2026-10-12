@@ -494,8 +494,9 @@ def test_a_score_offers_its_analyses_and_their_own_arguments():
     graph.set(score, "scale", "sd")
     b = blocks.BLOCKS["method-comparison"]
 
-    assert [f.name for f in graph.fields(score)] == ["references", "output_dir", "x_axis",
-                                                     "location", "scale", "conditional"]
+    assert [f.name for f in graph.fields(score)] == [
+        "references", "output_dir", "x_axis", "location", "scale", "loa_method", "conditional",
+        "ci_method", "confidence_level", "n_bootstrap", "n_ci_grid", "seed"]
     assert "partial(method_comparison.bland_altman, scale='sd')" in graph.code(score)[0]
     graph.choose(score, [f for _, f in b.analyses].index("deming"))
     assert graph.nodes[score].values == {"references": "tCr"}

@@ -36,7 +36,8 @@ from mrsuite.benchmark import (analyses, bias, coverage, figure, mae, observatio
 from mrsuite.core.result import FitResult
 
 # MRSValidate's repository, for its toy example, which its package does not ship
-TOY = Path(os.environ.get("MRSUITE_MRSVALIDATE", "/nonexistent")) / "examples" / "toy_outputs"
+TOY = (Path(os.environ.get("MRSUITE_MRSVALIDATE", "/nonexistent")) / "assets" / "publication"
+       / "examples" / "toy_outputs")
 
 
 #***********#

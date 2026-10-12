@@ -151,18 +151,20 @@ def load_file(path: Path) -> ModuleType:
 #*************#
 #   spectra   #
 #*************#
-def spectra(items: Union[List[NIFTI_MRS], NIfTI_MRS_Plus]) -> np.ndarray:
+def spectra(items: Union[List[NIFTI_MRS], NIfTI_MRS_Plus], zero_fill: int = 1) -> np.ndarray:
     """A batch as (batch, 2, points): the plain FFT of each FID, real and imaginary.
 
     No shift and no conjugation - the spectrum as NumPy's FFT gives it from the samples
     as NIfTI-MRS stores them. A NIfTI-MRS+ is read as the one array it holds, which is
-    how a training batch arrives: no NIfTI-MRS object per spectrum.
+    how a training batch arrives: no NIfTI-MRS object per spectrum. ``zero_fill`` pads
+    each FID with zeros to that many times its points first.
     """
     if isinstance(items, NIfTI_MRS_Plus):
         fids = items.numpy()
     else:
         fids = np.stack([np.asarray(i[:]) for i in items])
-    specs = np.fft.fft(fids.reshape(len(fids), -1), axis=-1)
+    fids = fids.reshape(len(fids), -1)
+    specs = np.fft.fft(fids, n=fids.shape[1] * zero_fill, axis=-1)
     return np.stack([specs.real, specs.imag], axis=1)
 
 

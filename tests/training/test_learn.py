@@ -19,11 +19,13 @@
 import os
 
 os.environ.setdefault("KERAS_TORCH_DEVICE", "cpu")      # before anything imports keras
+os.environ.setdefault("KERAS_BACKEND", "torch")         # as learn sets it
 
 import json
 
 import numpy as np
 import pytest
+import torch
 from safetensors.numpy import load_file
 
 from nifti_mrs_plus import NIfTI_MRS_Plus
@@ -249,6 +251,20 @@ def test_a_converted_model_learns_on_from_step_zero(tmp_path):
 #***********************#
 #   self - supervised   #
 #***********************#
+def test_wand_weighs_each_components_error_as_told():
+    plain = WAND(["metabolites"], 0, 64, WAND_ACQUISITION, nuisance=["nuisance"], baseline=False)
+    weighed = WAND(["metabolites"], 0, 64, WAND_ACQUISITION, nuisance=["nuisance"],
+                   baseline=False, weights={"nuisance": 0.25})
+    assert weighed.components == ["metabolites", "nuisance", "artifacts"]
+    target = torch.zeros(1, 2, 64, 3)
+    out = target.clone()
+    out[..., 0], out[..., 1] = 1.0, 2.0          # the metabolites off by 1, the nuisance by 2
+    assert float(plain.loss(target, out, "components")) == pytest.approx((1 + 4) / 3)
+    assert float(weighed.loss(target, out, "components")) == pytest.approx((1 + 1) / 3)
+    with pytest.raises(ValueError, match="no component"):
+        WAND(["metabolites"], 0, 64, WAND_ACQUISITION, weights={"water": 1.0})
+
+
 def test_the_mlp_learns_from_spectra_alone():
     """The 'spectra' objective fits the source's basis through the original signal
     model: no concentrations are read, and the loss falls all the same."""

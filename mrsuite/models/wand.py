@@ -82,6 +82,15 @@ class WAND(TorchModel, paper_url="https://doi.org/10.1002/nbm.70038"):
         batch_statistics (bool): Normalise with each batch's own statistics.
         nuisance (List[str]): Further components, between the metabolites and the baseline,
             e.g. ['nuisance'] for the MRSI challenge's water and lipids. Empty by default.
+        baseline (bool): Learn the baseline as a component of its own; without, it is part
+            of the artifacts, as for training data that gives no baseline apart.
+        zero_fill (int): Zero-fill each FID to this many times its points before the
+            transform, ``first`` and ``last`` counting on that grid; the components come
+            back on the data's own points. 1 by default: as the original, which on short
+            spectra (the MRSI challenge's 384 points) gives back ~1.7 times its input.
+        weights (Optional[Dict[str, float]]): Weights of components in the loss, by name,
+            1 for the others: e.g. a nuisance far larger than the metabolites weighed down
+            to their size.
 
     Attributes:
         repo (Path): The original repository, which the network and transform are loaded from.
@@ -96,13 +105,19 @@ class WAND(TorchModel, paper_url="https://doi.org/10.1002/nbm.70038"):
     #**********#
     def __init__(self, metabolites: List[str], first: int, last: int,
                  acquisition: Dict[str, float], batch_statistics: bool = True,
-                 nuisance: List[str] = ()) -> None:
+                 nuisance: List[str] = (), baseline: bool = True, zero_fill: int = 1,
+                 weights: Optional[Dict[str, float]] = None) -> None:
         super().__init__()
         self.metabolites, self.first, self.last = list(metabolites), first, last
         self.acquisition = dict(acquisition)
         self.batch_statistics = batch_statistics
-        self.nuisance = list(nuisance)
-        self.components = self.metabolites + self.nuisance + ["baseline", "artifacts"]
+        self.nuisance, self.baseline, self.zero_fill = list(nuisance), baseline, zero_fill
+        self.components = (self.metabolites + self.nuisance + ["baseline"] * baseline
+                           + ["artifacts"])
+        self.weights = dict(weights or {})
+        unknown = sorted(set(self.weights) - set(self.components))
+        if unknown:
+            raise ValueError(f"WAND has no component {unknown} to weigh; it has {self.components}")
         self.repo = externals.ensure(self.external)
         self.cwt = load_file(self.repo / "utils" / "wavelets.py").CWT(
             last - first, wavelet=("morlet", {"mu": 14}), scales="log-piecewise", nv=32,
@@ -114,7 +129,7 @@ class WAND(TorchModel, paper_url="https://doi.org/10.1002/nbm.70038"):
     #   prepare   #
     #*************#
     def prepare(self, items) -> torch.Tensor:
-        return torch.from_numpy(spectra(items))
+        return torch.from_numpy(spectra(items, self.zero_fill))
 
     #*************#
     #   predict   #
@@ -160,9 +175,10 @@ class WAND(TorchModel, paper_url="https://doi.org/10.1002/nbm.70038"):
         if keep is not None or remove is not None:
             return self._select(out, items, keep, remove)
         n = int(self.acquisition.get("points", items[0].shape[3]))
-        full = torch.nn.functional.pad(out, (0, 0, self.first, n - self.last), mode="replicate")
+        full = torch.nn.functional.pad(out, (0, 0, self.first, n * self.zero_fill - self.last),
+                                       mode="replicate")
         full = full.cpu().double().numpy()
-        fids = np.fft.ifft(full[:, 0] + 1j * full[:, 1], axis=1)     # (batch, points, components)
+        fids = np.fft.ifft(full[:, 0] + 1j * full[:, 1], axis=1)[:, :n]  # (batch, points, comps)
         results = []
         for fid, item in zip(fids, items):
             result = gen_nifti_mrs(fid.reshape(1, 1, 1, *fid.shape), item.dwelltime,
@@ -194,9 +210,9 @@ class WAND(TorchModel, paper_url="https://doi.org/10.1002/nbm.70038"):
         window = out[..., chosen].sum(-1).cpu().double().numpy()      # (batch, 2, window)
         results = []
         for spec, item in zip(window, items):
-            full = np.zeros(item.shape[3], complex)
+            full = np.zeros(item.shape[3] * self.zero_fill, complex)
             full[self.first:self.last] = spec[0] + 1j * spec[1]
-            fid = np.fft.ifft(full)
+            fid = np.fft.ifft(full)[:item.shape[3]]
             if remove is not None:
                 fid = np.asarray(item[:]).reshape(-1) - fid
             results.append(gen_nifti_mrs(fid.reshape(item.shape), item.dwelltime,
@@ -219,7 +235,9 @@ class WAND(TorchModel, paper_url="https://doi.org/10.1002/nbm.70038"):
             raise KeyError(f"WAND learns each component; the source gives no {missing}")
         parts = [np.asarray(truth.components[c]) for c in self.components[:-1]]
         parts.append(data.numpy().reshape(len(data), -1) - sum(parts))
-        specs = np.fft.fft(np.stack(parts, axis=-1), axis=1)[:, self.first:self.last]
+        stacked = np.stack(parts, axis=-1)
+        specs = np.fft.fft(stacked, n=stacked.shape[1] * self.zero_fill,
+                           axis=1)[:, self.first:self.last]
         specs = specs - specs.mean(axis=1, keepdims=True)
         return np.stack([specs.real, specs.imag], axis=1).astype(np.float32)
 
@@ -227,9 +245,14 @@ class WAND(TorchModel, paper_url="https://doi.org/10.1002/nbm.70038"):
     #   loss   #
     #**********#
     def loss(self, target, out, objective: str):
-        """The mean squared error over every component, as the original's 'mse'."""
+        """The mean squared error over every component, as the original's 'mse', each
+        component's errors times its weight where ``weights`` gives one."""
         from keras import ops
-        return ops.mean(ops.square(out - target))
+        error = ops.square(out - target)
+        if self.weights:
+            error = error * ops.convert_to_tensor(
+                [self.weights.get(c, 1.0) for c in self.components], dtype=error.dtype)
+        return ops.mean(error)
 
     #*************#
     #   runtime   #

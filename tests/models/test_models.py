@@ -30,6 +30,7 @@ from mrsuite.core.pipeline import Pipeline
 from mrsuite.core.result import FitResult
 from mrsuite.datasets import challenge2016
 from mrsuite.models import MLP, WAND, Model
+from mrsuite.training import Truth
 
 MLP_METABOLITES = ["Ala", "Asc", "Asp", "Cr", "GABA", "Gln", "Glu", "Gly", "GPC", "GSH", "mIns",
                    "Lac", "NAAG", "NAA", "PCh", "PCr", "PE", "Scyllo", "Ser", "Tau", "MM_CMR"]
@@ -286,6 +287,49 @@ def test_wand_as_a_processing_step_removes_or_keeps_components():
         wand(data, keep=["NotAMetabolite"])
     with pytest.raises(ValueError, match="not both"):
         wand(data, keep=["NAA"], remove=["baseline"])
+
+
+#*****************#
+#   zero-filled   #
+#*****************#
+def test_a_zero_filled_wand_reads_twice_the_points_and_answers_on_the_datas_own(tmp_path):
+    """Zero-filling is undone exactly: what comes back sits on the data's own points, its
+    window where the zero-filled grid puts it, and the components it learns add up to the
+    zero-filled input."""
+    points, first, last, rng = 256, 10, 506, np.random.default_rng(1)
+    acquisition = {"points": points, "bandwidth": 1200.0, "frequency": 123.2, "centre": 4.7}
+    wand = WAND(["A"], first, last, acquisition, baseline=False, zero_fill=2,
+                weights={"artifacts": 0.5})
+    fids = rng.normal(size=(2, points)) + 1j * rng.normal(size=(2, points))
+    items = [gen_nifti_mrs(f.reshape(1, 1, 1, -1), 1 / 1200.0, 123.2) for f in fids]
+
+    x = wand.prepare(items).numpy()
+    spec = np.fft.fft(fids, n=2 * points)
+    np.testing.assert_allclose(x[:, 0] + 1j * x[:, 1], spec)
+
+    out = torch.zeros(2, 2, last - first, 2, dtype=torch.float64)    # the window all 'A'
+    out[:, 0, :, 0] = torch.from_numpy(spec.real[:, first:last])
+    out[:, 1, :, 0] = torch.from_numpy(spec.imag[:, first:last])
+    window = np.zeros_like(spec)
+    window[:, first:last] = spec[:, first:last]
+    a = np.fft.ifft(window)[:, :points]                 # 'A' back on the data's points
+    kept = wand.interpret(out, items, keep=["A"])
+    np.testing.assert_allclose([np.asarray(k[:]).ravel() for k in kept], a, atol=1e-9)
+    removed = wand.interpret(out, items, remove=["A"])
+    np.testing.assert_allclose([np.asarray(r[:]).ravel() for r in removed], fids - a, atol=1e-9)
+    edges = np.pad(spec[:, first:last], ((0, 0), (first, 2 * points - last)), mode="edge")
+    every = np.asarray(wand.interpret(out, items)[0][:]).reshape(points, 2)
+    np.testing.assert_allclose(every[:, 0], np.fft.ifft(edges[0])[:points], atol=1e-9)
+
+    target = wand.target(Truth(components={"A": fids / 2}), NIfTI_MRS_Plus(items), "components")
+    inside = x[:, :, first:last]
+    np.testing.assert_allclose(target.sum(-1), inside - inside.mean(-1, keepdims=True),
+                               rtol=1e-5, atol=1e-5 * np.abs(x).max())
+
+    wand.save_pretrained(tmp_path)
+    loaded = WAND.from_pretrained(tmp_path)
+    assert (loaded.zero_fill, loaded.baseline, loaded.weights, loaded.components) == \
+        (2, False, {"artifacts": 0.5}, ["A", "artifacts"])
 
 
 #**************#

@@ -18,6 +18,7 @@
 #   imports   #
 #*************#
 import glob
+import os
 import re
 import warnings
 from dataclasses import dataclass
@@ -110,7 +111,7 @@ def discover(folder: Any, names: Optional[Dict[str, str]] = None,
     if not folder.is_dir():
         raise ValueError(f"{folder} is not a folder")
     entries = []
-    for path in sorted(folder.rglob("*")):
+    for path in _walk(folder):
         parts = path.relative_to(folder).parts
         if any(p.startswith(".") or p in SKIPPED for p in parts):
             continue
@@ -123,6 +124,18 @@ def discover(folder: Any, names: Optional[Dict[str, str]] = None,
         rel = e.path.relative_to(folder).as_posix()
         e.name, e.group = (names or {}).get(rel, e.name), (groups or {}).get(rel, e.group)
     return sort([e for e in entries if e.name])
+
+
+#**********#
+#   walk   #
+#**********#
+def _walk(folder: Path) -> List[Path]:
+    """Every path under a folder, in order, symlinked folders followed (a study kept on
+    another disk), which rglob leaves out."""
+    found = []
+    for dirpath, dirnames, files in os.walk(folder, followlinks=True):
+        found.extend(Path(dirpath) / name for name in [*dirnames, *files])
+    return sorted(found)
 
 
 #************#

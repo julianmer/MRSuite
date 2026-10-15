@@ -252,3 +252,22 @@ def test_a_cows_subjects_twix_files_load_by_their_names():
     assert svs.dim_tags == ["DIM_COIL", "DIM_DYN", "DIM_USER_0"]
     assert svs.dwelltime == pytest.approx(125e-6) and svs.spectrometer_frequency[0] == \
         pytest.approx(123.26, abs=0.01)
+
+
+#**************#
+#   symlinks   #
+#**************#
+def test_a_symlinked_folder_in_a_study_is_searched_too(tmp_path):
+    """A study's data kept on another disk and linked in is found like the rest."""
+    elsewhere = tmp_path / "disk" / "sub-01" / "mrs" / "sourcedata"
+    elsewhere.mkdir(parents=True)
+    (elsewhere / "sub-01_acq-01_svs_slaser_metab.dat").write_bytes(b"twix")
+    study = tmp_path / "study"
+    (study / "sub-01" / "mrs").mkdir(parents=True)
+    (study / "sub-01" / "mrs" / "sourcedata").symlink_to(elsewhere, target_is_directory=True)
+
+    found = collect.discover(study)
+
+    assert [(e.name, e.format) for e in found] == [("data", "twix")]
+    assert found[0].path == study / "sub-01" / "mrs" / "sourcedata" / \
+        "sub-01_acq-01_svs_slaser_metab.dat"

@@ -1026,15 +1026,21 @@ class App:
     #**********#
     #   pick   #
     #**********#
-    async def _pick(self, title: str = "Open data", both: bool = False) \
-            -> Optional[List[Path]]:
-        """Files from the system's own dialog where there is one; files and folders together
-        from the page's own, as the system's dialogs choose one or the other."""
+    async def _pick(self, title: str = "Open data", both: bool = False, mode: str = "open",
+                    name: str = "") -> Optional[List[Path]]:
+        """Files, one folder or a file to save ('open', 'folder', 'save') from the system's
+        own dialogs where there is a window; files and folders together, and everything in
+        a browser, from the page's own picker."""
+        from webview import FileDialog                  # picklable, as the window's queue needs
+
         window = nicegui.native.main_window
         if window is not None and not both:
-            # NiceGUI's default dialog is Open; pywebview's OPEN_DIALOG cannot cross to the window
-            found = await window.create_file_dialog(allow_multiple=True,
-                                                    directory=str(self.folder))
+            kind = {"open": FileDialog.OPEN, "folder": FileDialog.FOLDER,
+                    "save": FileDialog.SAVE}[mode]
+            found = await window.create_file_dialog(kind, allow_multiple=mode == "open",
+                                                    directory=str(self.folder),
+                                                    save_filename=name)
+            found = [found] if isinstance(found, str) else found
             return [Path(p) for p in found] if found else None
         done: asyncio.Future = asyncio.get_running_loop().create_future()
 
@@ -1043,7 +1049,7 @@ class App:
                 done.set_result(paths)
 
         with self.windows:
-            picker = Picker(self.folder, chosen, title)
+            picker = Picker(self.folder, chosen, title, mode, name)
         picker.on_value_change(lambda e: e.value or done.done() or done.set_result(None))
         picker.open()
         out = await done
@@ -1186,8 +1192,11 @@ class App:
         name = self.graph.nodes[id].name
         with ui.dialog() as dialog, ui.card().classes("w-[32rem] max-w-full"):
             ui.label(f"Export {name}").classes("text-base font-semibold")
-            where = ui.input("Folder", value=str(self.folder)).classes("w-full") \
-                .props("dense outlined").mark("export-folder")
+            with ui.row().classes("w-full no-wrap items-center gap-1"):
+                where = ui.input("Folder", value=str(self.folder)).classes("grow") \
+                    .props("dense outlined").mark("export-folder")
+                ui.button(icon="folder_open", on_click=lambda: self._browse(where, "folder")) \
+                    .props("flat dense").tooltip("Choose a folder").mark("export-browse")
             with ui.row().classes("w-full"):
                 ui.button("Cancel", on_click=lambda: dialog.submit(None)).props("flat")
                 ui.space()
@@ -1223,8 +1232,12 @@ class App:
             ui.label("The graph as Python").classes("text-base font-semibold")
             ui.label("Running it makes what the canvas made.").classes("mr-muted text-xs")
             ui.code(code, language="python").classes("w-full mr-code")
-            path = ui.input("Save to", value=str(self.folder / "graph.py")).classes("w-full") \
-                .props("dense outlined").mark("script-path")
+            with ui.row().classes("w-full no-wrap items-center gap-1"):
+                path = ui.input("Save to", value=str(self.folder / "graph.py")).classes("grow") \
+                    .props("dense outlined").mark("script-path")
+                ui.button(icon="folder_open",
+                          on_click=lambda: self._browse(path, "save", "graph.py")) \
+                    .props("flat dense").tooltip("Choose where").mark("script-browse")
             with ui.row().classes("w-full"):
                 ui.space()
                 ui.button("Close", on_click=lambda: dialog.submit(None)).props("flat")
@@ -1240,6 +1253,16 @@ class App:
                 return
             ui.notify(f"Wrote {target}", type="positive")
 
+    #************#
+    #   browse   #
+    #************#
+    async def _browse(self, box: Any, mode: str, name: str = "") -> None:
+        """A path box filled from a browser: a folder, or a file to save."""
+        chosen = await self._pick("Choose a folder" if mode == "folder" else "Save as",
+                                  mode=mode, name=name)
+        if chosen:
+            box.set_value(str(chosen[0]))
+
     #**********#
     #   file   #
     #**********#
@@ -1250,28 +1273,30 @@ class App:
     #   open   #
     #**********#
     async def open(self) -> None:
-        path = await _ask("Open a graph", "File", str(self.folder / "graph.mrsuite.json"))
-        if not path:
+        chosen = await self._pick("Open a graph")
+        if not chosen:
             return
         try:
-            self._replace(await run.io_bound(Graph.load, Path(path).expanduser()))
+            self._replace(await run.io_bound(Graph.load, chosen[0]))
         except Exception as err:                       # noqa: BLE001 - said, not hidden
             _said(err)
             return
+        self.folder = chosen[0].parent
         self.canvas.fit()
 
     #**********#
     #   save   #
     #**********#
     async def save(self) -> None:
-        path = await _ask("Save the graph", "File", str(self.folder / "graph.mrsuite.json"))
-        if path:
+        chosen = await self._pick("Save the graph", mode="save", name="graph.mrsuite.json")
+        if chosen:
             try:
-                self.graph.save(Path(path).expanduser())
+                self.graph.save(chosen[0])
             except OSError as err:
                 _said(err)
                 return
-            ui.notify(f"Saved {path}", type="positive")
+            self.folder = chosen[0].parent
+            ui.notify(f"Saved {chosen[0]}", type="positive")
 
     #*************#
     #   replace   #
@@ -1335,25 +1360,6 @@ def _said(err: BaseException) -> None:
     all, so a session run from a shell shows what went wrong while the GUI is young."""
     logger.error("%s", brief(err), exc_info=err)
     ui.notify(brief(err), type="negative", multi_line=True)
-
-
-#*********#
-#   ask   #
-#*********#
-async def _ask(title: str, label: str, value: str) -> Optional[str]:
-    """One line of text from a small dialog; None when cancelled."""
-    with ui.dialog() as dialog, ui.card().classes("w-[32rem] max-w-full"):
-        ui.label(title).classes("text-base font-semibold")
-        answer = ui.input(label, value=value).classes("w-full") \
-            .props("dense outlined autofocus").mark("answer")
-        answer.on("keydown.enter", lambda: dialog.submit(answer.value))
-        with ui.row().classes("w-full"):
-            ui.space()
-            ui.button("Cancel", on_click=lambda: dialog.submit(None)).props("flat")
-            ui.button("OK", on_click=lambda: dialog.submit(answer.value)).props("unelevated")
-    out = await dialog
-    dialog.delete()
-    return out or None
 
 
 #***********#

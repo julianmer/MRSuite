@@ -17,6 +17,7 @@
 #*************#
 import asyncio
 import pickle
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -686,9 +687,13 @@ def test_the_native_open_dialog_gets_what_can_reach_the_window(monkeypatch, tmp_
         with monkeypatch.context() as patch:               # the window only while picking
             patch.setattr(nicegui.app.native, "main_window", Window())
             assert await app._pick() == [tmp_path / "a.nii.gz"]
+            assert await app._pick(mode="save", name="g.json") == [tmp_path / "a.nii.gz"]
+            assert await app._pick(mode="folder") == [tmp_path / "a.nii.gz"]
 
     simulate(Graph(), script)
-    assert len(asked) == 1
+    kinds = [pickle.loads(a)[0][0] for a in asked]
+    assert [int(k) for k in kinds] == [10, 30, 20], "open, save, folder dialogs"
+    assert pickle.loads(asked[1])[1]["save_filename"] == "g.json"
 
 
 def test_files_and_folders_together_come_from_the_pages_own_picker_in_the_window_too(
@@ -937,15 +942,100 @@ def test_a_graph_or_script_saved_where_it_cannot_be_is_said(tmp_path):
     nowhere = str(tmp_path / "no" / "such" / "folder" / "g.json")
 
     async def script(user, app):
+        app.folder = tmp_path / "no" / "such" / "folder"       # gone by the time it saves
         async def click():                             # as the header's button does
             with app.client:
                 await app.save()
         task = asyncio.create_task(click())
-        await user.should_see(marker="answer")
-        user.find(marker="answer").clear().type(nowhere)
-        user.find("OK").click()
+        await user.should_see(marker="picker-name")
+        user.find(marker="picker-name").clear().type("g.json")
+        user.find(marker="picker-save").click()
         await task                                      # said, not raised
         await user.should_see("FileNotFoundError")
+        assert not Path(nowhere).exists()
+
+    simulate(graph, script)
+
+
+#*************#
+#   browser   #
+#*************#
+def test_a_graph_is_saved_and_opened_through_the_pages_own_browser(tmp_path):
+    """Save names the file in the picker's box; Open ticks it; the folder is remembered."""
+    graph = Graph()
+    graph.add("ismrm2016")
+
+    async def script(user, app):
+        app.folder = tmp_path
+
+        async def save():
+            with app.client:
+                await app.save()
+        task = asyncio.create_task(save())
+        await user.should_see(marker="picker-name")
+        assert user.find(marker="picker-name").elements.pop().value == "graph.mrsuite.json"
+        user.find(marker="picker-name").clear().type("mine.json")
+        user.find(marker="picker-save").click()
+        await task
+        assert (tmp_path / "mine.json").exists() and app.folder == tmp_path
+
+        app.new()
+        assert not app.graph.nodes
+        async def open_():
+            with app.client:
+                await app.open()
+        task = asyncio.create_task(open_())
+        await user.should_see(marker="file-mine.json")
+        user.find(marker="file-mine.json").elements.pop().set_value(True)
+        user.find(marker="picker-open").click()
+        await task
+        assert [n.block for n in app.graph.nodes.values()] == ["ismrm2016"]
+
+    simulate(graph, script)
+
+
+def test_the_export_folder_and_the_script_path_come_from_a_browser(tmp_path):
+    import pandas as pd
+
+    graph = Graph()
+    data = graph.add("mosae")
+    graph.nodes[data].made = {"mosae": pd.DataFrame({"score": [1.0]})}
+    (tmp_path / "out").mkdir()
+
+    async def script(user, app):
+        app.folder = tmp_path
+        async def export():
+            with app.client:
+                await app.export(data)
+        task = asyncio.create_task(export())
+        await user.should_see(marker="export-browse")
+        user.find(marker="export-browse").click()
+        await user.should_see(marker="open-out")
+        user.find(marker="open-out").click()
+        await user.should_see(marker="picker-folder")
+        user.find(marker="picker-folder").click()
+        await until(lambda: user.find(marker="export-folder").elements.pop().value
+                    == str(tmp_path / "out"))
+        user.find("Cancel").click()
+        await task
+
+        graph.remove(data)                             # unwired, it has no script
+        graph.add("ismrm2016")
+
+        async def script_():
+            with app.client:
+                await app.script()
+        task = asyncio.create_task(script_())
+        await user.should_see(marker="script-browse")
+        user.find(marker="script-browse").click()
+        await user.should_see(marker="picker-name")
+        user.find(marker="picker-name").clear().type("made.py")
+        user.find(marker="picker-save").click()
+        await until(lambda: user.find(marker="script-path").elements.pop().value
+                    == str(tmp_path / "made.py"))
+        user.find(marker="script-save").click()
+        await task
+        assert (tmp_path / "made.py").read_text().startswith("#")
 
     simulate(graph, script)
 

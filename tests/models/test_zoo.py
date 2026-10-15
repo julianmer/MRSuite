@@ -71,3 +71,17 @@ def test_a_zoo_model_loads_by_name_and_runs_in_a_pipeline(name):
     assert model.fingerprint() == weights       # the mixin loads weights leniently
     assert len(results) == len(data.list())
     assert model.recipe["training"] and model.source["name"] == name
+
+
+#*************#
+#   listing   #
+#*************#
+def test_the_zoo_lists_every_repo_of_the_organisation_with_its_class():
+    try:
+        listed = mrsuite.models.zoo()
+    except (httpx.HTTPError, OSError):
+        pytest.skip("the Hub is out of reach")
+    assert set(listed) >= set(ZOO)
+    assert listed["MRSuite/wand-ismrm2016"] == "mrsuite.models.wand.WAND"
+    assert listed["MRSuite/mlp-supervised-7t-slaser"] == "mrsuite.models.mlp.MLP"
+    assert list(listed) == sorted(listed)

@@ -19,14 +19,14 @@
 import importlib
 import json
 import os
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 from mrsuite.models.base import DOWNLOAD, Model
 from mrsuite.models.mlp import MLP
 from mrsuite.models.pytorch import TorchModel
 from mrsuite.models.wand import WAND
 
-__all__ = ["Model", "TorchModel", "MLP", "WAND", "load"]
+__all__ = ["Model", "TorchModel", "MLP", "WAND", "load", "zoo"]
 
 
 #**********#
@@ -67,3 +67,31 @@ def load(name: Any, revision: Optional[str] = None, **kwargs) -> Model:
     if not (isinstance(cls, type) and issubclass(cls, Model)):
         raise ValueError(f"{spec} is not an mrsuite Model")
     return cls.from_pretrained(name, revision=revision, **kwargs)
+
+
+#*********#
+#   zoo   #
+#*********#
+def zoo(org: str = "MRSuite", **kwargs) -> Dict[str, str]:
+    """
+    The models an organisation keeps on the Hub, with the MRSuite class each one loads as.
+
+    Args:
+        org (str): The organisation (or user) on the Hub.
+        **kwargs: ``token`` and the other download options of ``load``.
+
+    Returns:
+        Dict[str, str]: By repo id, the class its config names, e.g. 'mrsuite.models.wand.WAND';
+            a repo whose config names none is left out.
+    """
+    from huggingface_hub import HfApi, hf_hub_download
+
+    found = {}
+    for repo in HfApi(token=kwargs.get("token")).list_models(author=org):
+        path = hf_hub_download(repo_id=repo.id, filename="config.json",
+                               **{k: kwargs[k] for k in DOWNLOAD if k in kwargs})
+        with open(path) as fh:
+            spec = str(json.load(fh).get("model", ""))
+        if spec.startswith("mrsuite."):
+            found[repo.id] = spec
+    return dict(sorted(found.items()))

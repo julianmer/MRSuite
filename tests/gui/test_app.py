@@ -29,6 +29,7 @@ from nicegui.testing.user_simulation import user_simulation            # noqa: E
 
 from mrsuite import collect                                             # noqa: E402
 from mrsuite.datasets import challenge2016                              # noqa: E402
+from mrsuite.gui import blocks, catalog                                 # noqa: E402
 from mrsuite.gui.app import App, _found                                 # noqa: E402
 from mrsuite.gui.canvas import Canvas                                   # noqa: E402
 from mrsuite.gui.graph import Graph                                     # noqa: E402
@@ -1057,5 +1058,85 @@ def test_an_argument_with_a_default_goes_on_the_block_by_its_button():
 def test_a_search_puts_blocks_named_so_first():
     async def script(user, app):
         assert app._candidates("phas", None)[0][0] == "phasing"
+
+    simulate(Graph(), script)
+
+
+#*********#
+#   zoo   #
+#*********#
+def test_a_model_block_offers_the_pinned_checkpoints_until_the_hub_is_listed(monkeypatch):
+    """The dropdown holds the pinned checkpoints; once the Hub's listing is in, those of the
+    block's class from there, and a name typed stays offered."""
+    from mrsuite import models
+    listed = {"MRSuite/mlp-supervised-7t-slaser": "mrsuite.models.mlp.MLP",
+              "MRSuite/wand-ismrm2016": "mrsuite.models.wand.WAND",
+              "MRSuite/wand-fmrs-in-pain": "mrsuite.models.wand.WAND"}
+    monkeypatch.setattr(models, "zoo", lambda: listed)
+    graph = Graph()
+    wand = graph.add("wand")
+
+    async def script(user, app):
+        app.select(wand)
+        await asyncio.sleep(0.1)                       # the page redrawn
+        box, = user.find(marker="field-checkpoint").elements
+        assert box.options == ["MRSuite/wand-ismrm2016"] == list(blocks.ZOO["wand"])
+        await app._zoo()
+        assert app.zoo["wand"] == ["MRSuite/wand-fmrs-in-pain", "MRSuite/wand-ismrm2016"]
+        await asyncio.sleep(0.1)                       # the inspector redrawn
+        box, = user.find(marker="field-checkpoint").elements
+        assert box.options == ["MRSuite/wand-fmrs-in-pain", "MRSuite/wand-ismrm2016"]
+        assert app.zoo["mlp"] == ["MRSuite/mlp-supervised-7t-slaser"]
+
+        graph.set(wand, "checkpoint", "me/my-wand")
+        app.inspector.refresh()
+        await asyncio.sleep(0.1)
+        box, = user.find(marker="field-checkpoint").elements
+        assert box.value == "me/my-wand" and "me/my-wand" in box.options
+
+    simulate(graph, script)
+
+
+#*************#
+#   folders   #
+#*************#
+def test_the_data_blocks_sit_in_folders_closed_until_opened_and_kept_so():
+    async def script(user, app):
+        for folder in ("Files", "Simulated datasets", "In vivo datasets", "Basis sets"):
+            fold, = [e for e in user.find(folder).elements if isinstance(e, ui.expansion)]
+            assert fold.value is False
+        app._fold("data/In vivo datasets", True)
+        app.palette.refresh()
+        await asyncio.sleep(0.1)
+        fold, = [e for e in user.find("In vivo datasets").elements if isinstance(e, ui.expansion)]
+        assert fold.value is True
+        await user.should_see(marker="block-openneuro-ds005371")
+        assert "data/In vivo datasets" in app.opened and app.functions == {}, "no toolbox listed"
+
+    simulate(Graph(), script)
+
+
+#*************#
+#   by tab   #
+#*************#
+def test_a_toolboxs_functions_are_listed_under_the_tabs_they_belong_to():
+    async def script(user, app):
+        app.functions = {b: {} for b in catalog.BRIDGES}
+        app.functions["fsl_mrs"] = {"fit": "fit", "add": "other", "align": "preprocess"}
+        app._fold("all", True)
+        app._fold("fsl_mrs", True)
+        app.palette.refresh()
+        await asyncio.sleep(0.1)
+        folds = {k: [e for e in user.find(marker=f"folder-fsl_mrs/{k}").elements][0]
+                 for k in ("preprocess", "fit", "other")}
+        assert [f.text for f in folds.values()] == ["Preprocess", "Fit", "Other"]
+        assert not any(f.value for f in folds.values()), "folded until opened"
+        await user.should_see(marker="block-fsl_mrs:align")
+        app._fold("fsl_mrs/preprocess", True)
+        app.palette.refresh()
+        await asyncio.sleep(0.1)
+        fold, = user.find(marker="folder-fsl_mrs/preprocess").elements
+        assert fold.value is True
+        await user.should_not_see(marker="folder-fsl_mrs/data")      # nothing of that tab
 
     simulate(Graph(), script)

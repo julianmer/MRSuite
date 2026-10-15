@@ -614,6 +614,17 @@ class FIDABridge(Bridge):
         """The op_ functions, FID-A's operations on a spectrum's struct."""
         return [name for name in self.available() if name.startswith("op_")]
 
+    #*************#
+    #   folders   #
+    #*************#
+    def folders(self) -> Dict[str, str]:
+        """The toolbox's top folder each function lives in, e.g. 'processingTools'; '' at
+        the root."""
+        root = os.path.abspath(self._root)
+        return {name: os.path.relpath(path, root).split(os.sep)[0].replace(".m", "")
+                if os.path.dirname(os.path.abspath(path)) != root else ""
+                for name, path in _files(root).items()}
+
 
 bridge = FIDABridge()
 

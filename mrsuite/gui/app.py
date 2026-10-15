@@ -20,10 +20,13 @@ import asyncio
 import base64
 import io
 import json
+import logging
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from nicegui import app as nicegui, background_tasks, run, ui
+
+logger = logging.getLogger(__name__)
 
 from nifti_mrs_plus import NIfTI_MRS_Plus
 from mrsuite import collect
@@ -72,7 +75,8 @@ class App:
         self.theme = "system"
         self.folder = Path.home()                    # where files are looked for and written
         self.thumbs: Dict[str, Tuple[int, Any]] = {}
-        self.functions: Dict[str, Any] = {}          # every toolbox function, once listed
+        self.functions: Dict[str, Any] = {}          # every toolbox function by its tab, once listed
+        self.zoo: Dict[str, List[str]] = {}          # the Hub's checkpoints by block, once listed
         self.opened: set = set()                     # the palette's folds left open
         self.about: Dict[Tuple[str, str], Any] = {}  # a function's form and help, once read
         self.client = ui.context.client
@@ -225,7 +229,16 @@ class App:
                         ui.icon("info_outline").classes("mr-muted ml-auto text-sm") \
                             .tooltip(group.help)
                 for b in shown:
-                    self._item(b.key, b.title, group.colour, b.help)
+                    if not b.folder:
+                        self._item(b.key, b.title, group.colour, b.help)
+                for folder in dict.fromkeys(b.folder for b in shown if b.folder):
+                    key = f"{group.key}/{folder}"
+                    with ui.expansion(folder, value=bool(text) or key in self.opened,
+                                      on_value_change=lambda e, k=key: self._fold(k, e.value)) \
+                            .classes("w-full mr-folder").props("dense"):
+                        for b in shown:
+                            if b.folder == folder:
+                                self._item(b.key, b.title, group.colour, b.help)
         toolbox = GROUPS["toolbox"]
         with ui.expansion(value=bool(text) or "all" in self.opened,
                           on_value_change=lambda e: self._fold("all", e.value)) \
@@ -236,8 +249,9 @@ class App:
                     ui.label(toolbox.title).classes("text-sm font-semibold")
             for bridge in catalog.BRIDGES:
                 names = self.functions.get(bridge)
-                if isinstance(names, list):
-                    names = [n for n in names if not text or text in n.lower() or text in bridge]
+                if isinstance(names, dict):
+                    names = {n: g for n, g in names.items()
+                             if not text or text in n.lower() or text in bridge}
                     if text and not names:
                         continue
                 with ui.expansion(blocks.label((bridge, "")).rstrip(" ·"),
@@ -249,8 +263,24 @@ class App:
                     elif isinstance(names, str):
                         ui.label(names).classes("mr-muted text-xs px-2")
                     else:
-                        for name in names[:200]:
-                            self._item(f"{bridge}:{name}", name, toolbox.colour, "")
+                        self._folders(bridge, names, text)
+
+    #*************#
+    #   folders   #
+    #*************#
+    def _folders(self, bridge: str, names: Dict[str, str], text: str) -> None:
+        """A toolbox's functions by the tab each belongs to, in the tabs' order."""
+        colour = GROUPS["toolbox"].colour
+        for group in GROUPS.values():
+            found = [n for n, g in names.items() if g == group.key]
+            if not found:
+                continue
+            key = f"{bridge}/{group.key}"
+            with ui.expansion(group.title, value=bool(text) or key in self.opened,
+                              on_value_change=lambda e, k=key: self._fold(k, e.value)) \
+                    .classes("w-full mr-folder").props("dense").mark(f"folder-{key}"):
+                for name in found[:200]:
+                    self._item(f"{bridge}:{name}", name, colour, "")
 
     #**********#
     #   item   #
@@ -271,10 +301,12 @@ class App:
     #   fold   #
     #**********#
     def _fold(self, part: str, opened: bool) -> None:
-        """A fold of the palette opened or closed, kept so a refresh leaves it so."""
+        """A fold of the palette opened or closed, kept so a refresh leaves it so: a group's
+        folder ('group/folder'), or a toolbox, whose functions are listed on opening."""
         if opened:
             self.opened.add(part)
-            self._listing()
+            if "/" not in part:
+                self._listing()
         else:
             self.opened.discard(part)
 
@@ -289,13 +321,32 @@ class App:
             if bridge not in self.functions:
                 self.functions[bridge] = None
                 background_tasks.create(self._list(bridge))
+        if not self.zoo:
+            self.zoo = {k: [] for k, b in BLOCKS.items() if b.model}
+            background_tasks.create(self._zoo())
+
+    #*********#
+    #   zoo   #
+    #*********#
+    async def _zoo(self) -> None:
+        """The checkpoints MRSuite keeps on the Hub, by the block that loads them; the pinned
+        ones stay where the Hub is out of reach."""
+        from mrsuite import models
+        try:
+            listed = await run.io_bound(models.zoo)
+        except Exception as err:                       # noqa: BLE001 - said, not hidden
+            logger.info("the model zoo could not be listed: %s", brief(err))
+            return
+        self.zoo = {k: sorted(r for r, spec in listed.items() if spec == b.model)
+                    for k, b in BLOCKS.items() if b.model}
+        self.inspector.refresh()
 
     #**********#
     #   list   #
     #**********#
     async def _list(self, bridge: str) -> None:
         try:
-            self.functions[bridge] = await run.io_bound(catalog.functions, bridge, True)
+            self.functions[bridge] = await run.io_bound(blocks.categories, bridge)
         except Exception as err:                       # noqa: BLE001 - said, not hidden
             self.functions[bridge] = brief(err)
         self.palette.refresh()
@@ -400,7 +451,7 @@ class App:
         # names that start so first, then names that have it, then the help that does
         found.sort(key=lambda f: (not f[1].lower().startswith(text), text not in f[1].lower()))
         for bridge, names in self.functions.items():
-            if not isinstance(names, list) or not text:
+            if not isinstance(names, dict) or not text:
                 continue
             for name in names:
                 key = f"{bridge}:{name}"
@@ -693,6 +744,13 @@ class App:
                 ui.select(options, label=f.name, value=node.values.get(f.name),
                           on_change=lambda e, n=f.name: self._set(node.id, n, e.value)) \
                     .classes("grow").props("dense outlined")
+            elif f.kind == "pick":                     # the Hub's, else the pinned; or typed
+                names = self.zoo.get(node.block) or f.choices
+                ui.select(sorted({*names, *filter(None, [node.values.get(f.name)])}),
+                          label=f.name, value=node.values.get(f.name), with_input=True,
+                          new_value_mode="add-unique",
+                          on_change=lambda e, n=f.name: self._set(node.id, n, e.value)) \
+                    .classes("grow").props("dense outlined").mark(f"field-{f.name}")
             else:
                 shown = repr(node.values[f.name]) if f.name in node.values else ""
                 hint = f.default or ("in order" if f.positional else "needed")
@@ -1265,7 +1323,7 @@ def _folder(path: Any) -> Path:
 #*************#
 def _matches(b: blocks.Block, text: str) -> bool:
     """Whether a block answers a search: its name, its help, or a toolbox it offers."""
-    words = [b.title, b.help, *[f"{blocks.label(o)} {o[1]}" for o in b.offers]]
+    words = [b.title, b.help, b.folder, *[f"{blocks.label(o)} {o[1]}" for o in b.offers]]
     return not text or any(text in w.lower() for w in words)
 
 

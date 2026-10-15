@@ -404,10 +404,13 @@ class Graph:
                 line = f"{alias}.{function}({', '.join(filter(None, [wires['data'], args]))})"
                 imports = {f"from {package} import {alias}"}
             return f"{node.name} = {line}", imports, [node.name]
-        if node.block == "model":
-            if not node.values.get("name"):
-                raise ValueError(f"{node.name}: give the model's name")
-            line = f"Pipeline([models.load({node.values['name']!r}).step()]).run({wires['data']})"
+        if b.model:
+            checkpoint = node.values.get("checkpoint")
+            if not checkpoint:
+                raise ValueError(f"{node.name}: choose a checkpoint")
+            options = self._args(node, [f for f in b.fields if f.name != "checkpoint"], wires,
+                                 b.wrap)
+            line = f"Pipeline([models.load({checkpoint!r}).step({options})]).run({wires['data']})"
             return f"{node.name} = {line}", {*b.imports, PIPELINE}, [node.name]
         if node.block == "load":
             chosen = node.values.get("entries")
@@ -831,6 +834,11 @@ def traces(spectrum: Any, limit: int = 64, spread: Optional[str] = None,
     if stack and count > 1:
         step = stack * max(float(np.abs(y).max()) for y in ys)
         ys = [y + j * step for j, y in enumerate(ys)]
+    header = spectrum.hdr_ext.to_dict().get(f"dim_{axis + 1}_header", {})   # NIfTI counts from 1
+    named = next(iter(header.values()), None)        # one list per element, or {'Value': ...}
+    named = named.get("Value") if isinstance(named, dict) else named
+    if isinstance(named, list) and len(named) >= count:     # e.g. WAND's components by name
+        return ppm, ys, [str(v) for v in named[:count]]
     name = (tags[axis - 4] or "DIM").removeprefix("DIM_").lower() + " " if tags else ""
     return ppm, ys, [f"{name}{j}" for j in range(count)]
 
@@ -852,20 +860,32 @@ def table(result: FitResult) -> Tuple[List[str], List[List[Any]]]:
 #***********#
 def thumb(value: Any, points: int = 120) -> Dict[str, Any]:
     """
-    A small picture of a value, for its block: a spectrum's (or a basis set's) mean real
-    part over 0.5-4.2 ppm where it covers them, ppm falling, scaled to 0-1; a fit's largest
-    concentrations as bars; anything else in a few words.
+    A small picture of a value, for its block: a spectrum's mean real part over 0.5-4.2 ppm
+    where it covers them, ppm falling, scaled to 0-1; a basis set's spectra the same way,
+    stacked one above the other as a basis set is shown; a fit's largest concentrations as
+    bars; anything else in a few words.
     """
-    if isinstance(value, NIfTI_MRS_Plus) and len(value) or isinstance(value, Basis):
-        ppm, ys, _ = traces(value if isinstance(value, Basis) else value.list()[0])
-        y = np.mean(ys, axis=0)[::-1]
-        ppm = ppm[::-1]
+    def picture(ppm, ys):
+        """Each trace over 0.5-4.2 ppm, ppm falling, in ``points`` points keeping the peaks."""
+        ppm, ys = ppm[::-1], [y[::-1] for y in ys]
         keep = (ppm > 0.5) & (ppm < 4.2)
-        y = y[keep] if keep.sum() > points / 4 else y
-        chunks = np.array_split(y, min(points, len(y)))
-        y = np.array([c[np.argmax(np.abs(c))] for c in chunks])
+        ys = [y[keep] if keep.sum() > points / 4 else y for y in ys]
+        return [np.array([c[np.argmax(np.abs(c))] for c in np.array_split(y, min(points, len(y)))])
+                for y in ys]
+
+    if isinstance(value, NIfTI_MRS_Plus) and len(value):
+        ppm, ys, _ = traces(value.list()[0])
+        y, = picture(ppm, [np.mean(ys, axis=0)])
         span = np.ptp(y) or 1.0
         return {"kind": "line", "y": [round(float(v), 3) for v in (y - y.min()) / span]}
+    if isinstance(value, Basis):
+        ppm, ys, _ = traces(value)
+        ys = picture(ppm, ys)
+        step = 0.7 / max(len(ys), 1)           # each spectrum a step up, each at its own height
+        return {"kind": "lines", "ys": [[round(float(v), 3) for v in
+                                         np.clip(i * step + 0.3 * y / (np.abs(y).max() or 1.0),
+                                                 0, 1)]
+                                        for i, y in enumerate(ys)]}
     if results(value):
         scaling = "raw" if "raw" in value[0].concentrations else \
             next(iter(value[0].concentrations), None)

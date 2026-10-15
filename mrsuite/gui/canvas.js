@@ -51,6 +51,10 @@ const Block = {
            viewBox="0 0 120 36" preserveAspectRatio="none">
         <polyline :points="line(data.thumb.y)" />
       </svg>
+      <svg v-else-if="data.thumb && data.thumb.kind === 'lines'" class="mr-thumb mr-lines"
+           viewBox="0 0 120 36" preserveAspectRatio="none">
+        <polyline v-for="(y, i) in data.thumb.ys" :key="i" :points="line(y)" />
+      </svg>
       <svg v-else-if="data.thumb && data.thumb.kind === 'bars'" class="mr-thumb"
            viewBox="0 0 120 36" preserveAspectRatio="none">
         <rect v-for="(v, i) in data.thumb.y" :key="i" v-bind="bar(data.thumb.y, i)" />

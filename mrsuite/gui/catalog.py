@@ -63,6 +63,16 @@ def functions(bridge: str, everything: bool = False) -> List[str]:
     return own + [name for name in names if name not in own]
 
 
+#*************#
+#   folders   #
+#*************#
+def folders(bridge: str) -> Dict[str, str]:
+    """The toolbox's folder each function lives in, for the bridges that know (FID-A and
+    Osprey, from their files); empty for the rest."""
+    bridged = getattr(module(bridge), "bridge", None)
+    return bridged.folders() if hasattr(bridged, "folders") else {}
+
+
 #***********#
 #   about   #
 #***********#
@@ -125,7 +135,8 @@ class Field:
 
     Attributes:
         name (str): The argument's name.
-        kind (str): 'choice' for one of a few values, else 'value', typed as Python.
+        kind (str): 'choice' for one of a few values, 'pick' for one of them or one typed
+            (a name), else 'value', typed as Python.
         choices (List[Any]): The values to choose from, for a choice.
         default (str): The default as text, shown while the field is left empty; ''
             where there is none.

@@ -399,7 +399,9 @@ def test_a_basis_set_is_drawn_by_metabolite_and_written_out_as_a_basis_file(tmp_
     assert labels == ["NAA", "Cr"]
     assert np.allclose([ppm[np.argmax(y)] for y in ys], [2.01, 3.03],   # the nearest point
                        atol=(ppm[1] - ppm[0]) / 2)
-    assert line["kind"] == "line" and max(line["y"]) == 1
+    assert line["kind"] == "lines" and len(line["ys"]) == 2, "a line per basis spectrum"
+    assert all(0 <= v <= 1 for y in line["ys"] for v in y)
+    assert np.mean(line["ys"][1]) > np.mean(line["ys"][0]), "stacked: Cr drawn above NAA"
     assert exports(basis) == ["basis"] and written == tmp_path / "out" / "set.BASIS"
     assert written.read_bytes() == basis.lcmodel().read_bytes()
 
@@ -796,6 +798,19 @@ def test_coils_and_averages_are_drawn_apart_one_dimension_at_a_time_and_stacked(
     assert np.allclose(stacked[2] - flat[2], 2 * step) and np.allclose(stacked[0], flat[0])
 
 
+def test_a_dimension_named_in_the_header_labels_its_traces_by_name():
+    """WAND's components come with their names in the dimension's header."""
+    from nifti_mrs.create_nmrs import gen_nifti_mrs
+
+    fids = np.ones((1, 1, 1, 64, 3), dtype=complex)
+    spectrum = gen_nifti_mrs(fids, 2.5e-4, 123.2, dim_tags=["DIM_USER_0", None, None])
+    spectrum.set_dim_tag("DIM_USER_0", "DIM_USER_0", header={
+        "Component": {"Value": ["NAA", "baseline", "artifacts"], "Description": "parts"}})
+
+    _, _, labels = traces(spectrum)
+    assert labels == ["NAA", "baseline", "artifacts"]
+
+
 def test_a_thumbnail_shows_from_half_a_ppm():
     """A large peak at 0.35 ppm stays out of the picture; one at 2 ppm sits where 0.5-4.2
     ppm, falling, puts it."""
@@ -847,11 +862,35 @@ def test_a_call_blocks_line_fits_its_function(key):
 def test_what_flows_meets_only_what_takes_it():
     graph = Graph()
     simulated, score = graph.add("simulation"), graph.add("errors")
-    model, averaging = graph.add("model"), graph.add("averaging")
+    wand, mlp, averaging = graph.add("wand"), graph.add("mlp"), graph.add("averaging")
 
     with pytest.raises(ValueError, match="cannot go into"):        # MRS-Sim's own truth
         graph.connect(simulated, "truth", score, "truth")
-    graph.connect(model, "out", averaging, "data")                  # e.g. WAND's spectra
+    graph.connect(wand, "out", averaging, "data")                   # WAND processes
+    graph.connect(mlp, "out", score, "methods")                     # an MLP fits
+    with pytest.raises(ValueError, match="cannot go into"):
+        graph.connect(mlp, "out", averaging, "data")
+
+
+#************#
+#   models   #
+#************#
+def test_a_model_block_loads_its_checkpoint_and_runs_it_as_a_step_with_its_options():
+    graph = Graph()
+    data, wand, mlp = graph.add("ismrm2016"), graph.add("wand"), graph.add("mlp")
+    graph.connect(data, "spectra", wand, "data")
+    graph.connect(wand, "out", mlp, "data")
+
+    with pytest.raises(ValueError, match="choose a checkpoint"):
+        graph.code(wand)
+    graph.set(wand, "checkpoint", "MRSuite/wand-ismrm2016")
+    graph.set(wand, "remove", ["artifacts"])
+    graph.set(mlp, "checkpoint", "MRSuite/mlp-supervised-7t-slaser")
+    assert graph.code(wand)[0] == ("wand = Pipeline([models.load('MRSuite/wand-ismrm2016')"
+                                   ".step(remove=['artifacts'])]).run(ismrm2016_spectra)")
+    assert graph.code(mlp)[0] == ("mlp = Pipeline([models.load('MRSuite/mlp-supervised-7t-slaser')"
+                                  ".step()]).run(wand)")
+    assert "from mrsuite import models" in graph.code(mlp)[1]
 
 
 #****************#
@@ -959,3 +998,31 @@ def test_how_many_outputs_octave_gives_is_not_a_blocks_to_set():
     names = [f.name for f in catalog.fields(catalog.about("fid_a", "op_getSNR")[0])]
 
     assert "nout" not in names and names[0] == "NAAppmmin"
+
+
+#****************#
+#   categories   #
+#****************#
+def test_every_toolbox_function_lands_in_a_tab_by_where_its_toolbox_keeps_it(monkeypatch):
+    """Curated blocks keep their group; FID-A's and Osprey's folders, spant's prefixes and a
+    bridge's steps tell the rest; a fit is a fit; what nothing says is other."""
+    if not (externals.path("fid-a") / "processingTools").is_dir():
+        pytest.skip("FID-A is not checked out")
+    fida, osprey = blocks.categories("fid_a"), blocks.categories("osprey")
+    assert fida["op_averaging"] == "preprocess" and fida["io_loadspec_twix"] == "data"
+    assert fida["sim_press"] == "simulate" and fida["run_pressproc"] == "other"
+    assert fida["addphase"] == "other", "a helper beside the op_ steps"
+    assert osprey["OspreyLoad"] == "data" and osprey["osp_CrChoReferencing"] == "preprocess"
+    assert osprey["OspreyQuantify"] == "fit" and osprey["OspreyHTMLReport"] == "evaluate"
+
+    fsl = blocks.categories("fsl_mrs")
+    assert fsl["fit"] == "fit" and fsl["align"] == "preprocess" and fsl["apodize"] == "preprocess"
+    assert fsl["first_index"] == "other", "a helper, not a step"
+
+    monkeypatch.setattr(catalog, "folders", lambda bridge: {})
+    monkeypatch.setattr(catalog, "functions", lambda bridge, everything=False:
+                        ["fit", "read_ima", "sim_basis", "fit_mrs", "calc_spec_snr", "lb",
+                         "Npts"] if everything else ["lb", "Npts"])
+    spant = blocks.categories("spant")
+    assert spant == {"fit": "fit", "read_ima": "data", "sim_basis": "simulate", "fit_mrs": "fit",
+                     "calc_spec_snr": "evaluate", "lb": "preprocess", "Npts": "preprocess"}

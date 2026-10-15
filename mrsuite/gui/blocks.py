@@ -76,6 +76,9 @@ GROUPS = {g.key: g for g in [
           "Spectral analysis: model the spectrum to estimate its signals, in arbitrary units "
           "or, with a water reference, as the toolbox quantifies them (Near 2021; Kreis et "
           "al., NMR Biomed 2021, section 4.2)."),
+    Group("models", "Models", "#3fcfae",
+          "Trained networks from MRSuite's model zoo on the Hugging Face Hub: a checkpoint "
+          "each, loaded by name. WAND is a processing step and gives spectra; the MLPs fit."),
     Group("evaluate", "Evaluate", "#7fe0e6",
           "Judge the spectra and the fits: spectral quality (SNR, linewidth), and fits against "
           "the ground truth with every analysis of MRSValidate that compares the two (Kreis et "
@@ -142,15 +145,21 @@ class Block:
         wrap (Dict[str, str]): Code a field's value is put into, as '{}' marks.
         analyses (Tuple[Tuple[str, str], ...]): A score's choice of analysis, as
             (module, function).
+        model (str): A trained model's class, e.g. 'mrsuite.models.wand.WAND'; the block
+            loads a checkpoint of it by name and runs it as a step with its fields.
+        folder (str): A fold of its group the palette lists it under, e.g. 'Basis sets';
+            '' for the group itself.
         help (str): One line on what it does.
     """
 
     key: str
     group: str
     title: str
+    folder: str = ""
     options: Tuple[Tuple[str, str], ...] = ()
     out: str = SPECTRA
     call: str = ""
+    model: str = ""
     imports: Tuple[str, ...] = ()
     fields: Tuple[Field, ...] = ()
     inputs: Tuple[Port, ...] = ()
@@ -188,6 +197,13 @@ def _value(name: str, default: str = "", positional: bool = False) -> Field:
 #************#
 def _choice(name: str, choices: List[str], default: str = "", positional: bool = False) -> Field:
     return Field(name, "choice", choices, default, positional)
+
+
+#**********#
+#   pick   #
+#**********#
+def _pick(name: str, choices: Tuple[str, ...]) -> Field:
+    return Field(name, "pick", list(choices), "", False)
 
 
 #*******************#
@@ -281,6 +297,11 @@ _OTHER = [
 
 _CHALLENGE = "mrsuite.datasets.challenge2016"
 
+# MRSuite's model zoo on the Hub, by block, as pinned (tests/models/test_zoo.py checks each
+# one's weights); the GUI lists the organisation's repos itself where it can reach the Hub
+ZOO = {"wand": ("MRSuite/wand-ismrm2016",),
+       "mlp": ("MRSuite/mlp-supervised-7t-slaser", "MRSuite/mlp-selfsupervised-7t-slaser")}
+
 # MRSValidate's analyses that compare fits with the ground truth (scoring.analyses lists
 # them; a test keeps the two the same), a block per module of it, MRSuite's MAE and bias first
 _SCORING, _MRSV = "mrsuite.benchmark.scoring", "mrsvalidate.analysis"
@@ -336,35 +357,52 @@ PIPELINE: Dict[Tuple[str, str], Tuple[Dict[str, Any], str]] = {
 
 BLOCKS: Dict[str, Block] = {b.key: b for b in [
     # data
-    Block("load", "data", "Load data", call="collect.load",
+    Block("load", "data", "Load data", folder="Files", call="collect.load",
           imports=("from mrsuite import collect",), outputs=(),
           help="Files and folders from anywhere, each file named as you like (data, water, mm, "
                "truth, ...); a folder is searched and its files named by BIDS or by words in "
                "their names. One output per name, in group order."),
-    Block("ismrm2016", "data", "2016 fitting challenge", call="challenge2016.load",
+    Block("ismrm2016", "data", "2016 fitting challenge", folder="Simulated datasets",
+          call="challenge2016.load",
           imports=("from mrsuite.datasets import challenge2016",),
           fields=(_value("n", "None"),),
           outputs=(Port("spectra", SPECTRA), Port("water", SPECTRA), Port("truth", TRUTH)),
           help="The ISMRM 2016 fitting challenge: spectra, water references, ground truth."),
-    Block("mrsi2024", "data", "MRSI challenge", call="mrsi_challenge.load",
+    Block("mrsi2024", "data", "MRSI challenge", folder="Simulated datasets",
+          call="mrsi_challenge.load",
           imports=("from mrsuite.datasets import mrsi_challenge",),
           fields=(_value("subject", "", positional=True), _value("voxels", "None")),
           outputs=(Port("spectra", SPECTRA), Port("truth", TRUTH), Port("voxels")),
           help="One subject of the 2024 MRSI challenge, a spectrum per brain voxel."),
-    Block("basis", "data", "Basis set", call="io.basis", imports=("from mrsuite import io",),
+    Block("openneuro-ds005371", "data", "HERMES and HERCULES (ds005371)",
+          folder="In vivo datasets", call="openneuro.load",
+          imports=("from mrsuite.datasets import openneuro",),
+          fixed={"dataset": "'ds005371'"}, fields=(_value("subject", "'sub-01'"),),
+          outputs=(Port("spectra", SPECTRA), Port("water", SPECTRA)),
+          help="OpenNeuro ds005371 (Mikkelsen): edited PRESS and sLASER at 3 T, one subject's "
+               "sessions and acquisitions, with their water references."),
+    Block("openneuro-ds006812", "data", "COWS (ds006812)", folder="In vivo datasets",
+          call="openneuro.load", imports=("from mrsuite.datasets import openneuro",),
+          fixed={"dataset": "'ds006812'"}, fields=(_value("subject", "'sub-01'"),),
+          outputs=(Port("spectra", SPECTRA), Port("mm", SPECTRA)),
+          help="OpenNeuro ds006812 (Igwe): sLASER at 3 T under three water suppression "
+               "schemes, one subject's raw acquisitions and their macromolecule ones."),
+    Block("basis", "data", "Load basis set", folder="Basis sets", call="io.basis",
+          imports=("from mrsuite import io",),
           fields=(_value("files", positional=True), _value("format", "'auto'"),
                   _value("sw", "None"), _value("sf", "None"), _value("te", "None")),
           outputs=(Port("basis", BASIS),),
           help="A basis set in any format, told apart by BasiC, for any fit; sw (Hz), sf "
                "(MHz) and te (ms) where the files do not state them."),
-    Block("basis-add", "data", "Add to basis set", call="io.merge_basis",
+    Block("basis-add", "data", "Add to basis set", folder="Basis sets", call="io.merge_basis",
           imports=("from mrsuite import io",),
           inputs=(Port("basis", BASIS), Port("more", ANY, many=True)),
           fields=(_value("keep", "None"),), outputs=(Port("basis", BASIS),),
           help="Other basis sets' functions, or measured spectra (e.g. a macromolecule "
                "acquisition processed like the data, named as its wire), on the basis' axis; "
                "Choose functions keeps which, one per name."),
-    Block("basis-convert", "data", "Convert basis set", call="io.convert_basis",
+    Block("basis-convert", "data", "Convert basis set", folder="Basis sets",
+          call="io.convert_basis",
           imports=("from mrsuite import io",), inputs=(Port("basis", BASIS),),
           fields=(_value("folder"), _value("tool"), _value("output", "'default'")),
           outputs=(Port("files", FILES),),
@@ -389,11 +427,20 @@ BLOCKS: Dict[str, Block] = {b.key: b for b in [
           help="Model the spectrum as a combination of basis spectra."),
     Block("peak-fit", "fit", "Peak fit (AMARES)", out=RESULTS, options=(("pyamares", "fit"),),
           help="Model the spectrum as peaks with prior knowledge."),
-    Block("model", "fit", "Trained model", out=ANY, imports=("from mrsuite import models",),
-          fields=(_value("name"),), inputs=(Port("data", SPECTRA),),
-          outputs=(Port("out", ANY),),                 # a fit, or spectra (e.g. WAND's)
-          help="A trained network, by its name on the Hugging Face Hub, e.g. "
-               "MRSuite/wand-mrsi2024."),
+    # models
+    Block("wand", "models", "WAND", model="mrsuite.models.wand.WAND",
+          imports=("from mrsuite import models",),
+          fields=(_pick("checkpoint", ZOO["wand"]), _value("remove", "None"),
+                  _value("keep", "None")),
+          inputs=(Port("data", SPECTRA),), outputs=(Port("out", SPECTRA),),
+          help="Decomposes each spectrum into its metabolites, baseline and artifacts: the "
+               "spectrum without the components removed (e.g. ['artifacts']), with only those "
+               "kept ('metabolites' for all), or, with neither, every component apart."),
+    Block("mlp", "models", "MLP", model="mrsuite.models.mlp.MLP", out=RESULTS,
+          imports=("from mrsuite import models",), fields=(_pick("checkpoint", ZOO["mlp"]),),
+          inputs=(Port("data", SPECTRA),), outputs=(Port("out", RESULTS),),
+          help="Quantifies each spectrum with a multilayer perceptron, trained supervised on "
+               "simulated spectra or self-supervised with a signal model."),
     # evaluate
     Block("snr", "evaluate", "SNR", out=ANY,
           options=((_CHALLENGE, "snr"), ("fid_a", "op_getSNR"), ("osprey", "op_getSNR"),
@@ -451,6 +498,40 @@ def block(key: str) -> Block:
     if bridge not in catalog.BRIDGES or not re.fullmatch(r"[A-Za-z_][\w.]*", function):
         raise KeyError(f"no block {key!r}")
     return Block(key, "toolbox", function, options=((bridge, function),), out=ANY)
+
+
+#****************#
+#   categories   #
+#****************#
+# where a toolbox keeps a function says what it is for: FID-A's and Osprey's folders, spant's
+# name prefixes; what the curated blocks offer keeps their group, a fit is a fit, and the
+# remaining steps (spectra in, spectra out) are preprocessing
+FOLDERS = {"fid_a": {"inputOutput": "data", "simulationTools": "simulate"},
+           "osprey": {"load": "data", "process": "preprocess", "fit": "fit", "quantify": "fit",
+                      "plot": "evaluate", "overview": "evaluate"}}
+PREFIXES = {"spant": {"read_": "data", "write_": "data", "sim_": "simulate", "fit_": "fit",
+                      "calc_": "evaluate", "plot_": "evaluate"}}
+
+
+def categories(bridge: str) -> Dict[str, str]:
+    """Every function of a toolbox with the group it belongs to, a key of GROUPS: 'other'
+    where nothing says."""
+    curated = {o: b.group for b in BLOCKS.values() for o in b.options}
+    steps, folders = set(catalog.functions(bridge)), catalog.folders(bridge)
+
+    def category(name: str) -> str:
+        if (bridge, name) in curated:
+            return curated[(bridge, name)]
+        if name == "fit":
+            return "fit"
+        group = FOLDERS.get(bridge, {}).get(folders.get(name, ""))
+        if group:
+            return group
+        for prefix, group in PREFIXES.get(bridge, {}).items():
+            if name.startswith(prefix):
+                return group
+        return "preprocess" if name in steps else "other"
+    return {name: category(name) for name in catalog.functions(bridge, True)}
 
 
 #***********#

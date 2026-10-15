@@ -370,8 +370,8 @@ def test_radar_draws_one_polygon_per_method_best_at_the_rim():
     lines = ax.get_lines()
 
     assert [line.get_label() for line in lines] == ["lcmodel", "tarquin"]
-    assert list(lines[0].get_ydata()) == pytest.approx([1.0, 0.0, 0.0, 1.0, 1.0])
-    assert list(lines[1].get_ydata()) == pytest.approx([0.0, 1.0, 1.0, 1.0, 0.0])
+    assert list(lines[0].get_ydata()) == pytest.approx([1.0, 0.05, 0.05, 1.0, 1.0]), "floored"
+    assert list(lines[1].get_ydata()) == pytest.approx([0.05, 1.0, 1.0, 1.0, 0.05])
     assert [t.get_text() for t in ax.get_xticklabels()] == \
         ["mae\n0.2 to 0.1", "bias\n0.2 to 0.1", "lin_ccc\n0.5 to 1", "rmse\n0.3 to 0.3"]
 
@@ -380,7 +380,7 @@ def test_radar_draws_one_polygon_per_method_best_at_the_rim():
 
 
 def test_an_empty_radar_waits_for_scores():
-    ax = plot_scores({}, "none")
+    ax = plot_scores({})
 
     assert ax.get_lines() == [] and "No scores yet" in ax.get_title()
 
@@ -394,14 +394,17 @@ def test_score_tables_draw_on_one_radar():
     tables = {"mae": score(methods, truth, ["none"], {"mae": mae}),
               "ccc": score(methods, truth, ["none"], {"ccc": agreement.lin_ccc})}
 
-    ax = plot_scores(tables, "none")
+    ax = plot_scores(tables)
 
     assert [line.get_label() for line in ax.get_lines()] == ["a", "b"]
     assert [t.get_text().split("\n")[0] for t in ax.get_xticklabels()] == ["ccc", "mae"]
-    with pytest.raises(ValueError, match="no scores on water for all"):
-        plot_scores(tables, "water")
     with pytest.raises(ValueError, match="given twice: mae"):
-        plot_scores({"x": tables["mae"], "y": tables["mae"]}, "none")
+        plot_scores({"x": tables["mae"], "y": tables["mae"]})
+
+    both = score(methods, truth, ["none", "optimal"], {"mae": mae})   # a spoke per reference
+    ax = plot_scores(both)
+    assert [t.get_text().split("\n")[0] for t in ax.get_xticklabels()] == \
+        ["mae (none)", "mae (optimal)"]
 
 
 #**************#
@@ -456,7 +459,7 @@ def test_what_says_nothing_of_the_fits_has_no_score_and_leaves_nothing_behind(tm
     assert table["score"].isna().all() and table["low"].notna().all()
     assert list(tmp_path.iterdir()) == []
     with pytest.raises(ValueError, match=r"no score for tukey \(a\)"):
-        plot_scores(table, "none")
+        plot_scores(table)
     assert not {"standardization.standardize", "descriptive.cv"} & set(analyses())
 
 

@@ -29,6 +29,14 @@ HIGHER = {"lin_ccc", "robust_ccc", "pearson_r", "r_squared_direct", "adjusted_r_
 SIGNED = {"bias", "mpe", "mepe", "mean", "median"}
 
 
+#************#
+#   metric   #
+#************#
+def _metric(measure: str) -> str:
+    """The metric a measure is: its name before any reference or metabolite."""
+    return measure.split(" ")[0]
+
+
 #***********#
 #   radar   #
 #***********#
@@ -61,43 +69,60 @@ def radar(values: pd.DataFrame, limits: Optional[Dict[str, Tuple[float, float]]]
 
     values = values.copy()
     for c in values.columns:
-        if c in SIGNED:
+        if _metric(c) in SIGNED:
             values[c] = values[c].abs()
-    limits = {c: (limits or {}).get(c, (values[c].min(), values[c].max()) if c in HIGHER
-                                       else (values[c].max(), values[c].min()))
+    limits = {c: (limits or {}).get(c, (values[c].min(), values[c].max())
+                                       if _metric(c) in HIGHER else (values[c].max(), values[c].min()))
               for c in values.columns}
     angles = np.linspace(0, 2 * np.pi, len(limits), endpoint=False)
     if ax is None:
         _, ax = plt.subplots(subplot_kw={"projection": "polar"})
+    ax.set_facecolor("none")
+    ax.figure.set_facecolor("none")
 
+    for r, alpha in ((0.25, 0.05), (0.5, 0.05), (0.75, 0.03), (1.0, 0.01)):   # bsuite's rings
+        ax.fill(np.linspace(0, 2 * np.pi, 100), [r] * 100, color="grey", alpha=alpha,
+                zorder=0)
     for method, row in values.iterrows():
         radius = [(row[c] - lo) / (hi - lo) if hi != lo else 1.0 for c, (lo, hi) in limits.items()]
-        ax.plot(np.append(angles, angles[0]), radius + radius[:1], label=method)
-        ax.fill(angles, radius, alpha=0.1)
+        radius = [max(x, 0.05) for x in radius]             # never a point at the centre
+        line, = ax.plot(np.append(angles, angles[0]), radius + radius[:1], label=method,
+                        linewidth=3, alpha=0.85, zorder=2)
+        ax.fill(angles, radius, color=line.get_color(), alpha=0.2, zorder=2)
 
-    ax.set_xticks(angles, [f"{c}\n{lo:g} to {hi:g}" for c, (lo, hi) in limits.items()])
-    ax.set_yticks([])
+    ax.set_xticks(angles)
+    ax.set_xticklabels([f"{c}\n{lo:g} to {hi:g}" for c, (lo, hi) in limits.items()],
+                       fontsize=12, color="grey")
+    for angle, label in zip(np.degrees(angles), ax.get_xticklabels()):
+        label.set_horizontalalignment("right" if 90 < angle < 270 else
+                                      "center" if angle in (90, 270) else "left")
+    ax.set_rlabel_position(0)
+    ax.set_yticks([0.25, 0.5, 0.75, 1.0], [".25", ".5", ".75", "1"], color="grey",
+                  fontsize=9, alpha=0.75)
     ax.set_ylim(0, 1)
+    ax.grid(color="grey", alpha=0.6, linestyle=":", linewidth=1)
+    ax.spines["polar"].set_visible(False)
     if len(values):
-        ax.legend()
+        ax.legend(loc="upper left", bbox_to_anchor=(1.05, 1.0), frameon=False,
+                  labelcolor="grey")
     return ax
 
 
 #*****************#
 #   plot scores   #
 #*****************#
-def plot_scores(scores: Union[pd.DataFrame, Dict[str, pd.DataFrame]], reference: str,
-                metabolite: str = "all",
+def plot_scores(scores: Union[pd.DataFrame, Dict[str, pd.DataFrame]],
                 limits: Optional[Dict[str, Tuple[float, float]]] = None, ax: Any = None) -> Any:
     """
-    Score tables on a radar plot: one spoke per metric, each its 'score' (score's first
-    number of a result), one polygon per method, on one reference and metabolite.
+    Score tables on a radar plot: one spoke per measure, each its 'score' (score's first
+    number of a result), one polygon per method, as bsuite draws its agents over its
+    capabilities. Every measure in the tables is drawn: the pooled rows (metabolite 'all')
+    where a table has them, else each metabolite's; a measure scored on several references
+    gets a spoke per reference, named so.
 
     Args:
         scores (Union[pd.DataFrame, Dict[str, pd.DataFrame]]): One table of score's, or
-            several by name, e.g. one per metric.
-        reference (str): Which reference's scores.
-        metabolite (str): Which metabolite's, or 'all' pooled.
+            several by name, e.g. one per measure.
         limits (Optional[Dict[str, Tuple[float, float]]]): As in radar.
         ax (Any): A polar axes to draw on; else a new figure's, made without pyplot, so
             drawing it in a thread is safe and nothing is left open.
@@ -106,34 +131,32 @@ def plot_scores(scores: Union[pd.DataFrame, Dict[str, pd.DataFrame]], reference:
         Any: The axes.
 
     Raises:
-        ValueError: For no scores on that reference and metabolite, a method without a
-            score for a metric (one that failed, or an interval's), or one metric given
-            twice. No tables at all draw an empty radar, to be filled.
+        ValueError: For a method without a score for a measure (one that failed, or an
+            interval's), or one measure given twice. No tables at all draw an empty radar,
+            to be filled.
     """
     from matplotlib.figure import Figure
 
     tables = list(scores.values()) if isinstance(scores, dict) else [scores]
+    if ax is None:
+        ax = Figure(figsize=(7, 6), layout="constrained").add_subplot(projection="polar")
     if not tables:
-        if ax is None:
-            ax = Figure(figsize=(6, 6), layout="constrained").add_subplot(projection="polar")
         ax.set_xticks([])
         ax.set_yticks([])
-        ax.set_title("No scores yet: wire score tables in, a spoke per metric")
+        ax.set_title("No scores yet: wire score tables in, a spoke per measure", color="grey")
         return ax
     table = pd.concat(tables)
-    picked = table[(table["reference"] == reference) & (table["metabolite"] == metabolite)]
-    if picked.empty:
-        raise ValueError(f"no scores on {reference} for {metabolite}; there are "
-                         f"{sorted(set(table['reference']))} for "
-                         f"{sorted(set(table['metabolite']))[:12]}")
-    twice = picked[picked.duplicated(["method", "metric"])]["metric"].unique()
+    pooled = table[table["metabolite"] == "all"]
+    picked = pooled if not pooled.empty else table
+    picked = picked.assign(measure=picked["metric"] + np.where(
+        picked["reference"].nunique() > 1, " (" + picked["reference"] + ")", "") + np.where(
+        picked["metabolite"].nunique() > 1, " " + picked["metabolite"], ""))
+    twice = picked[picked.duplicated(["method", "measure"])]["measure"].unique()
     if len(twice):
         raise ValueError(f"given twice: {', '.join(twice)}")
-    values = picked.pivot(index="method", columns="metric", values="score")
-    missing = [f"{metric} ({method})" for metric in values.columns
-               for method in values.index[values[metric].isna()]]
+    values = picked.pivot(index="method", columns="measure", values="score")
+    missing = [f"{measure} ({method})" for measure in values.columns
+               for method in values.index[values[measure].isna()]]
     if missing:
         raise ValueError(f"no score for {', '.join(missing)}")
-    if ax is None:
-        ax = Figure(figsize=(6, 6), layout="constrained").add_subplot(projection="polar")
     return radar(values, limits, ax)

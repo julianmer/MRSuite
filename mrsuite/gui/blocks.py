@@ -477,12 +477,10 @@ BLOCKS: Dict[str, Block] = {b.key: b for b in [
           help="Each method's fits against the truth, with its regression line."),
     Block("radar", "evaluate", "Radar", call="plot_scores",
           imports=("from mrsuite.benchmark import plot_scores",),
-          inputs=(Port("scores", SCORES, many=True),),
-          fields=(_choice("reference", _REFERENCES), _value("metabolite", "'all'")),
-          outputs=(Port("figure"),),
-          help="Score tables on one radar, filled as they are wired in: a spoke per metric, "
+          inputs=(Port("scores", SCORES, many=True),), outputs=(Port("figure"),),
+          help="Score tables on one radar, filled as they are wired in: a spoke per measure, "
                "each scaled from the worst method to the best at the rim, a polygon per "
-               "method."),
+               "method, as bsuite draws its agents."),
     # other
     *[Block(key, "other", title, options=tuple(options), help=help)
       for key, title, options, help in _OTHER],

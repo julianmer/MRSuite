@@ -97,7 +97,7 @@ def test_the_script_makes_what_the_graph_made(graph):
     namespace = {}
     exec(graph.script(), namespace)
 
-    made, again = graph.output("n3"), namespace["lcm_fit"]
+    made, again = graph.output("n3"), namespace["fsl_mrs_fit"]
     assert [r.conc("molarity") for r in again] == [r.conc("molarity") for r in made]
     assert np.array_equal(namespace["snr"], graph.output("n4"))
     assert "ismrm2016_spectra, ismrm2016_water, ismrm2016_truth = challenge2016.load(n=2)" \
@@ -208,7 +208,7 @@ def test_a_basis_set_block_gives_a_fit_its_basis(tmp_path, monkeypatch):
     assert made.checksum() == namespace["basis"].checksum()
     conc = [r.conc("raw") for r in graph.output(fit)]
     assert conc == [r.conc("raw") for r in graph.output(given)]
-    assert conc == [r.conc("raw") for r in namespace["lcm_fit"]]
+    assert conc == [r.conc("raw") for r in namespace["fsl_mrs_fit"]]
     said = json.loads(graph.output(fit)[0].provenance[-1]["Details"])
     assert said["kwargs"]["basis"]["basis"]["sha256"] == made.checksum()
 
@@ -477,7 +477,7 @@ def test_an_input_taking_many_gets_them_by_name():
     graph.set(score, "output_dir", "runs")
 
     assert graph.code(score)[0] == (
-        "errors_ = scoring.score({'lcm_fit': lcm_fit, 'lcm_fit_2': lcm_fit_2}, "
+        "errors_ = scoring.score({'fsl_mrs_fit': fsl_mrs_fit, 'fsl_mrs_fit_2': fsl_mrs_fit_2}, "
         "ismrm2016_truth, references=['optimal'], output_dir='runs', "
         "metrics={'mae': scoring.mae})")
 
@@ -560,7 +560,6 @@ def test_scores_of_fits_draw_on_a_radar_as_the_script_draws_them(graph):
         graph.connect(data, "truth", score, "truth")
         graph.connect(score, "scores", radar, "scores")
     graph.set(ccc, "references", "optimal")
-    graph.set(radar, "reference", "optimal")
 
     assert graph.run()
     namespace = {}
@@ -886,10 +885,11 @@ def test_a_model_block_loads_its_checkpoint_and_runs_it_as_a_step_with_its_optio
     graph.set(wand, "checkpoint", "MRSuite/wand-ismrm2016")
     graph.set(wand, "remove", ["artifacts"])
     graph.set(mlp, "checkpoint", "MRSuite/mlp-supervised-7t-slaser")
-    assert graph.code(wand)[0] == ("wand = Pipeline([models.load('MRSuite/wand-ismrm2016')"
-                                   ".step(remove=['artifacts'])]).run(ismrm2016_spectra)")
-    assert graph.code(mlp)[0] == ("mlp = Pipeline([models.load('MRSuite/mlp-supervised-7t-slaser')"
-                                  ".step()]).run(wand)")
+    assert graph.code(wand)[0] == ("wand_ismrm2016 = Pipeline([models.load('MRSuite/"
+                                   "wand-ismrm2016').step(remove=['artifacts'])])"
+                                   ".run(ismrm2016_spectra)")
+    assert graph.code(mlp)[0] == ("mlp_supervised_7t_slaser = Pipeline([models.load('MRSuite/"
+                                  "mlp-supervised-7t-slaser').step()]).run(wand_ismrm2016)")
     assert "from mrsuite import models" in graph.code(mlp)[1]
 
 
@@ -1000,15 +1000,33 @@ def test_how_many_outputs_octave_gives_is_not_a_blocks_to_set():
     assert "nout" not in names and names[0] == "NAAppmmin"
 
 
+#***********#
+#   names   #
+#***********#
+def test_a_block_is_named_after_what_it_does():
+    """A fit after its toolbox, renamed when another is chosen; a model after its checkpoint;
+    the rest after their block; never a name twice."""
+    graph = Graph()
+    fit, again = graph.add("lcm-fit"), graph.add("lcm-fit")
+    wand, averaging = graph.add("wand"), graph.add("averaging")
+    assert [graph.nodes[k].name for k in (fit, again, wand, averaging)] == \
+        ["fsl_mrs_fit", "fsl_mrs_fit_2", "wand", "averaging"]
+
+    graph.choose(again, 1)                                    # LCModel
+    graph.set(wand, "checkpoint", "MRSuite/wand-ismrm2016")
+    assert [graph.nodes[k].name for k in (again, wand)] == ["lcmodel_fit", "wand_ismrm2016"]
+    graph.choose(fit, 1)
+    assert graph.nodes[fit].name == "lcmodel_fit_2"
+
+
 #*****************#
 #   empty radar   #
 #*****************#
 def test_a_radar_with_nothing_wired_in_draws_empty_and_fills_as_scores_come():
     graph = Graph()
     radar = graph.add("radar")
-    graph.set(radar, "reference", "none")
 
-    assert "plot_scores({}, reference='none')" in graph.code(radar)[0]
+    assert "plot_scores({})" in graph.code(radar)[0]
     graph.run()
     assert "No scores yet" in graph.output(radar, "figure").get_title()
 

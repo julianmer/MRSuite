@@ -225,6 +225,8 @@ class Graph:
         if node.block == "load":
             node.found = []
             self._drop_wires(node)
+        if name == "checkpoint":
+            self._renamed(id)
 
     #************#
     #   choose   #
@@ -243,6 +245,7 @@ class Graph:
         named = {f.name for f in self.arguments(id)}
         node.shown = [n for n in node.shown if n in named]
         self._drop_wires(node)
+        self._renamed(id)
 
     #**********#
     #   show   #
@@ -699,17 +702,35 @@ class Graph:
     #*************#
     #   helpers   #
     #*************#
-    def _name(self, b: Block) -> str:
-        """A Python name for a new block, not yet taken."""
-        name = re.sub(r"\W", "_", b.key.split(":")[-1]).lower()
+    def _name(self, b: Block, option: int = 0, values: Optional[Dict[str, Any]] = None,
+              id: Optional[str] = None) -> str:
+        """A Python name for a block, not yet taken, saying what it does: a fit's toolbox
+        (lcmodel_fit, fsl_mrs_fit), a model's checkpoint (wand_ismrm2016), else its block."""
+        if b.group == "fit" and b.options:
+            base = f"{b.options[option][0]}_fit"
+        elif b.model and (values or {}).get("checkpoint"):
+            base = str(values["checkpoint"]).rsplit("/", 1)[-1]
+        else:
+            base = b.key.split(":")[-1]
+        name = re.sub(r"\W", "_", base).lower()
         name = "_" + name if name[0].isdigit() else name
         if name in TAKEN or keyword.iskeyword(name):
             name += "_"
-        taken = {n.name for n in self.nodes.values()}
+        taken = {n.name for k, n in self.nodes.items() if k != id}
         unique, k = name, 2
         while unique in taken:
             unique, k = f"{name}_{k}", k + 1
         return unique
+
+    #**************#
+    #   renamed    #
+    #**************#
+    def _renamed(self, id: str) -> None:
+        """A block named again after what it now does, where that changed."""
+        node = self.nodes[id]
+        name = self._name(blocks.block(node.block), node.option, node.values, id)
+        if name.rstrip("_0123456789") != node.name.rstrip("_0123456789"):
+            node.name = name
 
     #**************#
     #   pipeline   #

@@ -384,7 +384,8 @@ def test_radar_draws_one_polygon_per_method_best_at_the_rim():
 def test_an_empty_radar_waits_for_scores():
     ax = plot_scores({})
 
-    assert ax.get_lines() == [] and "No scores yet" in ax.get_title()
+    assert not [l for l in ax.get_lines() if not l.get_label().startswith("_")], "no polygon"
+    assert len(ax.get_lines()) == 5 and "No scores yet" in ax.get_title(), "the empty web"
     assert ax.figure.get_facecolor() == ax.get_facecolor() == (0.0, 0.0, 0.0, 0.0), "no white box"
     assert aspect("mae", "mean") == "Errors" and aspect("ccc", "lin_ccc") == "Agreement"
     assert aspect("deming", "deming") == "Method comparison"

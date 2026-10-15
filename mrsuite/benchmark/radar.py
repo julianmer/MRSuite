@@ -145,13 +145,18 @@ def plot_scores(scores: Union[pd.DataFrame, Dict[str, pd.DataFrame]], ax: Any = 
     tables = list(scores.values()) if isinstance(scores, dict) else [scores]
     if ax is None:
         ax = Figure(figsize=(7, 7), layout="constrained").add_subplot(projection="polar")
-    if not tables:
+    if not tables:                                           # the web, waiting for corners
         ax.set_facecolor("none")
         ax.figure.set_facecolor("none")
+        for r in (0.2, 0.4, 0.6, 0.8, 1.0):
+            ax.plot(np.linspace(0, 2 * np.pi, 100), [r] * 100, color="grey",
+                    alpha=0.55 if r == 1.0 else 0.35, linewidth=1.6 if r == 1.0 else 1.0)
         ax.set_xticks([])
         ax.set_yticks([])
+        ax.set_ylim(0, 1)
         ax.spines["polar"].set_visible(False)
-        ax.set_title("No scores yet: wire score tables in, a corner per aspect", color="grey")
+        ax.set_title("No scores yet: wire score tables in, a corner per aspect",
+                     color="#9aa4b5", fontsize=12)
         return ax
     table = pd.concat(tables)
     pooled = table[table["metabolite"] == "all"]

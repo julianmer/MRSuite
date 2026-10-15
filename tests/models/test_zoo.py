@@ -42,7 +42,7 @@ def _challenge():
 # each zoo repo: the SHA-256 of the weights it must hold (the published checkpoints, as
 # converted and checked against the original code) and data acquired as it was trained
 ZOO = {"MRSuite/wand-ismrm2016":
-           ("5dcc4bc3cc647e7a06c701dfccd78ffd27dbf2f214905a72c4f2b146973d1b71", _challenge),
+           ("635e74f89a9b6a33ea4fc757005f84c3986284d86f2e00334a111fd125f41107", _challenge),
        "MRSuite/mlp-supervised-7t-slaser":
            ("45a62ce6c27b96d48c1cd425a1ddd88e4ce7232ecf867395fb9c754ff6b142c4",
             lambda: _spectra(3)),

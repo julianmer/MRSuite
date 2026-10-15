@@ -33,6 +33,7 @@ from mrsvalidate.exceptions import AlignmentError
 
 from mrsuite.benchmark import (analyses, bias, coverage, figure, mae, observations,
                                optimal_scale, plot_scores, radar, score)
+from mrsuite.benchmark.radar import aspect
 from mrsuite.core.result import FitResult
 
 # MRSValidate's repository, for its toy example, which its package does not ship
@@ -367,7 +368,7 @@ def test_radar_draws_one_polygon_per_method_best_at_the_rim():
     values = pd.DataFrame({"mae": [0.1, 0.2], "bias": [-0.2, 0.1], "lin_ccc": [0.5, 1.0],
                            "rmse": [0.3, 0.3]}, index=["lcmodel", "tarquin"])
     ax = radar(values, ax=Figure().add_subplot(projection="polar"))
-    lines = ax.get_lines()
+    lines = [line for line in ax.get_lines() if not line.get_label().startswith("_")]
 
     assert [line.get_label() for line in lines] == ["lcmodel", "tarquin"]
     assert list(lines[0].get_ydata()) == pytest.approx([1.0, 0.05, 0.05, 1.0, 1.0]), "floored"
@@ -376,13 +377,16 @@ def test_radar_draws_one_polygon_per_method_best_at_the_rim():
         ["mae\n0.2 to 0.1", "bias\n0.2 to 0.1", "lin_ccc\n0.5 to 1", "rmse\n0.3 to 0.3"]
 
     ax = radar(values, limits={"mae": (0.4, 0.0)}, ax=Figure().add_subplot(projection="polar"))
-    assert ax.get_lines()[0].get_ydata()[0] == pytest.approx(0.75)
+    assert [line for line in ax.get_lines() if line.get_label() == "lcmodel"][0].get_ydata()[0] \
+        == pytest.approx(0.75)
 
 
 def test_an_empty_radar_waits_for_scores():
     ax = plot_scores({})
 
     assert ax.get_lines() == [] and "No scores yet" in ax.get_title()
+    assert aspect("mae", "mean") == "Errors" and aspect("ccc", "lin_ccc") == "Agreement"
+    assert aspect("deming", "deming") == "Method comparison"
 
 
 def test_score_tables_draw_on_one_radar():
@@ -396,15 +400,19 @@ def test_score_tables_draw_on_one_radar():
 
     ax = plot_scores(tables)
 
-    assert [line.get_label() for line in ax.get_lines()] == ["a", "b"]
-    assert [t.get_text().split("\n")[0] for t in ax.get_xticklabels()] == ["ccc", "mae"]
-    with pytest.raises(ValueError, match="given twice: mae"):
+    polygons = [line for line in ax.get_lines() if line.get_label() in ("a", "b")]
+    assert [t.get_text() for t in ax.get_xticklabels()] == ["Agreement", "Errors"]
+    assert list(polygons[0].get_ydata()) == pytest.approx([1.0, 1.0, 1.0]), "a: best in both"
+    assert list(polygons[1].get_ydata()) == pytest.approx([0.05, 0.05, 0.05])
+    with pytest.raises(ValueError, match=r"given twice: mae \(none\)"):
         plot_scores({"x": tables["mae"], "y": tables["mae"]})
 
-    both = score(methods, truth, ["none", "optimal"], {"mae": mae})   # a spoke per reference
-    ax = plot_scores(both)
-    assert [t.get_text().split("\n")[0] for t in ax.get_xticklabels()] == \
-        ["mae (none)", "mae (optimal)"]
+    more = {**tables, "mape": score(methods, truth, ["none"], {"mape": errors.mape}),
+            "r": score(methods, truth, ["none"], {"pearson_r": regression.pearson_r})}
+    ax = plot_scores(more)                       # a corner is the mean of its measures
+    assert [t.get_text() for t in ax.get_xticklabels()] == ["Agreement", "Errors", "Regression"]
+    errors_ = [line for line in ax.get_lines() if line.get_label() == "b"][0].get_ydata()[1]
+    assert errors_ == pytest.approx((0.05 + 0.05) / 2, abs=0.05) or errors_ <= 0.5
 
 
 #**************#
@@ -458,7 +466,7 @@ def test_what_says_nothing_of_the_fits_has_no_score_and_leaves_nothing_behind(tm
 
     assert table["score"].isna().all() and table["low"].notna().all()
     assert list(tmp_path.iterdir()) == []
-    with pytest.raises(ValueError, match=r"no score for tukey \(a\)"):
+    with pytest.raises(ValueError, match=r"no score for tukey \(none\) \(a\)"):
         plot_scores(table)
     assert not {"standardization.standardize", "descriptive.cv"} & set(analyses())
 

@@ -385,6 +385,7 @@ def test_an_empty_radar_waits_for_scores():
     ax = plot_scores({})
 
     assert ax.get_lines() == [] and "No scores yet" in ax.get_title()
+    assert ax.figure.get_facecolor() == ax.get_facecolor() == (0.0, 0.0, 0.0, 0.0), "no white box"
     assert aspect("mae", "mean") == "Errors" and aspect("ccc", "lin_ccc") == "Agreement"
     assert aspect("deming", "deming") == "Method comparison"
 

@@ -146,6 +146,8 @@ def plot_scores(scores: Union[pd.DataFrame, Dict[str, pd.DataFrame]], ax: Any = 
     if ax is None:
         ax = Figure(figsize=(7, 7), layout="constrained").add_subplot(projection="polar")
     if not tables:
+        ax.set_facecolor("none")
+        ax.figure.set_facecolor("none")
         ax.set_xticks([])
         ax.set_yticks([])
         ax.spines["polar"].set_visible(False)

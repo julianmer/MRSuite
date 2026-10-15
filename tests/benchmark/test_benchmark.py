@@ -358,20 +358,31 @@ def test_mrsvalidates_toy_example_is_reproduced(tmp_path):
 #***********#
 #   radar   #
 #***********#
-def test_radar_draws_one_polygon_per_method_within_its_limits():
-    """A spoke runs from 0, or below where a value is negative, to its highest value;
-    MAE is lower-is-better, so its limits are given worst first and draw the better
-    method further out."""
+def test_radar_draws_one_polygon_per_method_best_at_the_rim():
+    """Each spoke runs from the worst method to the best: MAE lower is better, bias by its
+    magnitude, Lin's CCC higher is better; limits given override; a spoke where all score
+    the same sits at the rim."""
     from matplotlib.figure import Figure
 
-    values = pd.DataFrame({"mae": [0.1, 0.2], "bias": [-0.2, 0.1], "ccc": [0.5, 1.0]},
-                          index=["lcmodel", "tarquin"])
-    ax = radar(values, limits={"mae": (0.2, 0.0)}, ax=Figure().add_subplot(projection="polar"))
+    values = pd.DataFrame({"mae": [0.1, 0.2], "bias": [-0.2, 0.1], "lin_ccc": [0.5, 1.0],
+                           "rmse": [0.3, 0.3]}, index=["lcmodel", "tarquin"])
+    ax = radar(values, ax=Figure().add_subplot(projection="polar"))
     lines = ax.get_lines()
 
     assert [line.get_label() for line in lines] == ["lcmodel", "tarquin"]
-    assert list(lines[0].get_ydata()) == pytest.approx([0.5, 0.0, 0.5, 0.5])
-    assert list(lines[1].get_ydata()) == pytest.approx([0.0, 1.0, 1.0, 0.0])
+    assert list(lines[0].get_ydata()) == pytest.approx([1.0, 0.0, 0.0, 1.0, 1.0])
+    assert list(lines[1].get_ydata()) == pytest.approx([0.0, 1.0, 1.0, 1.0, 0.0])
+    assert [t.get_text() for t in ax.get_xticklabels()] == \
+        ["mae\n0.2 to 0.1", "bias\n0.2 to 0.1", "lin_ccc\n0.5 to 1", "rmse\n0.3 to 0.3"]
+
+    ax = radar(values, limits={"mae": (0.4, 0.0)}, ax=Figure().add_subplot(projection="polar"))
+    assert ax.get_lines()[0].get_ydata()[0] == pytest.approx(0.75)
+
+
+def test_an_empty_radar_waits_for_scores():
+    ax = plot_scores({}, "none")
+
+    assert ax.get_lines() == [] and "No scores yet" in ax.get_title()
 
 
 def test_score_tables_draw_on_one_radar():

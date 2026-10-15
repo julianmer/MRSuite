@@ -480,7 +480,9 @@ BLOCKS: Dict[str, Block] = {b.key: b for b in [
           inputs=(Port("scores", SCORES, many=True),),
           fields=(_choice("reference", _REFERENCES), _value("metabolite", "'all'")),
           outputs=(Port("figure"),),
-          help="Score tables on one radar: a spoke per metric, a polygon per method."),
+          help="Score tables on one radar, filled as they are wired in: a spoke per metric, "
+               "each scaled from the worst method to the best at the rim, a polygon per "
+               "method."),
     # other
     *[Block(key, "other", title, options=tuple(options), help=help)
       for key, title, options, help in _OTHER],

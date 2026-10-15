@@ -448,17 +448,15 @@ class Graph:
     #***********#
     def _wires(self, node: Node) -> Dict[str, str]:
         """What comes in by wire, as code: an input taking many, a dictionary by name (see
-        ``labels``)."""
+        ``labels``), empty where nothing is wired yet (a radar fills as scores come in)."""
         ins = {p.name: p for p in self.ports(node.id)[0]}
         out: Dict[str, Any] = {}
         for e in self.edges:
             if e.target == node.id and not ins[e.input].many:
                 out[e.input] = self.ref(e.source, e.output)
-        for name in {p.name for p in ins.values() if p.many}:
-            wired = self.labels(node.id, name)
-            if wired:
-                out[name] = "{" + ", ".join(f"{label!r}: {self.ref(e.source, e.output)}"
-                                            for label, e in wired) + "}"
+        for name in {p.name for p in ins.values() if p.many}:      # none wired: an empty dict
+            out[name] = "{" + ", ".join(f"{label!r}: {self.ref(e.source, e.output)}"
+                                        for label, e in self.labels(node.id, name)) + "}"
         return out
 
     #************#

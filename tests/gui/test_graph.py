@@ -1000,6 +1000,19 @@ def test_how_many_outputs_octave_gives_is_not_a_blocks_to_set():
     assert "nout" not in names and names[0] == "NAAppmmin"
 
 
+#*****************#
+#   empty radar   #
+#*****************#
+def test_a_radar_with_nothing_wired_in_draws_empty_and_fills_as_scores_come():
+    graph = Graph()
+    radar = graph.add("radar")
+    graph.set(radar, "reference", "none")
+
+    assert "plot_scores({}, reference='none')" in graph.code(radar)[0]
+    graph.run()
+    assert "No scores yet" in graph.output(radar, "figure").get_title()
+
+
 #****************#
 #   categories   #
 #****************#

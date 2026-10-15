@@ -173,3 +173,15 @@ body {
 /* the preview */
 .mr-preview { background: var(--mr-panel); border-top: 1px solid var(--mr-border); }
 .mr-code { font-size: 12px; }
+
+/* the tabs above the canvas, one per graph open */
+.mr-tabs { background: var(--mr-panel); border-bottom: 1px solid var(--mr-border); min-height: 34px;
+           padding: 0 6px; overflow-x: auto; }
+.mr-tab { display: flex; align-items: center; gap: 6px; padding: 6px 10px 5px 12px; cursor: pointer;
+          font-size: 13px; color: var(--mr-muted); border-bottom: 2px solid transparent;
+          white-space: nowrap; user-select: none; }
+.mr-tab:hover { color: var(--mr-text); }
+.mr-tab-active { color: var(--mr-text); border-bottom-color: var(--accent); }
+.mr-tab-close { font-size: 15px; opacity: 0.45; border-radius: 50%; }
+.mr-tab-close:hover { opacity: 1; background: var(--mr-border); }
+.mr-tab-add { margin-left: 2px; color: var(--mr-muted); }

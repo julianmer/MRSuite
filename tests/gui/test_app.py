@@ -1250,3 +1250,81 @@ def test_an_error_said_on_the_page_is_logged_in_full_for_the_terminal(caplog):
 
     with caplog.at_level("ERROR", logger="mrsuite.gui"):
         simulate(graph, script)
+
+
+#**********#
+#   tabs   #
+#**********#
+def test_new_opens_a_tab_and_the_first_keeps_its_graph():
+    graph = Graph()
+    graph.add("ismrm2016")
+
+    async def script(user, app):
+        user.find(marker="new").click()
+        await until(lambda: not app.graph.nodes)
+        assert [t.name for t in app.tabs] == ["Untitled 1", "Untitled 2"]
+        assert app.tab is app.tabs[1] and drawn(user) == ([], [])
+
+        user.find(marker="tab-1").click()
+        await until(lambda: app.graph is graph)
+        assert len(drawn(user)[0]) == 1 and app.tab.name == "Untitled 1"
+
+    simulate(graph, script)
+
+
+def test_a_tab_edited_since_its_save_shows_a_dot_and_asks_before_closing():
+    async def script(user, app):
+        assert not app.tab.dirty
+        app.add("ismrm2016", (0, 0), join=False)
+        await user.should_see("Untitled 1 •")
+
+        async def close():
+            with app.client:
+                await app.close_tab(app.tab)
+        task = asyncio.create_task(close())
+        await user.should_see(marker="close-cancel")
+        user.find(marker="close-cancel").click()
+        await task
+        assert len(app.tabs) == 1 and app.graph.nodes, "kept"
+
+        task = asyncio.create_task(close())
+        await user.should_see(marker="close-discard")
+        user.find(marker="close-discard").click()
+        await task
+        assert len(app.tabs) == 1 and not app.graph.nodes, "closed; an empty tab is left"
+        assert app.tab.name == "Untitled 2" and not app.tab.dirty
+
+    simulate(Graph(), script)
+
+
+def test_a_graph_opened_has_its_own_tab_named_after_its_file_and_saves_back_to_it(tmp_path):
+    saved = Graph()
+    saved.add("ismrm2016")
+    saved.save(tmp_path / "mine.mrsuite.json")
+
+    async def script(user, app):
+        app.folder = tmp_path
+
+        async def open_():
+            with app.client:
+                await app.open()
+        task = asyncio.create_task(open_())
+        await user.should_see(marker="file-mine.mrsuite.json")
+        user.find(marker="file-mine.mrsuite.json").elements.pop().set_value(True)
+        user.find(marker="picker-open").click()
+        await task
+        assert [t.name for t in app.tabs] == ["mine"], "the empty untouched tab made way"
+        assert not app.tab.dirty and app.tab.path == tmp_path / "mine.mrsuite.json"
+
+        app.add("averaging", (0, 0), join=False)
+        await user.should_see("mine •")
+        with app.client:
+            await app.save()                           # to its file, nothing asked
+        await until(lambda: not app.tab.dirty)
+        assert len(Graph.load(tmp_path / "mine.mrsuite.json").nodes) == 2
+
+        user.find(marker="new").click()
+        await until(lambda: len(app.tabs) == 2)
+        assert [t.name for t in app.tabs] == ["mine", "Untitled 2"]
+
+    simulate(Graph(), script)

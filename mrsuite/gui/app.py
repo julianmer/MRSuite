@@ -21,6 +21,7 @@ import base64
 import io
 import json
 import logging
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -44,6 +45,49 @@ nicegui.add_static_files(STATIC, HERE / "static")
 
 # the page last opened, which files dropped on the native window go to
 LATEST: List["App"] = []
+
+
+#**************************************************************************************************#
+#                                            Class Tab                                             #
+#**************************************************************************************************#
+#                                                                                                  #
+# One graph open on the page: its file, how it was last saved, and its page state while hidden.    #
+#                                                                                                  #
+#**************************************************************************************************#
+@dataclass
+class Tab:
+    """One graph open on the page: its file, how it was last saved, and its page state while
+    hidden.
+
+    Attributes:
+        graph (Graph): The graph.
+        number (int): Its number among the untitled ones, for its name until saved.
+        path (Optional[Path]): The file it was opened from or saved to.
+        saved (str): The graph as it was then (``_snapshot``), so an edit since shows.
+        state (Dict[str, Any]): The selection, preview and thumbnails while another is shown.
+    """
+
+    graph: Graph
+    number: int = 0
+    path: Optional[Path] = None
+    saved: str = ""
+    state: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def name(self) -> str:
+        return self.path.name.split(".")[0] if self.path else f"Untitled {self.number}"
+
+    @property
+    def dirty(self) -> bool:
+        return _snapshot(self.graph) != self.saved
+
+
+#**************#
+#   snapshot   #
+#**************#
+def _snapshot(graph: Graph) -> str:
+    """A graph as text, to tell an edit since it was saved."""
+    return json.dumps(graph.to_dict(), sort_keys=True)
 
 
 #**************************************************************************************************#
@@ -77,6 +121,9 @@ class App:
         self.thumbs: Dict[str, Tuple[int, Any]] = {}
         self.functions: Dict[str, Any] = {}          # every toolbox function by its tab, once listed
         self.zoo: Dict[str, List[str]] = {}          # the Hub's checkpoints by block, once listed
+        self.count = 1                               # untitled tabs so far
+        self.tabs: List[Tab] = [Tab(self.graph, 1, saved=_snapshot(self.graph))]
+        self.tab = self.tabs[0]                      # the one shown
         self.opened: set = set()                     # the palette's folds left open
         self.about: Dict[Tuple[str, str], Any] = {}  # a function's form and help, once read
         self.client = ui.context.client
@@ -109,7 +156,9 @@ class App:
                         with ui.splitter(horizontal=True, value=70, limits=(25, 95)) \
                                 .classes("w-full h-full") as split:
                             with split.before:
-                                self.canvas = Canvas().classes("w-full h-full")
+                                with ui.column().classes("w-full h-full gap-0 no-wrap"):
+                                    self.tabbar()
+                                    self.canvas = Canvas().classes("w-full grow")
                             with split.after:
                                 with ui.column().classes("mr-preview w-full h-full p-3 gap-2 "
                                                          "no-wrap overflow-auto"):
@@ -124,13 +173,18 @@ class App:
                                                         e.args["target"], e.args["targetHandle"]))
         self.canvas.on("loose", lambda e: self.loose(e.args))
         self.canvas.on("removed", lambda e: self.removed(e.args["kind"], e.args["ids"]))
-        self.canvas.on("moved", lambda e: [self.graph.move(m["id"], (m["x"], m["y"]))
-                                           for m in e.args if m["id"] in self.graph.nodes])
+        self.canvas.on("moved", lambda e: ([self.graph.move(m["id"], (m["x"], m["y"]))
+                                            for m in e.args if m["id"] in self.graph.nodes],
+                                           self.tabbar.refresh()))     # moved: edited
         self.canvas.on("search", lambda e: self.search((e.args["x"], e.args["y"])))
         self.canvas.on("dropped", lambda e: self.add(e.args["key"], (e.args["x"], e.args["y"]),
                                                      join=False))
         # anything a handler did not see coming is said on the page, not only in the console
         ui.on_exception(_said)
+        # leaving the page with a tab edited since its save is asked about (a browser's way)
+        ui.add_body_html('''<script>window.addEventListener("beforeunload", e => {
+            if (document.querySelector(".mr-tab[data-dirty='1']")) { e.preventDefault();
+                e.returnValue = ""; } });</script>''')
         self.draw()
         ui.timer(0.3, self._tick)
         ui.timer(0, self._system, once=True)
@@ -149,9 +203,10 @@ class App:
             ui.label("MRSuite").classes("mr-brand")
             ui.label(_version()).classes("mr-version")
             ui.element("div").classes("mr-divider")
-            button("New", "add_box", self.new, "Start an empty graph").mark("new")
-            button("Open", "folder_open", self.open, "Open a saved graph")
-            button("Save", "save", self.save, "Save the graph")
+            button("New", "add_box", self.new, "An empty graph in a new tab").mark("new")
+            button("Open", "folder_open", self.open, "Open a saved graph in a new tab")
+            button("Save", "save", self.save, "Save the graph to its file").mark("save")
+            button("Save as", "save_as", self.save_as, "Save the graph to a new file")
             ui.element("div").classes("mr-divider")
             ui.button("Run", icon="play_arrow", on_click=lambda: self.run()) \
                 .props("unelevated dense no-caps").classes("mr-run px-3") \
@@ -469,6 +524,7 @@ class App:
         for n in nodes:
             n["selected"] = n["id"] == self.selected
         self.canvas.show(nodes, edges)
+        self.tabbar.refresh()                          # an edit shows on the tab
 
     #************#
     #   select   #
@@ -1267,47 +1323,151 @@ class App:
     #   file   #
     #**********#
     def new(self) -> None:
-        self._replace(Graph())
+        """An empty graph in a new tab, shown."""
+        self.count += 1
+        graph = Graph()
+        self._show_tab(Tab(graph, self.count, saved=_snapshot(graph)))
+
+    #*************#
+    #   tab bar   #
+    #*************#
+    @ui.refreshable
+    def tabbar(self) -> None:
+        """The graphs open, a tab each: its name, a dot once edited since its save, a cross
+        to close it; and a plus for a new one."""
+        with ui.row().classes("mr-tabs w-full no-wrap items-center gap-0"):
+            for tab in self.tabs:
+                shown = tab is self.tab
+                with ui.element("div").classes("mr-tab" + (" mr-tab-active" if shown else "")) \
+                        .props(f'data-dirty="{int(tab.dirty)}"') \
+                        .on("click", lambda _, t=tab: self._switch(t)).mark(f"tab-{tab.number}"):
+                    ui.label(tab.name + (" •" if tab.dirty else "")).classes("mr-tab-name")
+                    ui.icon("close").classes("mr-tab-close") \
+                        .on("click.stop", lambda _, t=tab: self.close_tab(t)) \
+                        .mark(f"close-{tab.number}")
+            ui.button(icon="add", on_click=self.new, color=None).props("flat dense round") \
+                .classes("mr-tab-add").tooltip("An empty graph in a new tab")
+
+    #************#
+    #   switch   #
+    #************#
+    def _switch(self, tab: Tab) -> None:
+        """Another tab in front: the one shown keeps its selection, preview and thumbnails."""
+        if tab is self.tab:
+            return
+        keys = ("selected", "previewed", "port", "index", "scaling", "spread", "stack",
+                "running", "thumbs")
+        if self.tab is not None:                       # none after the last tab closed
+            self.tab.state = {k: getattr(self, k) for k in keys}
+        self.tab, self.graph = tab, tab.graph
+        fresh = {"selected": None, "previewed": None, "port": None, "index": 0, "scaling": None,
+                 "spread": None, "stack": 0.0, "running": None, "thumbs": {}}
+        for k in keys:
+            setattr(self, k, tab.state.get(k, fresh[k]))
+        self.status.text = ""
+        self._changed()
+
+    #**************#
+    #   show tab   #
+    #**************#
+    def _show_tab(self, tab: Tab) -> None:
+        """A tab opened and shown; an empty tab never edited makes way for it."""
+        if not self.tab.graph.nodes and not self.tab.dirty and self.tab.path is None:
+            self.tabs[self.tabs.index(self.tab)] = tab
+        else:
+            self.tabs.append(tab)
+        self._switch(tab)
+
+    #***************#
+    #   close tab   #
+    #***************#
+    async def close_tab(self, tab: Tab) -> None:
+        """A tab closed; one edited since its save asks first. The last one closed leaves an
+        empty one."""
+        if tab.dirty:
+            with ui.dialog() as dialog, ui.card().classes("w-[26rem] max-w-full"):
+                ui.label(f"Save the changes to {tab.name}?").classes("text-base font-semibold")
+                ui.label("They are lost if you don't.").classes("text-sm mr-muted")
+                with ui.row().classes("w-full"):
+                    ui.button("Don't save", on_click=lambda: dialog.submit("discard")) \
+                        .props("flat no-caps").mark("close-discard")
+                    ui.space()
+                    ui.button("Cancel", on_click=lambda: dialog.submit(None)).props("flat") \
+                        .mark("close-cancel")
+                    ui.button("Save", icon="save", on_click=lambda: dialog.submit("save")) \
+                        .props("unelevated").mark("close-save")
+            choice = await dialog
+            dialog.delete()
+            if choice is None:
+                return
+            if choice == "save":
+                self._switch(tab)
+                await self.save()
+                if tab.dirty:                          # not saved after all
+                    return
+        if tab is self.tab and len(self.tabs) > 1:
+            self._switch(self.tabs[max(self.tabs.index(tab) - 1, 0)]
+                         if self.tabs.index(tab) else self.tabs[1])
+        self.tabs.remove(tab)
+        if not self.tabs:
+            self.count += 1
+            graph = Graph()
+            self.tabs.append(Tab(graph, self.count, saved=_snapshot(graph)))
+            self.tab = None                            # so the switch takes the fresh one
+            self._switch(self.tabs[0])
+        self.tabbar.refresh()
 
     #**********#
     #   open   #
     #**********#
     async def open(self) -> None:
+        """A saved graph in a new tab, named after its file."""
         chosen = await self._pick("Open a graph")
         if not chosen:
             return
         try:
-            self._replace(await run.io_bound(Graph.load, chosen[0]))
+            graph = await run.io_bound(Graph.load, chosen[0])
         except Exception as err:                       # noqa: BLE001 - said, not hidden
             _said(err)
             return
         self.folder = chosen[0].parent
+        self._show_tab(Tab(graph, path=chosen[0], saved=_snapshot(graph)))
         self.canvas.fit()
 
     #**********#
     #   save   #
     #**********#
     async def save(self) -> None:
-        chosen = await self._pick("Save the graph", mode="save", name="graph.mrsuite.json")
-        if chosen:
-            try:
-                self.graph.save(chosen[0])
-            except OSError as err:
-                _said(err)
-                return
-            self.folder = chosen[0].parent
-            ui.notify(f"Saved {chosen[0]}", type="positive")
+        """The graph to its file, or to one chosen where it has none yet."""
+        if self.tab.path is None:
+            await self.save_as()
+            return
+        self._save(self.tab.path)
 
     #*************#
-    #   replace   #
+    #   save as   #
     #*************#
-    def _replace(self, graph: Graph) -> None:
-        if self.busy:
-            self.graph.stop()
-        self.graph, self.thumbs, self.running = graph, {}, None
-        self.status.text = ""
-        self.selected = self.previewed = None
-        self._changed()
+    async def save_as(self) -> None:
+        chosen = await self._pick("Save the graph", mode="save",
+                                  name=self.tab.path.name if self.tab.path
+                                  else "graph.mrsuite.json")
+        if chosen:
+            self._save(chosen[0])
+
+    #**********#
+    #   save   #
+    #**********#
+    def _save(self, path: Path) -> None:
+        try:
+            self.graph.save(path)
+        except OSError as err:
+            _said(err)
+            return
+        self.tab.path, self.tab.saved = path, _snapshot(self.graph)
+        self.folder = path.parent
+        self.tabbar.refresh()
+        ui.notify(f"Saved {path}", type="positive")
+
 
 
 #*************#

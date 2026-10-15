@@ -130,7 +130,7 @@ class App:
         self.canvas.on("dropped", lambda e: self.add(e.args["key"], (e.args["x"], e.args["y"]),
                                                      join=False))
         # anything a handler did not see coming is said on the page, not only in the console
-        ui.on_exception(lambda err: ui.notify(brief(err), type="negative", multi_line=True))
+        ui.on_exception(_said)
         self.draw()
         ui.timer(0.3, self._tick)
         ui.timer(0, self._system, once=True)
@@ -580,7 +580,7 @@ class App:
                 ui.notify("Stopped before the end: press Run to go on", type="info")
         except Exception as err:                       # noqa: BLE001 - said, not hidden
             if graph is self.graph:
-                ui.notify(brief(err), type="negative", multi_line=True)
+                _said(err)
         finally:
             if self.runs is graph:
                 self.runs, self.running = None, None
@@ -1203,7 +1203,7 @@ class App:
             index = self.index if id == self.previewed else 0      # the spectrum shown
             written = await run.io_bound(export, value, folder, name, kind, index)
         except Exception as err:                       # noqa: BLE001 - said, not hidden
-            ui.notify(brief(err), type="negative", multi_line=True)
+            _said(err)
             return
         self.folder = Path(folder)
         ui.notify(f"Wrote {len(written)} file{'s' * (len(written) != 1)} to {folder}",
@@ -1217,7 +1217,7 @@ class App:
         try:
             code = await run.io_bound(self.graph.script)
         except Exception as err:                       # noqa: BLE001 - said, not hidden
-            ui.notify(brief(err), type="negative", multi_line=True)
+            _said(err)
             return
         with ui.dialog() as dialog, ui.card().classes("w-[60rem] max-w-full"):
             ui.label("The graph as Python").classes("text-base font-semibold")
@@ -1236,7 +1236,7 @@ class App:
             try:
                 Path(target).expanduser().write_text(code)
             except OSError as err:
-                ui.notify(brief(err), type="negative", multi_line=True)
+                _said(err)
                 return
             ui.notify(f"Wrote {target}", type="positive")
 
@@ -1256,7 +1256,7 @@ class App:
         try:
             self._replace(await run.io_bound(Graph.load, Path(path).expanduser()))
         except Exception as err:                       # noqa: BLE001 - said, not hidden
-            ui.notify(brief(err), type="negative", multi_line=True)
+            _said(err)
             return
         self.canvas.fit()
 
@@ -1269,7 +1269,7 @@ class App:
             try:
                 self.graph.save(Path(path).expanduser())
             except OSError as err:
-                ui.notify(brief(err), type="negative", multi_line=True)
+                _said(err)
                 return
             ui.notify(f"Saved {path}", type="positive")
 
@@ -1325,6 +1325,16 @@ def _matches(b: blocks.Block, text: str) -> bool:
     """Whether a block answers a search: its name, its help, or a toolbox it offers."""
     words = [b.title, b.help, b.folder, *[f"{blocks.label(o)} {o[1]}" for o in b.offers]]
     return not text or any(text in w.lower() for w in words)
+
+
+#**********#
+#   said   #
+#**********#
+def _said(err: BaseException) -> None:
+    """An error said on the page in one line, and in the terminal in full, traceback and
+    all, so a session run from a shell shows what went wrong while the GUI is young."""
+    logger.error("%s", brief(err), exc_info=err)
+    ui.notify(brief(err), type="negative", multi_line=True)
 
 
 #*********#

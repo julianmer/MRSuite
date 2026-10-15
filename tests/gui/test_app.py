@@ -1140,3 +1140,23 @@ def test_a_toolboxs_functions_are_listed_under_the_tabs_they_belong_to():
         await user.should_not_see(marker="folder-fsl_mrs/data")      # nothing of that tab
 
     simulate(Graph(), script)
+
+
+#**************#
+#   terminal   #
+#**************#
+def test_an_error_said_on_the_page_is_logged_in_full_for_the_terminal(caplog):
+    """A block's failure, and any error a page says, goes to the log with its traceback."""
+    graph = Graph()
+    data = graph.add("ismrm2016")
+    graph.set(data, "n", "two")                        # not a number: the load fails
+
+    async def script(user, app):
+        with app.client:
+            await app.run()
+        await until(lambda: any("Traceback" in r.exc_text for r in caplog.records if r.exc_text))
+        failed = [r for r in caplog.records if r.levelname == "ERROR"]
+        assert failed and "ismrm2016 failed" in failed[0].message and failed[0].exc_text
+
+    with caplog.at_level("ERROR", logger="mrsuite.gui"):
+        simulate(graph, script)

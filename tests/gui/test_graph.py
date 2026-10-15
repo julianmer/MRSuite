@@ -566,7 +566,7 @@ def test_scores_of_fits_draw_on_a_radar_as_the_script_draws_them(graph):
     exec(graph.script(), namespace)
 
     drawn = graph.output(radar)
-    assert [t.get_text().split("\n")[0] for t in drawn.get_xticklabels()] == ["lin_ccc", "mosae"]
+    assert [t.get_text() for t in drawn.get_xticklabels()] == ["Agreement", "Errors"]
     for score in (mosae, ccc):
         assert graph.output(score).equals(namespace[graph.nodes[score].name])
     assert exports(drawn) == ["figure"] and thumb(drawn) == {"kind": "text", "text": "figure"}

@@ -18,6 +18,7 @@
 #*************#
 import ast
 import json
+import logging
 import keyword
 import re
 import shutil
@@ -44,6 +45,8 @@ KEYWORD_ONLY = Parameter.KEYWORD_ONLY
 TAKEN = {"Pipeline", "partial", *catalog.BRIDGES,
          *(line.split()[-1] for b in blocks.BLOCKS.values() for line in b.imports),
          *(where.rsplit(".", 1)[-1] for b in blocks.BLOCKS.values() for where, _ in b.analyses)}
+
+logger = logging.getLogger(__name__)
 
 
 #**************************************************************************************************#
@@ -600,6 +603,7 @@ class Graph:
                     if node.changes != mine:     # edited meanwhile: its failure is stale too
                         return False
                     node.error = f"{type(err).__name__}: {err}"
+                logger.error("%s failed: %s", node.name, node.error, exc_info=err)
                 raise
             with self._lock:
                 if node.changes != mine:         # edited while it ran: what it made is stale

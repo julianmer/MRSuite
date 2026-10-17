@@ -164,7 +164,9 @@ class WAND(TorchModel, paper_url="https://doi.org/10.1002/nbm.70038"):
         artifacts = torch.stack((1 - masks[:, :, 0].sum(dim=1, keepdim=True),
                                  1 - masks[:, :, 1].sum(dim=1, keepdim=True)), dim=2)
         masks = torch.softmax(torch.cat((masks, artifacts), dim=1), dim=1)
-        specs = self.cwt.inverse(masks * cwtmatr.unsqueeze(1)).float()
+        # given the scales, the original's inverse reads their type off them: a short window's
+        # have no log-piecewise split, and assumed to have one, each would be summed twice
+        specs = self.cwt.inverse(masks * cwtmatr.unsqueeze(1), scales=self.cwt.scales).float()
         return specs.permute(0, 2, 3, 1)
 
     #***************#

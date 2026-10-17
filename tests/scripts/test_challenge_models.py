@@ -94,9 +94,10 @@ def test_a_run_trains_and_its_checkpoints_load(name, tmp_path):
         assert recipe["generation"]["subjects"] == ["Sub1"]
         assert recipe["generation"]["signal"] == challenge_models.RELEASE[challenge]
     if kind == "wand":
-        assert ("nuisance" in loaded.components) == (challenge in ("mrsi", "release-track1"))
+        assert ("nuisance" in loaded.components) == (challenge in ("mrsi", "release-track1")
+                                                     and name not in challenge_models.TWO_MASKS)
         assert ("baseline" in loaded.components) == (challenge not in challenge_models.RELEASE)
-        assert loaded.zero_fill == (2 if name in challenge_models.ZERO_FILLED else 1)
+        assert loaded.zero_fill == 1
         assert bool(loaded.weights) == (name in challenge_models.WEIGHTED)
     if kind == "wand" and challenge == "mrsi":
         water = recipe["MRSsynMRS"]["Artifacts"]["Residual Water"]
@@ -155,3 +156,39 @@ def test_the_nuisance_adds_up_and_stands_to_the_metabolites_as_in_its_voxel():
     voxels = np.linalg.norm(source.signals, axis=1) / source.norms
     assert np.all([np.isclose(voxels, r, rtol=1e-5).any() for r in ratio])
     assert np.median(ratio) > 100                               # far above the metabolites
+
+
+#*********************#
+#   best checkpoint   #
+#*********************#
+def test_every_checkpoint_is_scored_and_the_benchmark_takes_the_best(tmp_path, monkeypatch):
+    """Each saved checkpoint of a run gets its MOSAE on held-out spectra, and the benchmark
+    takes the one best.json names instead of the last."""
+    name = "mlp-supervised-ismrm2016"
+    challenge_models.train(name, steps=2, every=1, to=tmp_path, batch=2, chunk=4)
+    best = importlib.util.spec_from_file_location("best_checkpoint",
+                                                  SCRIPT.parent / "best_checkpoint.py")
+    best_checkpoint = importlib.util.module_from_spec(best)
+    best.loader.exec_module(best_checkpoint)
+
+    found, score = {}, best_checkpoint.score
+
+    def scored(name, n):
+        found.update(score(name, n, runs=tmp_path))
+        return found
+
+    config = importlib.util.spec_from_file_location(
+        "config", SCRIPT.parents[1] / "benchmark" / "config.py")
+    benchmark = importlib.util.module_from_spec(config)
+    config.loader.exec_module(benchmark)
+    monkeypatch.setattr(benchmark, "RUNS", tmp_path)
+    assert benchmark.weights(name).endswith("step-2/model.safetensors"), "the last, unchosen"
+    monkeypatch.setattr(best_checkpoint, "RUNS", tmp_path)
+    monkeypatch.setattr(best_checkpoint, "score", scored)
+    best_checkpoint.main([name, "--n", "8"])
+
+    assert list(found) == ["step-1", "step-2"] and all(v > 0 for v in found.values())
+    chosen = json.loads((tmp_path / name / "best.json").read_text())["checkpoint"]
+    assert chosen == min(found, key=found.get)           # the lowest MOSAE
+    benchmark.weights.cache_clear()                      # a session keeps what it first took
+    assert benchmark.weights(name).endswith(f"{chosen}/model.safetensors")

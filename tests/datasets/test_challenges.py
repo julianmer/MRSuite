@@ -286,6 +286,47 @@ def test_the_2016_snr_is_the_challenges_own():
     np.testing.assert_allclose(ratios[[0, 11, 14, 17, 20]], [86, 20, 30, 43, 161], rtol=0.05)
 
 
+#***********#
+#   suite   #
+#***********#
+def _water_over_naa(data):
+    """Each spectrum's peak at 4.4-5.0 ppm over its peak at 1.9-2.1 ppm."""
+    out = []
+    for s in data.list():
+        fid = np.asarray(s[:]).ravel()
+        spec = np.abs(np.fft.fftshift(np.fft.fft(fid)))
+        ppm = 4.65 + np.fft.fftshift(np.fft.fftfreq(fid.size, s.dwelltime)) \
+            / s.spectrometer_frequency[0]
+        out.append(spec[(ppm > 4.4) & (ppm < 5.0)].max() / spec[(ppm > 1.9) & (ppm < 2.1)].max())
+    return np.array(out)
+
+
+@needs_2016
+@needs_sim
+def test_a_suite_level_moves_its_effect_out_of_the_training_distribution():
+    """The SNR level is that SNR as the challenge measures it; the strongest residual water
+    is as large as datasets 23 and 24 carry, where the base has none; concentrations above
+    the trained range are above it; a level draws the same spectra every time, and
+    another level others."""
+    base = challenge2016.suite_config()
+    ten, _ = challenge2016.suite("snr", "10", n=32)
+    assert 0.7 < np.median(challenge2016.snr(ten)) / 10 < 1.4
+
+    plain, _ = challenge2016.suite(n=8)
+    water, _ = challenge2016.suite("residual-water", "20.0x-tcr", n=8)
+    assert np.median(_water_over_naa(plain)) < 0.5 < 2 < np.median(_water_over_naa(water))
+
+    above = challenge2016.suite_config("concentrations", "above-1-1.5x")["parameters"]
+    assert all(above[m][0] >= base["parameters"][m][1] for m in ("naa", "glu", "ins"))
+
+    def samples(data):
+        return np.stack([np.asarray(s[:]).ravel() for s in data.list()])
+
+    again, truth = challenge2016.suite("snr", "10", n=32)
+    assert np.array_equal(samples(again), samples(ten)) and len(truth) == 32
+    assert not np.array_equal(samples(challenge2016.suite("snr", "5", n=32)[0]), samples(ten))
+
+
 #****************#
 #   truth mrsi   #
 #****************#

@@ -19,7 +19,7 @@
 #*************#
 import pytest
 
-from huggingface_hub import HfApi
+from huggingface_hub import HfApi, get_token
 from huggingface_hub.utils import httpx
 
 import mrsuite.models
@@ -81,8 +81,9 @@ def test_the_zoo_lists_every_repo_of_the_organisation_with_its_class():
         listed = mrsuite.models.zoo()
     except (httpx.HTTPError, OSError):
         pytest.skip("the Hub is out of reach")
-    if not set(listed) >= set(ZOO):
+    if not set(listed) >= set(ZOO) and get_token() is None:
         pytest.skip("the zoo is not visible from here (private repos need a token)")
+    assert set(listed) >= set(ZOO)
     assert listed["MRSuite/wand-ismrm2016"] == "mrsuite.models.wand.WAND"
     assert listed["MRSuite/mlp-supervised-7t-slaser"] == "mrsuite.models.mlp.MLP"
     assert list(listed) == sorted(listed)

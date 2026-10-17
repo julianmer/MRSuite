@@ -17,12 +17,13 @@
 #*************#
 #   imports   #
 #*************#
+import json
 from dataclasses import dataclass, field, replace
 from functools import lru_cache, partial
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
-from mrsvalidate.analysis import agreement
+from mrsvalidate.analysis import agreement, descriptive, errors, method_comparison, regression
 
 from nifti_mrs_plus import NIfTI_MRS_Plus
 from mrsuite.benchmark import bias, mae
@@ -127,6 +128,17 @@ def mrsi(subject: str, voxels: Optional[int] = None) -> Dataset:
     return Dataset(data, truth, ["-".join(map(str, voxel)) for voxel in index], str(MRSI_BASIS))
 
 
+#***********#
+#   suite   #
+#***********#
+def suite(axis: Optional[str] = None, level: Optional[str] = None, n: int = 100) -> Dataset:
+    """One level of the simulated suite (challenge2016.SUITE) on the challenge's basis; no
+    axis for the training distribution itself."""
+    data, truth = challenge2016.suite(axis, level, n)
+    name = f"{axis}-{level}" if axis else "in-distribution"
+    return Dataset(data, truth, [f"{name}-{i}" for i in range(n)], str(challenge2016.BASIS))
+
+
 #****************#
 #   wand model   #
 #****************#
@@ -161,10 +173,14 @@ def _model(checkpoint: str) -> Any:
 #*************#
 @lru_cache(maxsize=None)
 def weights(name: str) -> str:
-    """The weights of a training run's last checkpoint when first asked, so one session
-    scores one checkpoint while training writes on; a job records them by SHA-256, so
-    results of other weights are never resumed into."""
-    return str(last_checkpoint(RUNS / name) / "model.safetensors")
+    """The weights of a training run's best checkpoint where scripts/train/best_checkpoint.py
+    chose one (best.json), else of its last when first asked, so one session scores one
+    checkpoint while training writes on; a job records them by SHA-256, so results of other
+    weights are never resumed into."""
+    best = RUNS / name / "best.json"
+    folder = (RUNS / name / json.loads(best.read_text())["checkpoint"] if best.exists()
+              else last_checkpoint(RUNS / name))
+    return str(folder / "model.safetensors")
 
 
 #*************#
@@ -252,8 +268,13 @@ MODEL_VOXELS = 1000
 # ~0.2 s per voxel, and takes them all before a job's own subsample is drawn
 SAMPLED = {s: f"{s}-{MODEL_VOXELS}" for s in (*SUBJECTS, *TRACK1)}
 
+# the simulated suite: 500 spectra in distribution, 100 per level of each axis
+SUITE = {"suite-in-distribution": partial(suite, n=500),
+         **{f"suite-{axis}-{level}": partial(suite, axis, level)
+            for axis, levels in challenge2016.SUITE.items() for level in levels}}
+
 DATASETS = {"challenge2016": challenge, **{s: partial(mrsi, s) for s in SUBJECTS},
-            **{name: partial(mrsi, s, MODEL_VOXELS) for s, name in SAMPLED.items()}}
+            **{name: partial(mrsi, s, MODEL_VOXELS) for s, name in SAMPLED.items()}, **SUITE}
 
 STAGES = {
     "2016": [Job("challenge2016", name) for name in METHODS if name not in TRAINED],
@@ -277,6 +298,11 @@ STAGES = {
                              "mlp-selfsupervised-mrsi2024-release-track2",
                              "wand-mrsi2024-full-track2-lcmodel",
                              "wand-mrsi2024-full-track2-fsl_mrs")],
+    # every method on the simulated suite but Vespa and pyAMARES (held, Julian 2026-10-16)
+    "suite": [Job(dataset, name) for dataset in SUITE for name in
+              (*(f"{wand}{fit}" for fit in ("lcmodel", "fsl_mrs", "spant", "tarquin", "osprey")
+                 for wand in ("", "wand-")),
+               "mlp-supervised-ismrm2016", "mlp-selfsupervised-ismrm2016")],
     "models-mrsi-release-track1": [Job(SAMPLED[s], name) for s in TRACK1 for name in
                                    ("lcmodel", "fsl_mrs", "mlp-supervised-mrsi2024",
                                     "mlp-selfsupervised-mrsi2024",
@@ -292,9 +318,17 @@ STAGES = {
 # No default reference: water where the truth is in mM and the fits are water-scaled; on
 # MRSI, whose truth is on the basis' own scale, tCr, the optimal scale and none at all.
 REFERENCES = {"challenge2016": ("water", "tCr", "optimal"),
+              **dict.fromkeys(SUITE, ("tCr", "optimal")),
               **{s: ("tCr", "optimal", "none") for s in (*SUBJECTS, *SAMPLED.values())}}
 # the challenge's 24 brain-like datasets apart from its four tumour-like ones (lipids, lactate,
-# acetate), which no brain-like simulation covers
+# acetate), which no brain-like simulation covers; and each scenario on its own
 SUBSETS = {"challenge2016": {"brain-like": [f"dataset{i}" for i in range(1, 25)],
-                             "tumour-like": [f"dataset{i}" for i in range(25, 29)]}}
-METRICS = {"mae": mae, "bias": bias, "lin_ccc": agreement.lin_ccc}
+                             **{name: [f"dataset{i}" for i in numbers]
+                                for name, numbers in challenge2016.SCENARIOS.items()}}}
+# a measure or two per aspect of MRSValidate, so the radar has a corner for each: errors,
+# agreement, regression, method comparison, and the errors' spread
+METRICS = {"mae": mae, "bias": bias, "rmse": errors.rmse, "lin_ccc": agreement.lin_ccc,
+           "robust_ccc": agreement.robust_ccc, "pearson_r": regression.pearson_r,
+           "r_squared_direct": regression.r_squared_direct,
+           "bland_altman": method_comparison.bland_altman, "robust_sd": descriptive.robust_sd,
+           "iqr": descriptive.iqr}

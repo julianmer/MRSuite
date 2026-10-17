@@ -289,6 +289,23 @@ def test_wand_as_a_processing_step_removes_or_keeps_components():
         wand(data, keep=["NAA"], remove=["baseline"])
 
 
+#******************#
+#   short window   #
+#******************#
+def test_wand_gives_a_short_window_back_once_not_twice():
+    """On a window too short for the scales to split (the MRSI challenge's 169 points), the
+    components still add up to the centred input, not to twice it."""
+    points, first, last = 384, 208, 377
+    acquisition = {"points": points, "bandwidth": 1200.0, "frequency": 123.2, "centre": 4.7}
+    wand = WAND(["A"], first, last, acquisition, baseline=False)
+    x = torch.from_numpy(np.random.default_rng(1).normal(size=(2, 2, points))).float()
+    with torch.no_grad():
+        total = wand.forward(x).sum(-1).double()
+    inside = x[:, :, first:last].double()
+    inside = inside - inside.mean(-1, keepdim=True)
+    assert 0.9 < ((total * inside).sum() / (inside * inside).sum()).item() < 1.1
+
+
 #*****************#
 #   zero-filled   #
 #*****************#

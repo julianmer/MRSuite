@@ -19,6 +19,7 @@
 #*************#
 import os
 import re
+from functools import lru_cache
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -38,6 +39,15 @@ BASIS = ROOT / "basisset_LCModel" / "press3T_30ms.BASIS"
 TE = 0.030
 WATER_MM = 1e6 / 18.015 * (0.6 * 0.78 * np.exp(-30 / 110) + 0.4 * 0.65 * np.exp(-30 / 80))
 METAB_T2 = np.exp(30 / 160)
+
+# The datasets by what they test, as the WAND paper's challenge figure groups them
+# (externals/wand-for-mrs visualizations/visChallenge.py, its loader's order mapped to the
+# file numbers); datasets 23 and 24 carry a water peak 4.5 and 2.8 times NAA's, the others
+# at most 0.4 times.
+SCENARIOS = {"lorentzian": [1, 2, 3], "gaussian": [4, 5, 6], "gaba-gsh": [7, 8, 9, 10],
+             "no-mm": [11], "snr-20": [12, 13, 14], "snr-30": [15, 16, 17],
+             "snr-40": [18, 19, 20], "snr-160": [21], "eddy-currents": [22],
+             "residual-water": [23, 24], "tumour-like": [25, 26, 27, 28]}
 
 # Each water-scaling fitter's own options that put it on that convention, for its fit. On
 # its defaults a tool measures its own constants, not its fit: LCModel and TARQUIN come
@@ -308,3 +318,125 @@ def pyamares_prior(folder: Path = DATA / 'basis_sets') -> str:
     return pyamares.prior(str(path), basis_fids(), dwell=spectrum.dwelltime,
                           frequency=spectrum.spectrometer_frequency[0],
                           centre=spectrum.SpecFreqChemShift)
+
+
+#***********#
+#   suite   #
+#***********#
+# The benchmark suite on simulated spectra (paper/ismrm2027/SUITE.md): mrs_sim_config's
+# spectra, the 2016 training distribution, then one effect at a time moved out of it, by
+# level. MRS-Sim draws each range uniformly per spectrum, and a switched-on effect takes
+# MRS-Sim's own wide default unless given one, as the base config sets none. A Lorentzian
+# line is (d + 1) / pi Hz wide on the basis' own 2 Hz (MRS-Sim adds 1 per s, see
+# mrs_sim_config); a Gaussian 2 sqrt(g ln 2) / pi Hz. Baseline and residual water are scaled
+# to the Cr + PCr peak. Pure Lorentzian lines take g = 0 under 'voigt': MRS-Sim's own
+# 'lorentzian' line shape refers to a g it does not have.
+def _lorentzian(width: float) -> float:
+    return round(np.pi * (width - 2) - 1, 2)
+
+
+SUITE = {
+    "snr": {"10": {"snr": 10}, "5": {"snr": 5}, "300": {"snr": 300}},   # as the challenge's
+    "linewidth": {f"{w}Hz": {"parameters": {"d": [_lorentzian(w - 1), _lorentzian(w + 1)],
+                                            "g": [0.0, 0.0]}} for w in (15, 20, 30)},
+    "lineshape": {"gaussian": {"parameters": {"d": [0.0, 0.0], "g": [128.0, 513.0]}}},  # 6-12 Hz
+    "concentrations": {"above-1-1.5x": {"beyond": (1.0, 1.5)},
+                       "above-1.5-2x": {"beyond": (1.5, 2.0)}, "absent-30pc": {"drop_prob": 0.3}},
+    "frequency-shift": {f"{x}ppm": {"fshift_g": True, "parameters": {"f_shift": [-x, x]}}
+                        for x in (0.02, 0.05, 0.1)},
+    "zero-order-phase": {f"{x}deg": {"phi0": True, "parameters": {"phi0": [-x, x]}}
+                         for x in (15, 45, 90)},
+    "first-order-phase": {f"{x}deg-per-ppm": {"phi1": True, "parameters": {"phi1": [-x, x]}}
+                          for x in (10, 20)},
+    "baseline": {f"{s}x-tcr": {"baseline_cfg": {"scale": [s, s]}} for s in (0.2, 0.5, 1.0)},
+    # MRS-Sim's water is a broad walk: scaled 2, 8 and 20 its peak measures 0.5, 1.4 and 3.5
+    # times NAA's (medians of 32), the last as datasets 23 and 24 carry it (4.5 and 2.8)
+    "residual-water": {f"{s}x-tcr": {"resWater_cfg": {"scale": [s, s]}} for s in (2.0, 8.0, 20.0)},
+    "macromolecules": {"x0": {"scale": {"mac": 0.0}}, "x2": {"scale": {"mac": 2.0}}},
+}
+# far from the seeds training draws, so the suite's spectra are new to every model
+SEED = 10 ** 9
+
+
+#****************#
+#   suite base   #
+#****************#
+@lru_cache(maxsize=None)
+def _suite_base() -> Dict:
+    """mrs_sim_config, once: it simulates to calibrate the SNR."""
+    return mrs_sim_config()
+
+
+#******************#
+#   suite config   #
+#******************#
+def suite_config(axis: Optional[str] = None, level: Optional[str] = None) -> Dict:
+    """
+    MRS-Sim's config for one level of the suite, or the base (no axis) as it is.
+
+    Args:
+        axis (Optional[str]): One of SUITE; None for the training distribution itself.
+        level (Optional[str]): One of the axis' levels.
+
+    Returns:
+        Dict: The config, as ``mrs_sim.simulate`` takes it.
+    """
+    import copy
+
+    from mrsuite.simulators import mrs_sim
+
+    config = copy.deepcopy(_suite_base())
+    if axis is None:
+        return config
+    change = SUITE[axis][level]
+    parameters = config['parameters']
+    if 'snr' in change:                          # the challenge's SNR, in MRS-Sim's units
+        value = round(change['snr'] * config['snr'][0] / 20, 1)
+        parameters['snr'] = [value, value]
+    parameters.update(change.get('parameters', {}))
+    for flag in ('fshift_g', 'phi0', 'phi1'):
+        if flag in change:
+            config[flag] = change[flag]
+    for nuisance in ('baseline_cfg', 'resWater_cfg'):
+        if nuisance in change:
+            config[nuisance] = {**mrs_sim.config()[nuisance], **change[nuisance]}
+    if 'drop_prob' in change:
+        config['drop_prob'] = change['drop_prob']
+    if 'beyond' in change:                        # each metabolite above its trained range
+        low, high = change['beyond']
+        for name in config['metabolites']:
+            key = name.lower()
+            if key in parameters and name not in ('Cr', 'PCr', 'Mac'):
+                parameters[key] = [round(parameters[key][1] * low, 4),
+                                   round(parameters[key][1] * high, 4)]
+    for key, factor in change.get('scale', {}).items():
+        parameters[key] = [round(v * factor, 4) for v in parameters[key]]
+    return config
+
+
+#***********#
+#   suite   #
+#***********#
+def suite(axis: Optional[str] = None, level: Optional[str] = None,
+          n: int = 100) -> Tuple[NIfTI_MRS_Plus, List[Dict[str, float]]]:
+    """
+    One level of the suite as spectra and their truth, seeded, so the same every time;
+    the base (no axis) is the training distribution itself.
+
+    Args:
+        axis (Optional[str]): One of SUITE; None for the training distribution.
+        level (Optional[str]): One of the axis' levels.
+        n (int): Spectra.
+
+    Returns:
+        Tuple[NIfTI_MRS_Plus, List[Dict[str, float]]]: The spectra, and per spectrum the
+            amplitude of each basis function in the spectra's own units.
+    """
+    from mrsuite.simulators import mrs_sim
+
+    levels = [(None, None)] + [(a, lv) for a in SUITE for lv in SUITE[a]]
+    data, truth = mrs_sim.simulate(suite_config(axis, level), n=n,
+                                   seed=SEED + levels.index((axis, level)), components=False)
+    names = list(truth.concentrations)
+    return data, [{name: float(truth.concentrations[name][i]) for name in names}
+                  for i in range(n)]

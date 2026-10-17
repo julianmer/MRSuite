@@ -75,17 +75,18 @@ MODELS = {
     "wand-mrsi2024-release-track1": ("release-track1", "wand", "components", 1_195_264),
     "wand-mrsi2024-release-track1-weighted": ("release-track1", "wand", "components",
                                               1_195_264),
+    # and with two masks only: the metabolites' and the artifacts' (1 - it), which then
+    # take the water and lipids too
+    "wand-mrsi2024-release-track1-two-masks": ("release-track1", "wand", "components",
+                                               1_195_264),
 }
 
 # the release's signal each release-trained model learns from
 RELEASE = {"release-track1": "all", "release-track2": "all-nuisance"}
 
-# WANDs on spectra zero-filled to twice their points, where the wavelet transform gives the
-# signal back (on the MRSI challenge's 384 points, ~1.7 times it), and those weighing the
-# nuisance's error (see nuisance_weight)
-ZERO_FILLED = {"wand-mrsi2024-full-track1", "wand-mrsi2024-full-track2",
-               "wand-mrsi2024-release-track1", "wand-mrsi2024-release-track1-weighted"}
+# the WANDs weighing the nuisance's error (see nuisance_weight)
 WEIGHTED = {"wand-mrsi2024-release-track1-weighted"}
+TWO_MASKS = {"wand-mrsi2024-release-track1-two-masks"}
 
 # as the published runs: batch 16, Adam at 1e-4
 BATCH, LR = 16, 1e-4
@@ -208,8 +209,7 @@ class Nuisance(Source):
 #*********************#
 #   nuisance weight   #
 #*********************#
-def nuisance_weight(source: Source, first: int, last: int, zero_fill: int = 1,
-                    n: int = 1024) -> float:
+def nuisance_weight(source: Source, first: int, last: int, n: int = 1024) -> float:
     """
     The fixed weight that brings the nuisance's squared error to the metabolites' size: one
     over the median ratio of their power in the window, over ``n`` of the source's spectra.
@@ -218,7 +218,6 @@ def nuisance_weight(source: Source, first: int, last: int, zero_fill: int = 1,
         source (Source): Gives the metabolites and nuisance apart ('metabolites', 'nuisance').
         first (int): First point of the window.
         last (int): The point after it.
-        zero_fill (int): The model's zero-filling, on whose grid the window counts.
         n (int): Spectra to take the median over.
 
     Returns:
@@ -227,7 +226,7 @@ def nuisance_weight(source: Source, first: int, last: int, zero_fill: int = 1,
     _, truth = source.draw(n)
 
     def power(fids):
-        window = np.fft.fft(fids, n=fids.shape[1] * zero_fill, axis=1)[:, first:last]
+        window = np.fft.fft(fids, axis=1)[:, first:last]
         return (np.abs(window) ** 2).sum(axis=1)
     return float(1 / np.median(power(truth.components["nuisance"])
                                / power(truth.components["metabolites"])))
@@ -291,7 +290,6 @@ def train(name: str, steps: Optional[int] = None, every: Optional[int] = None,
         The trained model, as also saved in ``to / name / step-<steps taken>``.
     """
     challenge, kind, objective, published = MODELS[name]
-    zero_fill = 2 if name in ZERO_FILLED else 1
     steps = steps or published
     sixteenth = max(published // 16, 1)
     every = every or (sixteenth if steps % sixteenth == 0 else steps)
@@ -315,8 +313,7 @@ def train(name: str, steps: Optional[int] = None, every: Optional[int] = None,
                                           components=kind == "wand", ahead=ahead)
         metabolites = simulation["metabolites"]
     try:
-        first, last = window({**data.acquisition,
-                              "points": data.acquisition["points"] * zero_fill}, *WINDOW[kind])
+        first, last = window(data.acquisition, *WINDOW[kind])
         torch.manual_seed(seed)                 # the initial weights, so a run replays
         if kind == "wand" and challenge == "mrsi":
             data = Nuisance(data, subjects, seed + start)
@@ -327,10 +324,11 @@ def train(name: str, steps: Optional[int] = None, every: Optional[int] = None,
         else:
             weights = ({"nuisance": nuisance_weight(
                 mrsi_challenge.Release(release, "all", components=True, seed=seed),
-                first, last, zero_fill)} if name in WEIGHTED else None)
+                first, last)} if name in WEIGHTED else None)
             model = WAND(metabolites, first, last, data.acquisition,
-                         nuisance=["nuisance"] if challenge in ("mrsi", "release-track1") else [],
-                         baseline=challenge not in RELEASE, zero_fill=zero_fill, weights=weights)
+                         nuisance=["nuisance"] if challenge in ("mrsi", "release-track1")
+                         and name not in TWO_MASKS else [],
+                         baseline=challenge not in RELEASE, weights=weights)
         state = checkpoint if checkpoint and (checkpoint / OPTIMIZER).exists() else None
         model.learn(data, steps=steps, objective=objective, batch=batch, lr=LR, every=every,
                     to=str(Path(to) / name), resume=str(state) if state else None)

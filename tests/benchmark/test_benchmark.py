@@ -371,6 +371,7 @@ def test_radar_draws_one_polygon_per_method_best_at_the_rim():
     lines = [line for line in ax.get_lines() if not line.get_label().startswith("_")]
 
     assert [line.get_label() for line in lines] == ["lcmodel", "tarquin"]
+    assert [t.get_text().strip() for t in ax.texts] == ["0", "0.2", "0.4", "0.6", "0.8", "1"]
     assert list(lines[0].get_ydata()) == pytest.approx([1.0, 0.05, 0.05, 1.0, 1.0]), "floored"
     assert list(lines[1].get_ydata()) == pytest.approx([0.05, 1.0, 1.0, 1.0, 0.05])
     assert [t.get_text() for t in ax.get_xticklabels()] == \
@@ -384,16 +385,18 @@ def test_radar_draws_one_polygon_per_method_best_at_the_rim():
 def test_an_empty_radar_waits_for_scores():
     ax = plot_scores({})
 
-    assert not [l for l in ax.get_lines() if not l.get_label().startswith("_")], "no polygon"
+    assert not [line for line in ax.get_lines() if not line.get_label().startswith("_")], \
+        "no polygon"
     assert len(ax.get_lines()) == 5 and "No scores yet" in ax.get_title(), "the empty web"
+    assert [t.get_text().strip() for t in ax.texts][::5] == ["0", "1"], "its scale"
     assert ax.figure.get_facecolor() == ax.get_facecolor() == (0.0, 0.0, 0.0, 0.0), "no white box"
     assert aspect("mae", "mean") == "Errors" and aspect("ccc", "lin_ccc") == "Agreement"
     assert aspect("deming", "deming") == "Method comparison"
 
 
 def test_score_tables_draw_on_one_radar():
-    """A spoke per metric, from each table's score column, a polygon per method; a
-    reference not scored, or a metric twice, is said."""
+    """A spoke per metric, from each table's score column, a polygon per method; a metric
+    given twice is said."""
     truth = [{"NAA": 1.0}, {"NAA": 2.0}, {"NAA": 1.5}, {"NAA": 3.0}]
     methods = {"a": [built(NAA=v) for v in (1.1, 2.2, 1.4, 3.1)],
                "b": [built(NAA=v) for v in (1.0, 2.5, 1.9, 2.6)]}
@@ -403,7 +406,7 @@ def test_score_tables_draw_on_one_radar():
     ax = plot_scores(tables)
 
     polygons = [line for line in ax.get_lines() if line.get_label() in ("a", "b")]
-    assert [t.get_text() for t in ax.get_xticklabels()] == ["Agreement", "Errors"]
+    assert [t.get_text() for t in ax.get_xticklabels()] == ["Agreement\nccc", "Errors\nMAE"]
     assert list(polygons[0].get_ydata()) == pytest.approx([1.0, 1.0, 1.0]), "a: best in both"
     assert list(polygons[1].get_ydata()) == pytest.approx([0.05, 0.05, 0.05])
     with pytest.raises(ValueError, match=r"given twice: mae \(none\)"):
@@ -412,9 +415,72 @@ def test_score_tables_draw_on_one_radar():
     more = {**tables, "mape": score(methods, truth, ["none"], {"mape": errors.mape}),
             "r": score(methods, truth, ["none"], {"pearson_r": regression.pearson_r})}
     ax = plot_scores(more)                       # a corner is the mean of its measures
-    assert [t.get_text() for t in ax.get_xticklabels()] == ["Agreement", "Errors", "Regression"]
-    errors_ = [line for line in ax.get_lines() if line.get_label() == "b"][0].get_ydata()[1]
-    assert errors_ == pytest.approx((0.05 + 0.05) / 2, abs=0.05) or errors_ <= 0.5
+    assert [t.get_text() for t in ax.get_xticklabels()] == \
+        ["Agreement\nccc", "Errors\nMAE, MAPE", "Regression\nPearson r"]
+    swapped = tables["mae"].assign(metric="rmse", analysis="rmse",   # b best here, worst on
+                                   method=tables["mae"]["method"].map({"a": "b", "b": "a"}))
+    ax = plot_scores({"ccc": tables["ccc"], "mae": tables["mae"], "rmse": swapped})
+    corner = {line.get_label(): line.get_ydata()[1] for line in ax.get_lines()
+              if line.get_label() in ("a", "b")}                       # MAE: so even
+    assert corner["a"] == pytest.approx(corner["b"]) and 0.05 < corner["b"] < 1
+
+
+def test_a_radar_by_measure_has_a_spoke_per_measure_with_its_range():
+    """A spoke per measure, named, a signed one by its magnitude, every spoke 0 to 1; a
+    measure on two references is labelled with each."""
+    truth = [{"NAA": v} for v in (1.0, 2.0, 1.5, 3.0)]
+    methods = {"a": [built(NAA=t["NAA"] + 0.1) for t in truth],
+               "b": [built(NAA=t["NAA"] - 0.3) for t in truth]}
+    table = score(methods, truth, ["none"], {"mae": mae, "bias": bias})
+
+    ax = plot_scores(table, by="measure")
+    assert [t.get_text() for t in ax.get_xticklabels()] == \
+        ["|bias|", "MAE"]
+    two = pd.concat([table.query("metric == 'mae'"),
+                     table.query("metric == 'mae'").assign(reference="optimal")])
+    assert [t.get_text() for t in plot_scores(two).get_xticklabels()] == \
+        ["Errors\nMAE (none), MAE (optimal)"]
+    both = [{"NAA": t["NAA"], "Cr": 2.0} for t in truth]           # no pooled rows: a spoke
+    each = score({k: [built(NAA=t["NAA"] + d, Cr=2.0 + d) for t in both]   # per metabolite
+                  for k, d in (("a", 0.1), ("b", -0.3))}, both, ["none"], {"mae": mae})
+    each = each.query("metabolite != 'all'")
+    assert [t.get_text() for t in plot_scores(each, by="measure").get_xticklabels()] == \
+        ["MAE Cr", "MAE NAA"]
+    with pytest.raises(ValueError, match="by 'aspect' or by 'measure'"):
+        plot_scores(table, by="metric")
+
+
+def test_a_radar_reads_each_analysis_its_own_way_round():
+    """A slope is best at 1, Shapiro-Wilk's W the higher the better, and an equivalence
+    test's intercept best at 0, whichever side of it."""
+    rows = pd.DataFrame({"method": ["a", "b", "c"], "reference": "none", "metabolite": "all"})
+    tables = {name: rows.assign(metric=name, analysis=name, score=scores) for name, scores in
+              (("passing_bablok", [1.02, 0.6, 1.5]), ("shapiro_wilk", [0.99, 0.9, 0.95]),
+               ("equivalence_test_1", [0.01, -1.0, 0.5]))}
+
+    ax = plot_scores(tables, by="measure")
+
+    assert [t.get_text() for t in ax.get_xticklabels()] == \
+        ["|equivalence_test_1|", "|passing_bablok - 1|", "shapiro_wilk"]
+    radius = {line.get_label(): list(line.get_ydata())[:3] for line in ax.get_lines()
+              if line.get_label() in ("a", "b", "c")}
+    assert radius["a"] == pytest.approx([1.0, 1.0, 1.0]), "a: best on all three"
+    assert radius["b"][0] == radius["b"][2] == pytest.approx(0.05), "b: -1 and W 0.9 worst"
+    assert radius["c"][1] == pytest.approx(0.05), "c: the slope furthest from 1"
+
+
+def test_a_bland_altman_bias_is_best_at_zero_on_the_radar():
+    """Bland-Altman's score is its bias, signed: the method off by +0.05 beats the one off
+    by -0.3, though -0.3 is the lower number."""
+    truth = [{"NAA": v} for v in (1.0, 2.0, 1.5, 3.0)]
+    methods = {"a": [built(NAA=t["NAA"] + 0.05) for t in truth],
+               "b": [built(NAA=t["NAA"] - 0.3) for t in truth]}
+    ax = plot_scores(score(methods, truth, ["none"], {"ba": method_comparison.bland_altman}))
+
+    polygons = {line.get_label(): line for line in ax.get_lines()
+                if line.get_label() in ("a", "b")}
+    assert list(polygons["a"].get_ydata()) == pytest.approx([1.0, 1.0])
+    assert list(polygons["b"].get_ydata()) == pytest.approx([0.05, 0.05])
 
 
 #**************#

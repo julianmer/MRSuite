@@ -30,6 +30,31 @@ MRSuite is designed to support the full MRS workflow, from raw data processing t
 - **Community-Driven**: Open-source development encourages contributions and collaboration.
 
 
+## Installation
+
+MRSuite needs Python 3.11 or newer:
+
+```bash
+pip install "mrsuite[gui] @ git+https://github.com/julianmer/MRSuite"
+```
+
+The extras are `gui` (the graphical interface), `train` (training models, Keras 3) and `dev`
+(the tests). The toolboxes MRSuite drives come in as you use them:
+
+| for | needs |
+|---|---|
+| FID-A, Osprey (MATLAB code) | Octave (`octave-cli` on the PATH, or the Docker image MRSuite builds), or MATLAB with the MATLAB Engine for Python |
+| spant | R with spant installed |
+| LCModel, TARQUIN | nothing: their wrappers fetch the binaries |
+| FSL-MRS | `conda install -c conda-forge -c https://fsl.fmrib.ox.ac.uk/fsldownloads/fslconda/public/ fsl_mrs` |
+| pyAMARES, Vespa | `pip install pyAMARES`; Vespa from [its repository](https://github.com/vespa-mrs/vespa) |
+| benchmarking | `pip install git+https://github.com/JohnLaMaster/MRSValidate.git` |
+| WAND, QuantMLP, MRS-Sim, ... | nothing: cloned at their pinned commits on first use (below) |
+
+A part of MRSuite whose toolbox is missing says how to install it when first used, and
+`mrsuite-gui --check` lists what this machine has.
+
+
 ## Key Components
 
 ### Processing Pipeline
@@ -57,7 +82,25 @@ preprocess, fit, check quality and
 score against ground truth, with each block offering every toolbox that does its step (grouped
 after Near et al. and Kreis et al., NMR Biomed 2021) and every function of every toolbox besides.
 Each block shows what it made and exports it, and the whole graph is written out as the Python
-that makes it again:
+that makes it again.
+
+- **Data**: files or study folders, the 2016 fitting challenge, the 2024 MRSI challenge, in vivo
+  OpenNeuro datasets, basis sets (load, add, convert); spectra simulated with MRS-Sim.
+- **Swap the toolbox, keep the graph**: one block per step, offering every toolbox that does it
+  (a linear-combination fit by FSL-MRS, LCModel, Osprey, spant or TARQUIN); each toolbox's whole
+  catalogue besides, sorted into folders.
+- **Models from the zoo**: WAND and QuantMLP checkpoints, listed from the MRSuite organisation on
+  Hugging Face.
+- **Evaluate**: SNR and linewidth, MOSAE, every MRSValidate analysis that compares fits with the
+  truth, Bland-Altman and regression plots, and a radar that fills as score blocks are wired in.
+- **Everything shows and exports**: a preview on every block; data as NIfTI-MRS, results, figures;
+  graphs in tabs, saved and opened again.
+
+![A benchmark in the GUI: the 2016 challenge into LCModel, FSL-MRS, spant, WAND then LCModel, and QuantMLP, scored on five aspects and drawn on a radar](assets/gui/benchmark.png)
+
+![In vivo processing in the GUI: COWS (OpenNeuro ds006812) through FSL-MRS, FID-A and spant into LCModel](assets/gui/processing.png)
+
+Start it with one command:
 
 ```bash
 uvx --from "mrsuite[gui] @ git+https://github.com/julianmer/MRSuite" mrsuite-gui

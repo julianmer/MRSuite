@@ -108,3 +108,6 @@ mrsuite/octave/mex/
 
 # Superseded work kept locally for reference only
 legacy/
+
+# Abstract and paper drafts, planned and built locally
+paper/

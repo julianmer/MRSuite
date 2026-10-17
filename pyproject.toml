@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=64", "wheel"]
+requires = ["setuptools>=77"]   # 77 for the SPDX licence string
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,7 +7,7 @@ name = "mrsuite"
 version = "0.1.0a0"
 description = "MRS Processing, Analysis, AI Model Integration, and Benchmarking"
 readme = "README.md"
-license = {text = "Apache-2.0"}
+license = "MIT"
 requires-python = ">=3.11"
 authors = [{ name = "Julian P. Merkofer", email = "j.p.merkofer@tue.nl" }]
 keywords = ["MRS", "magnetic resonance spectroscopy", "NIfTI-MRS", "fitting"]

@@ -20,6 +20,7 @@
 import functools
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
+from nifti_mrs.definitions import standard_defined
 from nifti_mrs.nifti_mrs import NIFTI_MRS
 
 from nifti_mrs_plus import NIfTI_MRS_Plus
@@ -334,11 +335,15 @@ def _keep_header(source: NIFTI_MRS, out: NIFTI_MRS) -> None:
     A toolbox working on its own struct hands back the samples and little else, so the
     echo time, the ppm reference and the processing history would be lost at the first
     step. Fields the output already states win, and the dimension fields are left to
-    the output, since a step may have removed a dimension.
+    the output, since a step may have removed a dimension. A user-defined field goes with
+    its description, which nifti_mrs asks of it.
     """
     for key, value in source.hdr_ext.to_dict().items():
         if not key.startswith("dim_") and key not in out.hdr_ext:
-            out.add_hdr_field(key, value)
+            if key in standard_defined:
+                out.add_hdr_field(key, value)
+            else:
+                out.add_hdr_field(key, value.get("Value", value), doc=value["Description"])
 
 
 #*************#

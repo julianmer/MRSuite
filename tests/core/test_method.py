@@ -102,6 +102,24 @@ def test_the_header_and_the_history_are_kept(spectrum):
     assert [s["Method"] for s in out.hdr_ext["ProcessingApplied"]] == ["scale", "scale"]
 
 
+def test_a_user_defined_field_is_kept_with_its_description(spectrum):
+    """As Twix read by spec2nii carries them, onto a step's output that a toolbox built from
+    the samples alone: nifti_mrs takes such a field only with its description."""
+    from nifti_mrs.create_nmrs import gen_nifti_mrs
+
+    @method("test", version="1.0")
+    def rebuilt(spectrum):
+        return gen_nifti_mrs(np.asarray(spectrum[:]), spectrum.dwelltime,
+                             spectrum.spectrometer_frequency[0])
+
+    source = spectrum.copy()
+    source.add_hdr_field("WaterSuppression", "VAPOR", doc="the scheme")
+
+    out = rebuilt(source)
+
+    assert out.hdr_ext["WaterSuppression"] == {"Value": "VAPOR", "Description": "the scheme"}
+
+
 #*********#
 #   fit   #
 #*********#

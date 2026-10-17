@@ -70,8 +70,10 @@ def _read_back(path: str, source: NIFTI_MRS) -> NIFTI_MRS:
     if abs(dwell - source.dwelltime) <= 1e-6 * source.dwelltime:
         dwell = source.dwelltime
     tags = (tags + [None] * 3)[:3]
+    # stored as read: a file holds NIfTI-MRS' own convention, which nifti_mrs presents
+    # conjugated (FSL-MRS'), and conjugates again what it is built from, unless told not to
     return gen_nifti_mrs(samples, dwell, source.spectrometer_frequency[0],
-                         nucleus=source.nucleus[0], dim_tags=tags, no_conj=False)
+                         nucleus=source.nucleus[0], dim_tags=tags, no_conj=True)
 
 
 #**************************************************************************************************#

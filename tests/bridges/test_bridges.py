@@ -278,6 +278,23 @@ def test_fid_a_records_the_toolbox_version_and_every_argument(spectra):
 #   fid-a header   #
 #******************#
 @needs_octave
+def test_transients_keep_their_dimension_through_fid_a(spectrum):
+    """A struct's header comes back from Octave whole, so transients (DIM_DYN) are still
+    transients after an FID-A step that keeps them: aligning them gives as many back."""
+    from nifti_mrs.create_nmrs import gen_nifti_mrs
+
+    fid = np.asarray(spectrum[:]).ravel()
+    noise = np.random.default_rng(0).normal(scale=1e-3 * np.abs(fid).max(), size=(8, fid.size))
+    transients = gen_nifti_mrs((fid[:, None] + noise.T).reshape(1, 1, 1, fid.size, 8),
+                               spectrum.dwelltime, spectrum.spectrometer_frequency[0],
+                               dim_tags=["DIM_DYN", None, None])
+
+    out = fid_a.op_alignAverages(transients)
+
+    assert out.shape == transients.shape and out.dim_tags[0] == "DIM_DYN"
+
+
+@needs_octave
 def test_a_fid_a_step_keeps_the_header_and_the_history(spectrum):
     """FID-A hands back samples, not the header, which would lose the echo time, the
     ppm reference and every earlier step at the first FID-A call."""

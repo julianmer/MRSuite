@@ -20,7 +20,7 @@ import os
 import re
 import warnings
 from functools import lru_cache
-from typing import Any, List, Optional
+from typing import Any, Callable, List, Optional
 
 import numpy as np
 
@@ -35,6 +35,8 @@ from mrsuite.core.result import FitResult
 from mrsuite.octave import build_lbfgsb, resolve_runtime, scratch
 
 OSPREY_ROOT = externals.path("osprey")
+# Osprey's spectral registrations, which its pipeline starts from op_preref's frequency
+PREREFERENCED = {"op_robustSpecReg", "op_probabSpecReg", "op_SpecRegFreqRestrict"}
 
 
 #**************************************************************************************************#
@@ -53,21 +55,22 @@ class OspreyCodec(FIDACodec):
     ==============  ==========================  ==============================
     ..              upstream FID-A              Osprey's copy
     ==============  ==========================  ==============================
-    ``fids``        conjugated on load          not conjugated
+    ``fids``        the file's conjugate        the file's conjugate
     ``specs``       ``fftshift(ifft(fids))``    ``fftshift(fft(fids))``
     ``ppm``         ``-f/(Bo*42.577) + 4.65``   ``f/(Bo*42.577) + centerFreq``
     ``te``/``tr``   seconds                     milliseconds
     ==============  ==========================  ==============================
 
-    Each is self-consistent - a conjugated FID with an ifft and a descending axis
-    describes the same spectrum as a plain one with an fft and an ascending axis - but a
+    Each is self-consistent - the same FID with an ifft and a descending axis describes
+    the same spectrum as with an fft and an ascending axis - but a
     struct built for one is not valid for the other, and the failure is a mirrored
     spectrum rather than an error. Checked against the data rather than against either
     loader: only this combination puts the largest peak of the challenge spectrum at
     2.04 ppm, where NAA is.
 
-    (Both loaders read ``conj(nii.img)``, so the divergence is in the NIfTI readers
-    they use, not in the line that looks responsible.)
+    Both take the conjugate of a file's samples (FID-A's io_loadspec_niimrs: "FID-A needs
+    the conjugate"), which is what nifti_mrs hands out, so neither codec conjugates; they
+    differ in the transform and the axis.
     """
 
     #**********#
@@ -103,8 +106,7 @@ class OspreyCodec(FIDACodec):
                                  else centre_ppm)
         centre = out["centerFreq"]                    # resolved, from the data if not given
 
-        fids = np.conj(np.asarray(out["fids"]))       # undo the upstream conjugation
-        out["fids"] = fids
+        fids = np.asarray(out["fids"])
         out["specs"] = np.fft.fftshift(np.fft.fft(fids, axis=0), axes=0)
 
         # ascending, and rebuilt rather than negated so it matches Osprey's own formula
@@ -130,8 +132,7 @@ class OspreyCodec(FIDACodec):
         # raises in both its try and its catch when the field is absent. It is a
         # standard NIfTI-MRS field and MRSuite is the software in question, so fill it.
         nii = out["nii_mrs"]
-        hdr_ext = nii["hdr_ext"]
-        hdr_ext = hdr_ext.to_dict() if hasattr(hdr_ext, "to_dict") else dict(hdr_ext)
+        hdr_ext = dict(nii["hdr_ext"])
         hdr_ext.setdefault("ProcessingSoftwareVersion", f"MRSuite {__version__}")
         # It appends there with ProcessingApplied{end+1,1}, assuming a column, but both
         # runtimes hand a list over as a 1xN row: from two entries on that makes a 2-D cell,
@@ -154,10 +155,7 @@ class OspreyCodec(FIDACodec):
         Returns:
             NIFTI_MRS: The spectra.
         """
-        # the inherited conversion undoes an upstream-style conjugation that this
-        # dialect never applied, so put it back before handing over
         fida = dict(fida)
-        fida["fids"] = np.conj(np.asarray(fida["fids"]))
         # Osprey's own record of the step (see nifti2fida), so the input's history carries over
         nii = dict(fida["nii_mrs"])
         nii["hdr_ext"] = {k: v for k, v in dict(nii["hdr_ext"]).items()
@@ -222,6 +220,28 @@ class OspreyBridge(FIDABridge):
                               f"fit_runFit will fail, other functions are unaffected.",
                               stacklevel=2)
         return FIDABridge.octave.fget(self)
+
+    #*************#
+    #   resolve   #
+    #*************#
+    def _resolve(self, func: str) -> Callable:
+        """A function on Osprey's path; its spectral registrations given, where no start
+        frequency is, the one Osprey's own pipeline gives them (OspreyProcess.m, lines 248
+        and 258): op_preref's, from creatine and choline. Without one they start each
+        transient from one peak of its own: choline, or for op_robustSpecReg residual water,
+        which well-suppressed data does not have, so it aligns on noise."""
+        target = super()._resolve(func)
+        if func not in PREREFERENCED:
+            return target
+
+        def registered(data, *given, **options):
+            if len(given) < 3:                               # seqType, echo, F0
+                seq = given[0] if given else "unedited"
+                echo = given[1] if len(given) > 1 else 0
+                given = (seq, echo, self.octave.feval("op_preref", data, seq, nout=1))
+            return target(data, *given, **options)
+
+        return registered
 
     #***********#
     #   codec   #

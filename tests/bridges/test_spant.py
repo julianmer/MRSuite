@@ -43,6 +43,17 @@ def test_a_step_keeps_the_spectrum_what_it_was(spectrum):
 #************#
 #   values   #
 #************#
+def test_a_step_that_changes_nothing_gives_the_spectrum_back_as_it_was(spectrum):
+    """No line broadening is no change at all: not the conjugate, which a file read back
+    raw, in NIfTI-MRS' own convention, would be under nifti_mrs' conjugated one."""
+    from mrsuite import spant
+
+    out = spant.lb(spectrum.copy(), 0)
+
+    given = np.asarray(spectrum[:]).ravel()
+    assert np.allclose(np.asarray(out[:]).ravel(), given, atol=1e-6 * np.abs(given).max())
+
+
 def test_a_function_that_gives_no_spectra_gives_its_value(spectrum):
     """calc_spec_snr returns a number per spectrum, not spectra."""
     from mrsuite import spant

@@ -72,7 +72,9 @@ class FIDACodec:
             centre_ppm = data.SpecFreqChemShift
         hdr = data.header   # extract the header and header extensions
         hdr_ext = data.hdr_ext  # extract the header extension
-        fids = data[:]   # extract the time-domain data
+        # the time-domain data, as doubles as FID-A's own loaders give them: Octave solves no
+        # sparse system in single precision (Osprey's op_robustSpecReg), which Twix comes in
+        fids = np.asarray(data[:], dtype=np.complex128)
 
         # extract spectrometer frequency and dwell time
         f0 = hdr_ext['SpectrometerFrequency']
@@ -216,8 +218,9 @@ class FIDACodec:
             # size of final data
             sz = fids.shape
 
-            # conjugate
-            fids = np.conj(fids)
+            # no conjugation: FID-A takes the conjugate of a file's samples (its own
+            # io_loadspec_niimrs, "FID-A needs the conjugate"), which is what nifti_mrs
+            # already hands out; conjugating again mirrors the spectrum on its ppm axis
 
             # FFT along time dimension (convert dims['t'] → numpy index)
             t_axis = dims['t'] - 1
@@ -283,9 +286,11 @@ class FIDACodec:
             'dwelltime': dt,
             'txfrq': [f * 1e6 for f in f0],  # convert to Hz
             'date': '',
+            # the header extension as a plain dict: oct2py makes an Octave struct of an
+            # Hdr_Ext object's few attributes only, so its dimension tags would not come back
             'nii_mrs': {
                 'hdr': hdr,
-                'hdr_ext': hdr_ext
+                'hdr_ext': hdr_ext.to_dict()
             },
             'seq': hdr_ext['SequenceName'] if 'SequenceName' in hdr_ext else '',
 
@@ -348,25 +353,16 @@ class FIDACodec:
             raise KeyError("FID-A struct has no 'nii_mrs' header provenance; it did not "
                            "come from nifti2fida and cannot be converted back.")
 
-        # hdr_ext is an Hdr_Ext object on the way in, but a mapping once the struct has
-        # made a round trip through Octave. The dict check has to come first: oct2py's
-        # Struct is a dict subclass whose attribute access *fabricates* an entry, so
-        # hasattr(raw_ext, 'to_dict') is true for it and returns a Struct, not a method.
-        raw_ext = fida['nii_mrs']['hdr_ext']
-        if isinstance(raw_ext, dict):
-            hdr_ext = dict(raw_ext)
-        elif callable(getattr(raw_ext, 'to_dict', None)):
-            hdr_ext = dict(raw_ext.to_dict())
-        else:
-            hdr_ext = dict(raw_ext)
+        # a mapping: nifti2fida stores it as one, and oct2py's Struct is a dict subclass
+        hdr_ext = dict(fida['nii_mrs']['hdr_ext'])
 
         def as_int(v):
             return int(np.asarray(v).ravel()[0])
 
         dims = {k: as_int(v) for k, v in dict(fida['dims']).items()}
 
-        # nifti2fida conjugates on the way in; undo that here
-        fids = np.conj(np.asarray(fida['fids']))
+        # FID-A's convention is nifti_mrs' own (see nifti2fida), so the samples go back as they are
+        fids = np.asarray(fida['fids'])
 
         # after the forward permute the axes sit in ascending `dims` order
         order = [name for _, name in
@@ -417,11 +413,8 @@ class FIDACodec:
             float(f0),
             nucleus=nucleus,
             dim_tags=list(tags) + [None] * (3 - len(tags)),
-            # no_conj is left at its default. Its docstring says True "stops
-            # conjugation", but measured against nifti-mrs the flag behaves the other
-            # way round: gen_nifti_mrs(1+2j, no_conj=True) returns 1-2j, while
-            # no_conj=False returns the data untouched, which is what is wanted here
-            # since the conjugation nifti2fida applied has already been undone above.
+            # no_conj is left at its default: built from samples as nifti_mrs hands them
+            # out, which conjugates them to store them as a file holds them
             no_conj=False)
 
 

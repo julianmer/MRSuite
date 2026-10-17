@@ -100,12 +100,12 @@ def test_specs_use_fft_not_ifft(codec, spectrum):
 #   conjugate   #
 #***************#
 def test_the_fids_are_not_conjugated(codec, spectrum):
-    """Upstream conjugates on load and Osprey does not, so the two dialects hold
-    mirror-image FIDs for the same spectrum."""
+    """Both dialects hold the file's conjugate, as FID-A's and Osprey's own loaders read
+    it and nifti_mrs hands it out; they differ in the transform and the axis only."""
     ours = np.asarray(codec.nifti2fida(spectrum)["fids"]).ravel()
     upstream = np.asarray(FIDACodec().nifti2fida(spectrum)["fids"]).ravel()
 
-    assert np.allclose(ours, np.conj(upstream))
+    assert np.allclose(ours, upstream)
     assert np.allclose(ours, np.asarray(spectrum[:]).ravel())
 
 
@@ -424,3 +424,41 @@ def assert_a_chain_keeps_the_history(runtime, spectrum):
 @needs_octave
 def test_osprey_steps_chain(spectrum):
     assert_a_chain_keeps_the_history("local", spectrum)
+
+
+#***************************#
+#   spectral registration   #
+#***************************#
+@needs_octave
+def test_spectral_registration_starts_from_oprefs_frequency_and_finds_known_shifts(
+        spectrum, monkeypatch):
+    """Transients shifted and phased by known amounts are aligned back, the registration
+    started from op_preref's frequency as Osprey's own pipeline starts it; given a start,
+    it takes that one."""
+    from nifti_mrs.create_nmrs import gen_nifti_mrs
+    from mrsuite.bridges.osprey import OspreyBridge
+
+    fid = np.asarray(spectrum[:]).ravel()
+    t = np.arange(fid.size) * spectrum.dwelltime
+    rng = np.random.default_rng(0)
+    shifts, phases = rng.uniform(-5, 5, 8), rng.uniform(-30, 30, 8)
+    noise = 0.02 * np.abs(fid).max() * (rng.normal(size=(8, fid.size))
+                                        + 1j * rng.normal(size=(8, fid.size)))
+    transients = np.stack([fid * np.exp(2j * np.pi * f * t + 1j * np.deg2rad(p))
+                           for f, p in zip(shifts, phases)]) + noise
+    data = gen_nifti_mrs(transients.T.reshape(1, 1, 1, fid.size, 8), spectrum.dwelltime,
+                         spectrum.spectrometer_frequency[0], dim_tags=["DIM_DYN", None, None])
+    bridge = OspreyBridge()
+    asked = []
+    feval = bridge.octave.feval
+    monkeypatch.setattr(bridge.octave, "feval",
+                        lambda func, *a, **k: asked.append(func) or feval(func, *a, **k))
+    struct = bridge._to_toolbox(data)
+
+    _, fs, phs, _ = bridge._resolve("op_robustSpecReg")(struct, "unedited", 0, nout=4)
+
+    found = -(np.ravel(fs) - np.ravel(fs)[0])               # corrections undo the shifts
+    assert np.allclose(found, shifts - shifts[0], atol=0.5) and "op_preref" in asked
+    asked.clear()
+    bridge._resolve("op_robustSpecReg")(struct, "unedited", 0, np.zeros(8), nout=4)
+    assert "op_preref" not in asked

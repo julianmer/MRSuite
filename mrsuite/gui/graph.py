@@ -77,6 +77,7 @@ class Node:
         error (Optional[str]): Why it failed, when it last ran.
         changes (int): How often it or a block before it changed, so a run under way
             keeps what it made only if neither did meanwhile.
+        named (bool): Named by the user, so it keeps its name when its toolbox changes.
     """
 
     id: str
@@ -90,6 +91,7 @@ class Node:
     made: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
     changes: int = 0
+    named: bool = False
 
 
 #**************************************************************************************************#
@@ -249,6 +251,32 @@ class Graph:
         node.shown = [n for n in node.shown if n in named]
         self._drop_wires(node)
         self._renamed(id)
+
+    #************#
+    #   rename   #
+    #************#
+    def rename(self, id: str, name: str) -> None:
+        """
+        A block named by the user: its variable in the script, and so its name in score
+        tables and on a radar's legend; kept when its toolbox changes.
+
+        Raises:
+            ValueError: For a name Python cannot take, one the script imports, or one that,
+                or whose outputs, another block's name or outputs take.
+        """
+        node = self.nodes[id]
+        if name == node.name:
+            return
+        if not _identifier(name) or name in TAKEN:
+            raise ValueError(f"{name!r} cannot name a block: it takes a Python name the "
+                             f"script does not use already")
+        outputs = {f"{name}_{p.name}" for p in self.ports(id)[1]}
+        if any(name in (n.name, *(f"{n.name}_{p.name}" for p in self.ports(k)[1]))
+               or n.name in outputs for k, n in self.nodes.items() if k != id):
+            raise ValueError(f"another block is named {name!r}, or one of its outputs, or as "
+                             "an output of this one would be")
+        node.name, node.named = name, True
+        self.invalidate(id)
 
     #**********#
     #   show   #
@@ -645,7 +673,7 @@ class Graph:
                 "nodes": [{"id": n.id, "block": n.block, "name": n.name, "option": n.option,
                            "values": {k: repr(v) for k, v in n.values.items()},
                            "shown": n.shown,
-                           "position": list(n.position), "found": n.found}
+                           "position": list(n.position), "found": n.found, "named": n.named}
                           for n in self.nodes.values()],
                 "edges": [[e.source, e.output, e.target, e.input] for e in self.edges]}
 
@@ -678,7 +706,8 @@ class Graph:
                     raise ValueError(f"no toolbox {n['option']}")
                 values = {k: ast.literal_eval(v) for k, v in n["values"].items()}
                 graph.nodes[n["id"]] = Node(n["id"], n["block"], n["name"], n["option"], values,
-                                            shown, tuple(n["position"]), list(n["found"]))
+                                            shown, tuple(n["position"]), list(n["found"]),
+                                            named=bool(n.get("named", False)))
             graph._count = max((int(k[1:]) for k in graph.nodes), default=0)
             for e in saved["edges"]:
                 where = f"wire {e!r}"
@@ -708,33 +737,46 @@ class Graph:
     #*************#
     def _name(self, b: Block, option: int = 0, values: Optional[Dict[str, Any]] = None,
               id: Optional[str] = None) -> str:
-        """A Python name for a block, not yet taken, saying what it does: a fit's toolbox
-        (lcmodel_fit, fsl_mrs_fit), a model's checkpoint (wand_ismrm2016), else its block."""
-        if b.group == "fit" and b.options:
-            base = f"{b.options[option][0]}_fit"
-        elif b.model and (values or {}).get("checkpoint"):
-            base = str(values["checkpoint"]).rsplit("/", 1)[-1]
-        else:
-            base = b.key.split(":")[-1]
-        name = re.sub(r"\W", "_", base).lower()
-        name = "_" + name if name[0].isdigit() else name
-        if name in TAKEN or keyword.iskeyword(name):
-            name += "_"
+        """A Python name for a block, not yet taken, saying what it does (see ``_base``)."""
+        name = self._base(b, option, values)
         taken = {n.name for k, n in self.nodes.items() if k != id}
         unique, k = name, 2
         while unique in taken:
             unique, k = f"{name}_{k}", k + 1
         return unique
 
-    #**************#
-    #   renamed    #
-    #**************#
+    #**********#
+    #   base   #
+    #**********#
+    @staticmethod
+    def _base(b: Block, option: int = 0, values: Optional[Dict[str, Any]] = None) -> str:
+        """A Python name saying what a block does, before a number makes it its own: a fit's
+        toolbox (lcmodel_fit, fsl_mrs_fit), a model's checkpoint (wand_ismrm2016), else its
+        block."""
+        if b.group == "fit" and b.options:
+            base = f"{b.options[option][0]}_fit"
+        elif b.model and (values or {}).get("checkpoint"):
+            base = str(values["checkpoint"]).rstrip("/").rsplit("/", 1)[-1] or b.key
+        else:
+            base = b.key.split(":")[-1]
+        name = re.sub(r"\W", "_", base).lower()
+        name = "_" + name if name[0].isdigit() else name
+        if name in TAKEN or keyword.iskeyword(name):
+            name += "_"
+        return name
+
+    #*************#
+    #   renamed   #
+    #*************#
     def _renamed(self, id: str) -> None:
         """A block named again after what it now does, where that changed."""
         node = self.nodes[id]
-        name = self._name(blocks.block(node.block), node.option, node.values, id)
-        if name.rstrip("_0123456789") != node.name.rstrip("_0123456789"):
-            node.name = name
+        if node.named:
+            return
+        b = blocks.block(node.block)
+        if not re.fullmatch(rf"{re.escape(self._base(b, node.option, node.values))}(_\d+)?",
+                            node.name):
+            node.name = self._name(b, node.option, node.values, id)
 
     #**************#
     #   pipeline   #

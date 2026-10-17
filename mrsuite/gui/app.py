@@ -73,10 +73,16 @@ class Tab:
     saved: str = ""
     state: Dict[str, Any] = field(default_factory=dict)
 
+    #**********#
+    #   name   #
+    #**********#
     @property
     def name(self) -> str:
         return self.path.name.split(".")[0] if self.path else f"Untitled {self.number}"
 
+    #***********#
+    #   dirty   #
+    #***********#
     @property
     def dirty(self) -> bool:
         return _snapshot(self.graph) != self.saved
@@ -115,7 +121,7 @@ class App:
         self.index, self.scaling = 0, None           # which spectrum, which concentrations
         self.spread, self.stack = None, 0.0           # which dimension drawn apart, how far
         self.running: Optional[str] = None           # the block under way
-        self.runs: Optional[Graph] = None            # the graph a run is under way on
+        self.runs: set = set()                       # the graphs runs are under way on
         self.theme = "system"
         self.folder = Path.home()                    # where files are looked for and written
         self.thumbs: Dict[str, Tuple[int, Any]] = {}
@@ -180,7 +186,7 @@ class App:
         self.canvas.on("dropped", lambda e: self.add(e.args["key"], (e.args["x"], e.args["y"]),
                                                      join=False))
         # anything a handler did not see coming is said on the page, not only in the console
-        ui.on_exception(_said)
+        ui.on_exception(lambda err: _said(err, logged=True))      # NiceGUI's own log has it
         # leaving the page with a tab edited since its save is asked about (a browser's way)
         ui.add_body_html('''<script>window.addEventListener("beforeunload", e => {
             if (document.querySelector(".mr-tab[data-dirty='1']")) { e.preventDefault();
@@ -629,19 +635,21 @@ class App:
         if not self.graph.nodes:
             ui.notify("Add blocks first: drag one from the left", type="info")
             return
-        graph = self.runs = self.graph
+        graph = self.graph
+        self.runs.add(graph)
         try:
             done = await run.io_bound(graph.run, upto, lambda k: self._started(graph, k))
             if not done and graph is self.graph:
                 ui.notify("Stopped before the end: press Run to go on", type="info")
         except Exception as err:                       # noqa: BLE001 - said, not hidden
             if graph is self.graph:
-                _said(err)
+                _said(err, logged=True)                # the graph logged it
         finally:
-            if self.runs is graph:
-                self.runs, self.running = None, None
+            self.runs.discard(graph)
+            if graph is self.graph:
+                self.running = None
                 self.status.text = ""
-                self.spinner.set_visibility(False)
+            self.spinner.set_visibility(bool(self.runs))
         self._changed()
 
     #**********#
@@ -649,8 +657,8 @@ class App:
     #**********#
     @property
     def busy(self) -> bool:
-        """Whether the graph shown is running; one replaced may still finish its block."""
-        return self.runs is self.graph
+        """Whether the graph shown is running; another tab's may be too."""
+        return self.graph in self.runs
 
     #*************#
     #   started   #
@@ -673,11 +681,11 @@ class App:
     #   tick   #
     #**********#
     def _tick(self) -> None:
+        self.spinner.set_visibility(bool(self.runs))   # any tab's run
         if self.busy:
             self.draw()
             node = self.graph.nodes.get(self.running or "")
             self.status.text = f"Running {node.name}…" if node else "Running…"
-            self.spinner.set_visibility(True)
 
     #***************#
     #   inspector   #
@@ -697,7 +705,10 @@ class App:
         with ui.row().classes("items-center gap-2 no-wrap w-full"):
             ui.element("span").classes("mr-swatch").style(f"background: {group.colour}")
             ui.label(b.title).classes("text-base font-semibold")
-            ui.label(node.name).classes("font-mono text-xs mr-muted ml-auto")
+        box = ui.input("name", value=node.name).props("dense outlined") \
+            .classes("w-full font-mono").mark("name")
+        box.on("blur", lambda _: self._rename(node.id, box.value))
+        box.on("keydown.enter", lambda _: self._rename(node.id, box.value))
         if b.help:
             ui.label(b.help).classes("text-xs mr-muted")
         if len(b.offers) > 1:
@@ -866,6 +877,20 @@ class App:
             self.graph.set(id, name, value)
         except ValueError as err:
             ui.notify(str(err), type="warning")
+        self._changed()
+
+    #************#
+    #   rename   #
+    #************#
+    def _rename(self, id: str, name: str) -> None:
+        name = (name or "").strip()
+        if name == self.graph.nodes[id].name:          # left as it was: nothing to redraw
+            return
+        try:
+            self.graph.rename(id, name)
+        except ValueError as err:
+            ui.notify(str(err), type="warning")
+            return
         self._changed()
 
     #*********#
@@ -1326,7 +1351,8 @@ class App:
         """An empty graph in a new tab, shown."""
         self.count += 1
         graph = Graph()
-        self._show_tab(Tab(graph, self.count, saved=_snapshot(graph)))
+        self.tabs.append(Tab(graph, self.count, saved=_snapshot(graph)))
+        self._switch(self.tabs[-1])
 
     #*************#
     #   tab bar   #
@@ -1352,18 +1378,20 @@ class App:
     #   switch   #
     #************#
     def _switch(self, tab: Tab) -> None:
-        """Another tab in front: the one shown keeps its selection, preview and thumbnails."""
+        """Another tab in front: the one shown keeps its selection, preview and thumbnails;
+        the block its run is under way in shows from the next one started."""
         if tab is self.tab:
             return
         keys = ("selected", "previewed", "port", "index", "scaling", "spread", "stack",
-                "running", "thumbs")
+                "thumbs")
         if self.tab is not None:                       # none after the last tab closed
             self.tab.state = {k: getattr(self, k) for k in keys}
         self.tab, self.graph = tab, tab.graph
         fresh = {"selected": None, "previewed": None, "port": None, "index": 0, "scaling": None,
-                 "spread": None, "stack": 0.0, "running": None, "thumbs": {}}
+                 "spread": None, "stack": 0.0, "thumbs": {}}
         for k in keys:
             setattr(self, k, tab.state.get(k, fresh[k]))
+        self.running = None
         self.status.text = ""
         self._changed()
 
@@ -1405,6 +1433,8 @@ class App:
                 await self.save()
                 if tab.dirty:                          # not saved after all
                     return
+        if tab.graph in self.runs:                     # its run ends after the block under way
+            tab.graph.stop()
         if tab is self.tab and len(self.tabs) > 1:
             self._switch(self.tabs[max(self.tabs.index(tab) - 1, 0)]
                          if self.tabs.index(tab) else self.tabs[1])
@@ -1515,10 +1545,12 @@ def _matches(b: blocks.Block, text: str) -> bool:
 #**********#
 #   said   #
 #**********#
-def _said(err: BaseException) -> None:
-    """An error said on the page in one line, and in the terminal in full, traceback and
-    all, so a session run from a shell shows what went wrong while the GUI is young."""
-    logger.error("%s", brief(err), exc_info=err)
+def _said(err: BaseException, logged: bool = False) -> None:
+    """An error said on the page in one line, and, unless logged already, in the terminal in
+    full, traceback and all, so a session run from a shell shows what went wrong while the
+    GUI is young."""
+    if not logged:
+        logger.error("%s", brief(err), exc_info=err)
     ui.notify(brief(err), type="negative", multi_line=True)
 
 

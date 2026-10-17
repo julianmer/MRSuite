@@ -181,7 +181,7 @@ body {
           font-size: 13px; color: var(--mr-muted); border-bottom: 2px solid transparent;
           white-space: nowrap; user-select: none; }
 .mr-tab:hover { color: var(--mr-text); }
-.mr-tab-active { color: var(--mr-text); border-bottom-color: var(--accent); }
+.mr-tab-active { color: var(--mr-text); border-bottom-color: var(--q-primary); }
 .mr-tab-close { font-size: 15px; opacity: 0.45; border-radius: 50%; }
 .mr-tab-close:hover { opacity: 1; background: var(--mr-border); }
 .mr-tab-add { margin-left: 2px; color: var(--mr-muted); }

@@ -1328,3 +1328,95 @@ def test_a_graph_opened_has_its_own_tab_named_after_its_file_and_saves_back_to_i
         assert [t.name for t in app.tabs] == ["mine", "Untitled 2"]
 
     simulate(Graph(), script)
+
+
+def test_new_opens_a_tab_even_over_an_untouched_empty_one():
+    async def script(user, app):
+        user.find(marker="new").click()
+        await until(lambda: len(app.tabs) == 2)
+        assert [t.name for t in app.tabs] == ["Untitled 1", "Untitled 2"]
+        assert app.tab is app.tabs[1]
+
+    simulate(Graph(), script)
+
+
+@needs_challenge
+def test_a_tabs_run_is_its_own_and_ends_when_its_tab_closes(monkeypatch):
+    """A tab shown again refuses a second run while its first is under way, though another
+    tab's started since; a tab closed stops its run after the block under way."""
+    graph = Graph()
+    data = graph.add("ismrm2016")
+    graph.set(data, "n", 1)
+    for _ in range(2):                                 # two seconds
+        slow(monkeypatch, graph, data)
+
+    async def script(user, app):
+        first = asyncio.create_task(app.run())
+        await until(lambda: app.running == data)
+        app.new()
+        other = app.graph
+        one, two = other.add("ismrm2016"), other.add("ismrm2016")
+        for k in (one, two):
+            other.set(k, "n", 1)
+        slow(monkeypatch, other, one)
+        second = asyncio.create_task(app.run())
+        await until(lambda: app.running == one)
+
+        async def close():
+            with app.client:
+                await app.close_tab(app.tabs[1])
+        closing = asyncio.create_task(close())
+        await user.should_see(marker="close-discard")
+        user.find(marker="close-discard").click()
+        await closing
+        assert app.graph is graph and app.busy and app.spinner.visible
+        with app.client:
+            await app.run()
+        await user.should_see("Already running; stop it first")
+
+        await second
+        assert other.nodes[one].made is not None and other.nodes[two].made is None, "stopped"
+        await first
+        assert not app.runs and not app.spinner.visible
+
+    simulate(graph, script)
+
+
+@needs_challenge
+def test_a_tab_whose_run_ended_while_hidden_shows_no_block_running(monkeypatch):
+    graph = Graph()
+    data = graph.add("ismrm2016")
+    graph.set(data, "n", 1)
+    slow(monkeypatch, graph, data)
+
+    async def script(user, app):
+        task = asyncio.create_task(app.run())
+        await until(lambda: app.running == data)
+        app.new()
+        await task
+        user.find(marker="tab-1").click()
+        await until(lambda: app.graph is graph)
+        assert app.running is None
+        assert [n["data"]["status"] for n in drawn(user)[0]] == ["done"]
+
+    simulate(graph, script)
+
+
+def test_a_name_left_as_it_was_redraws_nothing(monkeypatch):
+    graph = Graph()
+    data = graph.add("ismrm2016")
+
+    async def script(user, app):
+        app.select(data)
+        await asyncio.sleep(0.1)                       # the page redrawn
+        changed = []
+        monkeypatch.setattr(app, "_changed", lambda: changed.append(True))
+        user.find(marker="name").trigger("blur")
+        await asyncio.sleep(0.1)
+        assert not changed
+        user.find(marker="name").elements.pop().set_value("challenge")
+        user.find(marker="name").trigger("blur")
+        await until(lambda: changed)
+        assert graph.nodes[data].name == "challenge"
+
+    simulate(graph, script)

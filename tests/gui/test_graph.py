@@ -465,6 +465,36 @@ def test_wires_keep_to_their_kinds_and_make_no_loops():
         graph.connect(again, "out", again, "data")
 
 
+def test_a_block_the_user_names_keeps_its_name_in_the_script_and_the_scores(tmp_path):
+    """The name is the block's variable in the script and its method in a score's table;
+    another toolbox keeps it, a saved graph too, and a name Python or the script cannot
+    take, or another block's, is refused."""
+    graph = Graph()
+    data, one, two, score = (graph.add(k) for k in
+                             ("ismrm2016", "lcm-fit", "lcm-fit", "errors"))
+    for fit in (one, two):
+        graph.connect(data, "spectra", fit, "data")
+        graph.connect(fit, "out", score, "methods")
+    graph.connect(data, "truth", score, "truth")
+    graph.set(score, "references", "optimal")
+
+    graph.rename(two, "wand_then_lcmodel")
+    graph.choose(two, 1)
+
+    assert graph.nodes[two].name == "wand_then_lcmodel"
+    assert "wand_then_lcmodel = " in graph.script()
+    assert "'wand_then_lcmodel': wand_then_lcmodel" in graph.code(score)[0]
+    graph.save(tmp_path / "g.json")
+    assert Graph.load(tmp_path / "g.json").nodes[two].name == "wand_then_lcmodel"
+    for bad in ("WAND + LCModel", "class", "challenge2016", graph.nodes[one].name,
+                f"{graph.nodes[data].name}_truth"):               # another's output
+        with pytest.raises(ValueError):
+            graph.rename(two, bad)
+    graph.rename(one, "fit_spectra")
+    with pytest.raises(ValueError):
+        graph.rename(data, "fit")                                 # its output another's name
+
+
 def test_an_input_taking_many_gets_them_by_name():
     graph = Graph()
     data, one, two, score = (graph.add(k) for k in
@@ -566,7 +596,8 @@ def test_scores_of_fits_draw_on_a_radar_as_the_script_draws_them(graph):
     exec(graph.script(), namespace)
 
     drawn = graph.output(radar)
-    assert [t.get_text() for t in drawn.get_xticklabels()] == ["Agreement", "Errors"]
+    assert [t.get_text() for t in drawn.get_xticklabels()] == \
+        ["Agreement\nLin's CCC", "Errors\nMOSAE"]
     for score in (mosae, ccc):
         assert graph.output(score).equals(namespace[graph.nodes[score].name])
     assert exports(drawn) == ["figure"] and thumb(drawn) == {"kind": "text", "text": "figure"}
@@ -1017,6 +1048,25 @@ def test_a_block_is_named_after_what_it_does():
     assert [graph.nodes[k].name for k in (again, wand)] == ["lcmodel_fit", "wand_ismrm2016"]
     graph.choose(fit, 1)
     assert graph.nodes[fit].name == "lcmodel_fit_2"
+
+
+def test_a_model_is_named_after_its_checkpoint_digits_and_all():
+    graph = Graph()
+    wand = graph.add("wand")
+
+    graph.set(wand, "checkpoint", "me/wand-run1")
+    graph.set(wand, "checkpoint", "me/wand-run2")
+    assert graph.nodes[wand].name == "wand_run2", "a digit of its own is no number added"
+
+
+def test_a_checkpoint_ending_in_a_slash_names_its_model_still():
+    graph = Graph()
+    wand = graph.add("wand")
+
+    graph.set(wand, "checkpoint", "me/wand-run/")
+    assert graph.nodes[wand].name == "wand_run"
+    graph.set(wand, "checkpoint", "/")
+    assert graph.nodes[wand].name == "wand"
 
 
 #*****************#

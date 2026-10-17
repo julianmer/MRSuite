@@ -349,6 +349,9 @@ PIPELINE: Dict[Tuple[str, str], Tuple[Dict[str, Any], str]] = {
                                 "FID-A's run_pressproc_auto.m, line 332 (on creatine)"),
     ("fid_a", "op_ppmref"): ({"ppmmin": 2.9, "ppmmax": 3.1, "ppmrefval": 3.027},
                              "FID-A's run_pressproc_auto.m, line 348 (creatine to 3.027)"),
+    ("fid_a", "op_alignAverages"): ({"tmax": 0.2, "med": "n"},
+                                    "FID-A's run_pressproc.m, lines 39 and 197 (tmaxin, 'n'): "
+                                    "its own estimate of tmax fails where no point clears SNR 5"),
     ("fid_a", "op_combinesubspecs"): ({"mode": "diff"},
                                       "FID-A's run_megapressproc_auto.m, line 403"),
     ("osprey", "op_robustSpecReg"): ({"seqType": "unedited", "echo": 0},
@@ -436,7 +439,7 @@ BLOCKS: Dict[str, Block] = {b.key: b for b in [
           help="Decomposes each spectrum into its metabolites, baseline and artifacts: the "
                "spectrum without the components removed (e.g. ['artifacts']), with only those "
                "kept ('metabolites' for all), or, with neither, every component apart."),
-    Block("mlp", "models", "MLP", model="mrsuite.models.mlp.MLP", out=RESULTS,
+    Block("mlp", "models", "QuantMLP", model="mrsuite.models.mlp.MLP", out=RESULTS,
           imports=("from mrsuite import models",), fields=(_pick("checkpoint", ZOO["mlp"]),),
           inputs=(Port("data", SPECTRA),), outputs=(Port("out", RESULTS),),
           help="Quantifies each spectrum with a multilayer perceptron, trained supervised on "
@@ -477,10 +480,12 @@ BLOCKS: Dict[str, Block] = {b.key: b for b in [
           help="Each method's fits against the truth, with its regression line."),
     Block("radar", "evaluate", "Radar", call="plot_scores",
           imports=("from mrsuite.benchmark import plot_scores",),
+          fields=(_choice("by", ["aspect", "measure"], "'aspect'"),),
           inputs=(Port("scores", SCORES, many=True),), outputs=(Port("figure"),),
-          help="Score tables on one radar, filled as they are wired in: a spoke per measure, "
-               "each scaled from the worst method to the best at the rim, a polygon per "
-               "method, as bsuite draws its agents."),
+          help="Score tables on one radar, filled as they are wired in: a corner per aspect "
+               "naming its measures, or by measure a spoke per measure, each scaled from the "
+               "worst method to the best at the rim, a polygon per method, as bsuite draws "
+               "its agents."),
     # other
     *[Block(key, "other", title, options=tuple(options), help=help)
       for key, title, options, help in _OTHER],

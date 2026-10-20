@@ -101,7 +101,7 @@ that makes it again.
 - **Everything shows and exports**: a preview on every block; data as NIfTI-MRS, results, figures;
   graphs in tabs, saved and opened again.
 
-![A benchmark in the GUI: the 2016 challenge into LCModel, FSL-MRS, spant, WAND then LCModel, and QuantMLP, scored on five aspects and drawn on a radar](https://raw.githubusercontent.com/julianmer/MRSuite/main/assets/gui/benchmark.png)
+![A benchmark in the GUI: the 2016 challenge into LCModel, FSL-MRS, spant, and WAND then LCModel, scored on five aspects and drawn on a radar](https://raw.githubusercontent.com/julianmer/MRSuite/main/assets/gui/benchmark.png)
 
 ![In vivo processing in the GUI: COWS (OpenNeuro ds006812) through FSL-MRS, FID-A and spant into LCModel](https://raw.githubusercontent.com/julianmer/MRSuite/main/assets/gui/processing.png)
 

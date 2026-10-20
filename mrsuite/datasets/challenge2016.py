@@ -9,7 +9,8 @@
 # Purpose: Loads the ISMRM 2016 fitting challenge into NIfTI-MRS+: the water-suppressed            #
 #          spectra, their water references, and the ground-truth concentrations, paired            #
 #          dataset by dataset. The spectra and basis come from the challenge submodule; the        #
-#          ground truth is kept in-repo, as that repository does not carry it.                     #
+#          ground truth is kept in-repo, as that repository does not carry it. An installed        #
+#          MRSuite downloads the release as published, which holds both, on first use.             #
 #                                                                                                  #
 ####################################################################################################
 
@@ -19,6 +20,9 @@
 #*************#
 import os
 import re
+import shutil
+import tempfile
+import zipfile
 from functools import lru_cache
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -26,12 +30,23 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 from nifti_mrs_plus import NIfTI_MRS_Plus
+from mrsuite import externals
 from mrsuite.core import provenance
 
-DATA = Path(__file__).resolve().parents[2] / "data"
+DATA = externals.local("data")
 ROOT = DATA / "2016_fitting_challenge"
 TRUTH = DATA / "2016_fitting_challenge_gts"
 BASIS = ROOT / "basisset_LCModel" / "press3T_30ms.BASIS"
+
+# The release as published (University of Minnesota Data Repository, doi:10.13020/kw61-3j13):
+# url, bytes and MD5. Its spectra, basis sets and ground truth are byte for byte the
+# submodule's and the in-repo truth, the truth named dataset1_answer.xlsx for dataset1.xlsx.
+RELEASE = ("https://conservancy.umn.edu/server/api/core/bitstreams/"
+           "6aa26a1e-0a04-4af7-b49b-40bd6d9ad8e9/content", 5969351,
+           "9da21a50739c1b9844157704cab885ff")
+# its zips that hold no folder of their own, by the submodule's folder for them
+FLAT = {"basisset_text.zip": "basisset_text", "basisset_JMRUI.zip": "basisset_JMRUI",
+        "basisset_text_noTMS_20160929.zip": "basisset_text_noTMS"}
 
 # The challenge's water scaling (its README, "Water scaling information"): water at 1 mol
 # per 18.015 g in 60% GM (0.78 g/ml, T2 110 ms) and 40% WM (0.65 g/ml, T2 80 ms) at TE 30 ms,
@@ -102,6 +117,46 @@ def _truth(path: Path) -> Dict[str, float]:
     return dict(sorted(truth.items()))
 
 
+#***********#
+#   fetch   #
+#***********#
+def fetch() -> None:
+    """
+    The release, downloaded into ROOT and its truth into TRUTH on first use, in the
+    submodule's layout; the truth first, so the challenge folder, moved in last, marks it
+    whole. Two processes fetching at once both finish; the first one's stands.
+
+    Raises:
+        RuntimeError: In a checkout whose submodule is not initialised, or if the download
+            is not the release published.
+    """
+    if ROOT.is_dir() and any(ROOT.iterdir()):
+        return
+    if externals.checkout():
+        raise RuntimeError(f"{ROOT} is empty: git -C {externals.CHECKOUT} submodule update "
+                           f"--init data/{ROOT.name}")
+    url, size, md5 = RELEASE
+    DATA.mkdir(parents=True, exist_ok=True)
+    part = Path(tempfile.mkdtemp(prefix=".part", dir=DATA))
+    try:
+        with externals.fetching(f"the 2016 fitting challenge ({size / 1e6:.0f} MB)", DATA):
+            externals.download(url, part / "release.zip", size, md5)
+        with zipfile.ZipFile(part / "release.zip") as release:
+            for name in release.namelist():
+                if name.startswith("ground_truth/") and name.endswith(".xlsx"):
+                    (part / "truth").mkdir(exist_ok=True)
+                    (part / "truth" / Path(name).name).write_bytes(release.read(name))
+                elif name.endswith(".zip"):
+                    release.extract(name, part)
+                    inner = Path(name).name
+                    with zipfile.ZipFile(part / name) as files:
+                        files.extractall(part / "challenge" / FLAT.get(inner, ""))
+        externals.move_in(part / "truth", TRUTH)
+        externals.move_in(part / "challenge", ROOT)
+    finally:
+        shutil.rmtree(part, ignore_errors=True)
+
+
 #**********#
 #   load   #
 #**********#
@@ -126,6 +181,8 @@ def load(n: Optional[int] = None, root: Path = ROOT,
     import fsl_mrs
     from fsl_mrs.utils import mrs_io
 
+    if Path(root) == ROOT or (Path(truth) == TRUTH and not externals.checkout()):
+        fetch()
     spectra = Path(root) / 'datasets_JMRUI'
 
     def read(suffix):
@@ -206,6 +263,7 @@ def mrs_sim_config(folder: Path = DATA / 'basis_sets') -> Dict:
 
     from mrsuite.simulators import mrs_sim
 
+    fetch()
     folder.mkdir(parents=True, exist_ok=True)
     mat = folder / 'challenge_2016.mat'
     if not mat.exists():
@@ -269,6 +327,8 @@ def basis_fids() -> Dict[str, np.ndarray]:
     Returns:
         Dict[str, np.ndarray]: (2048,) FIDs by the truth's names.
     """
+    fetch()
+
     def read(folder, name):
         columns = np.loadtxt(ROOT / folder / f'{name}.txt')
         return np.conj(columns[:, 0] + 1j * columns[:, 1])

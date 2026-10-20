@@ -28,7 +28,7 @@ import nicegui                                                          # noqa: 
 from nicegui import ui                                                  # noqa: E402
 from nicegui.testing.user_simulation import user_simulation            # noqa: E402
 
-from mrsuite import collect                                             # noqa: E402
+from mrsuite import collect, externals                                  # noqa: E402
 from mrsuite.datasets import challenge2016                              # noqa: E402
 from mrsuite.gui import blocks, catalog                                 # noqa: E402
 from mrsuite.gui.app import App, _found                                 # noqa: E402
@@ -778,6 +778,24 @@ def test_a_run_under_way_spins_and_its_block_shows_it(monkeypatch):
         await task
         assert not app.spinner.visible
         assert [n["data"]["status"] for n in drawn(user)[0]] == ["done"]
+
+    simulate(graph, script)
+
+
+@needs_challenge
+def test_a_download_under_way_is_said_in_the_status(monkeypatch):
+    """A dataset downloaded on first use says so in the status, not "Running"."""
+    graph = Graph()
+    data = graph.add("ismrm2016")
+    graph.set(data, "n", 1)
+    slow(monkeypatch, graph, data)
+    said = "Downloading the 2016 fitting challenge (6 MB) into here…"
+    monkeypatch.setattr(externals, "now", lambda: said)
+
+    async def script(user, app):
+        task = asyncio.create_task(app.run())
+        await until(lambda: app.status.text == said)
+        await task
 
     simulate(graph, script)
 

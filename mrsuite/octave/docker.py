@@ -23,6 +23,8 @@ import subprocess
 from pathlib import Path
 from typing import List, Optional
 
+from mrsuite import externals
+
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 
@@ -31,9 +33,9 @@ CONTAINER = os.environ.get("MRSUITE_OCTAVE_CONTAINER", "mrsuite-octave")
 DOCKERFILE = HERE / "dockerfile"      # it sits with the shims it serves
 
 # oct2py exchanges data as .mat files whose absolute paths it embeds in the commands it
-# sends, so the container has to see them at those same paths. Keeping the scratch inside
-# the repo means the single repo mount covers it.
-TEMP_DIR = REPO / ".octave-tmp"
+# sends, so the container has to see them at those same paths: the scratch is the repo's,
+# or an installed MRSuite's own folder, both mounted.
+TEMP_DIR = externals.local(".octave-tmp")
 
 
 #*************#
@@ -92,22 +94,21 @@ def _state() -> Optional[str]:
 #************#
 #   mounts   #
 #************#
-def _mounts() -> List[str]:
-    """Host paths the container must see, each at its own absolute path.
+def mounts() -> List[str]:
+    """Host paths a container must see, each at its own absolute path.
 
     The repo covers the toolboxes, the shims, the data and oct2py's scratch. oct2py also
     adds its own package directory to the Octave path, so that has to be visible too, and
-    an installed MRSuite fetches the toolboxes outside it (see externals).
+    an installed MRSuite keeps the toolboxes, data, scratch and MEX in its own folder
+    (see externals.local).
     """
     import oct2py
 
-    from mrsuite import externals
-
     paths = [str(REPO), str(Path(oct2py.__file__).resolve().parent)]
-    if not externals.root().is_relative_to(REPO):
-        externals.root().mkdir(parents=True, exist_ok=True)   # else Docker makes it, as root
-        paths.append(str(externals.root()))
-    return [arg for p in paths for arg in ("-v", f"{p}:{p}")]
+    if not externals.checkout():
+        externals.home().mkdir(parents=True, exist_ok=True)   # else Docker makes it, as root
+        paths += [str(externals.home()), str(TEMP_DIR.parent)]  # the scratch as imported
+    return [arg for p in dict.fromkeys(paths) for arg in ("-v", f"{p}:{p}")]
 
 
 #****************#
@@ -120,7 +121,7 @@ def _is_current() -> bool:
                    "{{.Image}} {{range .Mounts}}{{.Source}}:{{.Destination}} {{end}}",
                    CONTAINER, check=False, timeout=60)
     have = proc.stdout.split()
-    return bool(have) and have[0] == image_id() and set(_mounts()[1::2]) <= set(have[1:])
+    return bool(have) and have[0] == image_id() and set(mounts()[1::2]) <= set(have[1:])
 
 
 #**************#
@@ -153,12 +154,13 @@ def start() -> str:
         return CONTAINER
 
     build()
-    TEMP_DIR.mkdir(exist_ok=True)
+    TEMP_DIR.mkdir(parents=True, exist_ok=True)
     # run as the host user, so the .mat files octave writes stay readable outside the
     # container; a bare uid has no passwd entry, hence the explicit HOME
     _docker("run", "-d", "--name", CONTAINER,
             "--user", f"{os.getuid()}:{os.getgid()}", "-e", "HOME=/tmp",
-            *_mounts(), "-w", str(REPO), IMAGE, timeout=300)
+            *mounts(), "-w", str(REPO if externals.checkout() else TEMP_DIR), IMAGE,
+            timeout=300)
     return CONTAINER
 
 
@@ -185,7 +187,7 @@ def executable() -> str:
     has to be behind a path. Generated rather than shipped, since it is a build artefact
     of the chosen container, not source.
     """
-    TEMP_DIR.mkdir(exist_ok=True)
+    TEMP_DIR.mkdir(parents=True, exist_ok=True)
     path = TEMP_DIR / "octave-docker"
     path.write_text(f'#!/bin/sh\nexec docker exec -i "{CONTAINER}" octave-cli "$@"\n')
     path.chmod(0o755)

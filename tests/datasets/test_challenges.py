@@ -128,6 +128,116 @@ def test_the_2016_loader_pairs_spectra_references_and_truth():
     assert {"NAA", "Cr", "Mac"} <= set(truth[0])
 
 
+#******************#
+#   2016 release   #
+#******************#
+def _release(tmp_path, monkeypatch, md5=None):
+    """The challenge as an installed MRSuite finds it: no checkout, a release as published
+    (a zip of zips, one without a folder of its own, the truth renamed) to download."""
+    import hashlib
+    import zipfile
+
+    def zipped(path, files):
+        with zipfile.ZipFile(path, "w") as z:
+            for name, source in files.items():
+                z.write(source, name)
+        return path
+
+    inner = tmp_path / "inner"
+    inner.mkdir()
+    spectra = challenge2016.ROOT / "datasets_JMRUI"
+    zipped(inner / "datasets_JMRUI.zip", {f"datasets_JMRUI/{f}": spectra / f
+                                         for f in ("dataset1_WS.txt", "dataset1_nWS.txt")})
+    zipped(inner / "basisset_text_noTMS_20160929.zip",
+           {"Cr.txt": challenge2016.ROOT / "basisset_text_noTMS" / "Cr.txt"})
+    release = zipped(tmp_path / "release.zip", {
+        "datasets/datasets_JMRUI.zip": inner / "datasets_JMRUI.zip",
+        "basis_sets/basisset_text_noTMS_20160929.zip": inner / "basisset_text_noTMS_20160929.zip",
+        "ground_truth/dataset1_answer.xlsx": challenge2016.TRUTH / "dataset1.xlsx"})
+    data = tmp_path / "home" / "data"
+    monkeypatch.setattr(challenge2016.externals, "CHECKOUT", tmp_path / "site-packages")
+    monkeypatch.setattr(challenge2016, "DATA", data)
+    monkeypatch.setattr(challenge2016, "ROOT", data / "2016_fitting_challenge")
+    monkeypatch.setattr(challenge2016, "TRUTH", data / "2016_fitting_challenge_gts")
+    monkeypatch.setattr(challenge2016, "RELEASE", (release.as_uri(), release.stat().st_size,
+                        md5 or hashlib.md5(release.read_bytes()).hexdigest()))
+    return data
+
+
+@needs_2016
+def test_an_install_downloads_the_release_once_and_reads_it_as_the_checkout(tmp_path,
+                                                                            monkeypatch):
+    checkout = challenge2016.load(n=1)
+    data = _release(tmp_path, monkeypatch)
+
+    challenge2016.fetch()
+
+    root, truth = challenge2016.ROOT, challenge2016.TRUTH
+    assert (root / "basisset_text_noTMS" / "Cr.txt").is_file(), "a flat zip in its folder"
+    assert [p.name for p in truth.iterdir()] == ["dataset1_answer.xlsx"]
+    assert sorted(p.name for p in data.iterdir()) == [root.name, truth.name], "no part left"
+    got = challenge2016.load(n=1, root=root, truth=truth)
+    assert np.array_equal(got[0].list()[0][:], checkout[0].list()[0][:])
+    assert got[2] == checkout[2], "the truth by either name"
+
+    monkeypatch.setattr(challenge2016.externals, "download", None)    # never again
+    challenge2016.fetch()
+
+
+@needs_2016
+def test_two_processes_fetching_the_release_at_once_both_finish(tmp_path, monkeypatch):
+    _release(tmp_path, monkeypatch)
+    download = challenge2016.externals.download
+
+    def raced(url, dest, size=None, md5=None):            # the other one finishes meanwhile
+        (challenge2016.ROOT / "datasets_JMRUI").mkdir(parents=True)
+        challenge2016.TRUTH.mkdir()
+        (challenge2016.TRUTH / "theirs.xlsx").write_bytes(b"")
+        return download(url, dest, size, md5)
+
+    monkeypatch.setattr(challenge2016.externals, "download", raced)
+    challenge2016.fetch()
+
+    assert [p.name for p in challenge2016.TRUTH.iterdir()] == ["theirs.xlsx"], "theirs stands"
+    assert sorted(p.name for p in challenge2016.DATA.iterdir()) == \
+        sorted([challenge2016.ROOT.name, challenge2016.TRUTH.name]), "no part left"
+
+
+@needs_2016
+def test_a_release_not_as_published_is_not_kept(tmp_path, monkeypatch):
+    data = _release(tmp_path, monkeypatch, md5="0" * 32)
+
+    with pytest.raises(RuntimeError, match="MD5"):
+        challenge2016.fetch()
+    assert not list(data.iterdir())
+
+
+#******************#
+#   mrsi release   #
+#******************#
+def test_mrsi_subjects_missing_are_fetched_first_and_said(tmp_path, monkeypatch):
+    challenge = pytest.importorskip("augmentrum.dataset.mrsi_challenge")
+    said = []
+
+    class Release:
+        def __init__(self, data_dir, source):
+            self.data_dir = data_dir
+
+        def available(self, subject):
+            return subject == "Sub1"
+
+        def fetch(self, subjects, root):
+            said.append((subjects, root, mrsi_challenge.externals.now()))
+
+    monkeypatch.setattr(challenge, "MRSIChallengeDataModule", Release)
+    mrsi_challenge._module(tmp_path, "Sub1", "Sub2")
+
+    assert said == [(["Sub2"], str(tmp_path),
+                     f"Downloading the MRSI challenge's Sub2 from Zenodo into {tmp_path}…")]
+    mrsi_challenge._module(tmp_path, "Sub1")
+    assert len(said) == 1, "nothing missing, nothing fetched"
+
+
 #********************#
 #   mrsi truth map   #
 #********************#

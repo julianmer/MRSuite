@@ -100,7 +100,7 @@ data/*
 
 # Native MEX built per runtime from Osprey's bundled C sources: a build artefact of
 # the machine or container it was compiled on, not source.
-mrsuite/octave/mex/
+.octave-mex/
 
 # oct2py scratch. It lives inside the repo so the containerised Octave sees it at the
 # same absolute path as the host, under the one repo bind-mount.

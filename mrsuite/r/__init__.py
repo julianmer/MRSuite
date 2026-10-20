@@ -76,8 +76,8 @@ def run(job: Dict[str, Any], folder: str, runtime: Optional[str] = None) -> Dict
 
     Args:
         job (Dict[str, Any]): The task and its arguments, as driver.R reads them.
-        folder (str): Where the job, its spectra and its result live; inside the repo, so
-            that the container sees it at the same path.
+        folder (str): Where the job, its spectra and its result live; in octave.scratch,
+            so that the container sees it at the same path.
         runtime (Optional[str]): 'local', 'docker' or 'auto'. Defaults to ``RUNTIME``.
 
     Returns:
@@ -94,7 +94,7 @@ def run(job: Dict[str, Any], folder: str, runtime: Optional[str] = None) -> Dict
         docker.build(image=IMAGE, dockerfile=Path(HERE) / "dockerfile")
         # as the host user, so what R writes stays the caller's; a bare uid has no HOME
         command = ["docker", "run", "--rm", "--user", f"{os.getuid()}:{os.getgid()}",
-                   "-e", "HOME=/tmp", "-v", f"{docker.REPO}:{docker.REPO}", IMAGE] + command
+                   "-e", "HOME=/tmp", *docker.mounts(), IMAGE] + command
     proc = subprocess.run(command, capture_output=True, text=True)
     if proc.returncode != 0 or not os.path.exists(result):
         raise RuntimeError(f"spant job '{job['task']}' failed:\n{proc.stderr[-2000:]}")

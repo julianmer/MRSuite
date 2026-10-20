@@ -233,5 +233,65 @@ def test_converting_fetches_the_original_first(installed, monkeypatch):
 def test_the_octave_container_sees_what_an_install_fetched(installed):
     from mrsuite.octave import docker
 
-    assert f"{installed}:{installed}" in docker._mounts()
-    assert installed.is_dir(), "made here, else Docker makes it as root"
+    home = installed.parent                     # the toolboxes, data, scratch and MEX
+    assert f"{home}:{home}" in docker.mounts()
+    assert home.is_dir(), "made here, else Docker makes it as root"
+
+
+#***********#
+#   local   #
+#***********#
+def test_what_an_install_fetches_builds_and_scratches_is_its_own(installed):
+    home = installed.parent
+    assert externals.local("data") == home / "data" and externals.root() == installed
+    assert not externals.local("data").is_relative_to(externals.CHECKOUT)
+
+
+#**************#
+#   download   #
+#**************#
+def test_a_download_is_kept_only_whole_and_as_published(tmp_path):
+    import hashlib
+
+    served = tmp_path / "served.bin"
+    served.write_bytes(b"x" * 3000)
+    url, md5 = served.as_uri(), hashlib.md5(served.read_bytes()).hexdigest()
+    dest = tmp_path / "got" / "file.bin"
+
+    with pytest.raises(RuntimeError, match="2999 published"):
+        externals.download(url, dest, size=2999)
+    with pytest.raises(RuntimeError, match="MD5"):
+        externals.download(url, dest, md5="0" * 32)
+    assert not list(dest.parent.iterdir()), "nothing kept, no part left"
+
+    assert externals.download(url, dest, 3000, md5).read_bytes() == served.read_bytes()
+
+
+#**************#
+#   fetching   #
+#**************#
+def test_a_download_is_said_while_it_lasts_and_then_not(tmp_path, capsys):
+    with externals.fetching("a dataset (6 MB)", tmp_path):
+        assert externals.now() == f"Downloading a dataset (6 MB) into {tmp_path}…"
+        with externals.fetching("another", tmp_path, say=False):
+            assert externals.now().startswith("Downloading another")
+    assert externals.now() is None
+    assert capsys.readouterr().err == f"Downloading a dataset (6 MB) into {tmp_path}…\n"
+
+
+#*************#
+#   move in   #
+#*************#
+def test_a_folder_moves_in_whole_and_another_process_first_stands(tmp_path):
+    first, second, dest = tmp_path / "first", tmp_path / "second", tmp_path / "dest"
+    for part in (first, second):
+        part.mkdir(mode=0o700)
+        (part / "made").write_text(part.name)
+
+    externals.move_in(first, dest)
+    externals.move_in(second, dest)                       # too late: no error, first stands
+
+    assert (dest / "made").read_text() == "first" and second.is_dir()
+    assert dest.stat().st_mode & 0o055, "readable by others, as any folder made here"
+    with pytest.raises(OSError):
+        externals.move_in(tmp_path / "never-made", tmp_path / "nowhere")

@@ -24,10 +24,11 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 from nifti_mrs_plus import NIfTI_MRS_Plus
+from mrsuite import externals
 from mrsuite.core import provenance
 from mrsuite.training import Source, Truth
 
-DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "mrsi_challenge"
+DATA_DIR = externals.local("data") / "mrsi_challenge"
 
 # The order of metaMap's metabolite axis and of the VtMeta columns. Not alphabetical;
 # verified against the named ground-truth maps and the descriptor paper's Table 1.
@@ -70,8 +71,9 @@ VALIDATION = tuple(f'Sub{i}' for i in range(20, 25))
 #************#
 #   module   #
 #************#
-def _module(data_dir: Path):
-    """Augmentrum's loader, reading from the .mat.
+def _module(data_dir: Path, *subjects: str):
+    """Augmentrum's loader, reading from the .mat, with ``subjects`` fetched from Zenodo
+    first where they are missing, said while they download (Augmentrum says their size).
 
     The .mat rather than the NIfTI files: TestSub10's spectroscopy NIfTI is mirrored in
     x against its own brain mask and B0 map, while the .mat is consistent throughout.
@@ -83,7 +85,13 @@ def _module(data_dir: Path):
             raise
         raise ImportError("Augmentrum is not installed: with FSL-MRS installed, pip install "
                           "git+https://github.com/julianmer/Augmentrum.git") from err
-    return MRSIChallengeDataModule(data_dir=str(data_dir), source='mat')
+    module = MRSIChallengeDataModule(data_dir=str(data_dir), source='mat')
+    missing = [s for s in subjects if not module.available(s)]
+    if missing:
+        with externals.fetching(f"the MRSI challenge's {', '.join(missing)} from Zenodo",
+                                Path(data_dir), say=False):
+            module.fetch(missing, str(data_dir))
+    return module
 
 
 #**********#
@@ -114,7 +122,7 @@ def load(subject: str, signal: str = 'all', voxels: Optional[int] = None,
         Each spectrum's processing history starts with its subject, voxel and signal,
         and the file it came from.
     """
-    module = _module(data_dir)
+    module = _module(data_dir, subject)
     import augmentrum
 
     volume = module.load([subject], signal=signal)[0][0][:]         # (x, y, z, t)
@@ -189,7 +197,7 @@ class Release(Source):
         self.subjects, self.signal, self.components = tuple(subjects), signal, components
         self.seed, self.data_dir = seed, Path(data_dir)
         self.rng = np.random.default_rng(seed)
-        module = _module(data_dir)
+        module = _module(data_dir, *self.subjects)
         parts = [signal] + (['meta'] + (['nuisance'] if signal == 'all' else [])
                             if components else [])
         self._voxels = {part: [_brain(module, s, part, self.data_dir) for s in self.subjects]
@@ -286,7 +294,7 @@ def basis(path: str, subject: str = 'Sub1', data_dir: Path = DATA_DIR) -> str:
     """
     from lcmodel_wrapper.convert import write_basis
 
-    acquisition = _module(data_dir).read_acquisition(subject)
+    acquisition = _module(data_dir, subject).read_acquisition(subject)
     fids = basis_fids(subject, data_dir)
 
     # write_basis takes LCModel's .RAW orientation, the conjugate of NIfTI-MRS'
@@ -332,7 +340,7 @@ def truth_parameters(subjects: Tuple[str, ...] = ('Sub1', 'Sub2'), voxels: int =
     """
     import h5py
 
-    module = _module(data_dir)
+    module = _module(data_dir, *subjects)
     acquisition = module.read_acquisition(subjects[0])
     frequency = acquisition['spectrometer_frequency_mhz']
     table = np.array([TISSUE[m] for m in METABOLITES])      # c_GM, c_WM, T2_GM, T2_WM
@@ -415,7 +423,7 @@ def mrs_sim_config(folder: Optional[Path] = None,
     """
     from mrsuite.simulators import mrs_sim
 
-    module = _module(data_dir)
+    module = _module(data_dir, *subjects)
     acquisition = module.read_acquisition(subjects[0])
 
     folder = Path(folder) if folder else data_dir.parent / 'basis_sets'
@@ -479,7 +487,7 @@ def basis_fids(subject: str = 'Sub1', data_dir: Path = DATA_DIR) -> Dict[str, np
     """
     import h5py
 
-    module = _module(data_dir)
+    module = _module(data_dir, subject)
     acquisition = module.read_acquisition(subject)
     skip = int(round(acquisition['echo_time_s'] / acquisition['dwell_time_s']))
     with h5py.File(module.mat_path(subject, need_truth=False), 'r') as f:
@@ -537,7 +545,7 @@ def pyamares_prior(folder: Optional[Path] = None, subject: str = 'Sub1',
     folder = Path(folder) if folder else data_dir.parent / 'basis_sets'
     path = folder / 'mrsi_challenge_2024_pyamares.csv'
     folder.mkdir(parents=True, exist_ok=True)
-    acquisition = _module(data_dir).read_acquisition(subject)
+    acquisition = _module(data_dir, subject).read_acquisition(subject)
     return pyamares.prior(str(path), basis_fids(subject, data_dir),
                           dwell=acquisition['dwell_time_s'],
                           frequency=acquisition['spectrometer_frequency_mhz'],

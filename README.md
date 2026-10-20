@@ -50,6 +50,7 @@ The extras are `gui` (the graphical interface), `train` (training models, Keras 
 | pyAMARES, Vespa | `pip install pyAMARES`; Vespa from [its repository](https://github.com/vespa-mrs/vespa) |
 | benchmarking | `pip install git+https://github.com/JohnLaMaster/MRSValidate.git` |
 | WAND, QuantMLP, MRS-Sim, ... | nothing: cloned at their pinned commits on first use (below) |
+| the datasets | nothing: each is downloaded on first use into `~/.mrsuite` (or `$MRSUITE_HOME`), saying so: the 2016 fitting challenge (6 MB, from the [UMN Data Repository](https://doi.org/10.13020/kw61-3j13)), an OpenNeuro subject at the snapshot MRSuite pins, an MRSI challenge subject (3.7-4.7 GB, from [Zenodo](https://doi.org/10.5281/zenodo.21890222), which needs Augmentrum: `pip install git+https://github.com/julianmer/Augmentrum.git`) |
 
 A part of MRSuite whose toolbox is missing says how to install it when first used, and
 `mrsuite-gui --check` lists what this machine has.

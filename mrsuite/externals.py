@@ -11,6 +11,7 @@
 #          it carries its own licences and is run as published. A source checkout has it as the    #
 #          externals/ submodules. An installed MRSuite clones each on first use, at the commit     #
 #          its submodule pins, into a folder of the user's ($MRSUITE_HOME, else ~/.mrsuite).       #
+#          The datasets it downloads, and what it builds and scratches, lie by the same rule.      #
 #                                                                                                  #
 ####################################################################################################
 
@@ -18,11 +19,16 @@
 #*************#
 #   imports   #
 #*************#
+import contextlib
+import hashlib
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
+import urllib.request
 from pathlib import Path
+from typing import Iterator, List, Optional
 
 # name -> (git url, commit), as the checkout's submodules pin them (a test holds them equal)
 REGISTRY = {
@@ -44,13 +50,35 @@ REGISTRY = {
 
 CHECKOUT = Path(__file__).resolve().parents[1]
 
+_FETCHING: List[str] = []       # what is downloading now, said in the GUI's status
+_UMASK = os.umask(0o022)        # read once, so what is fetched is as readable as any file made
+os.umask(_UMASK)
+
 
 #**********#
 #   home   #
 #**********#
 def home() -> Path:
     """MRSuite's own folder of the user's: $MRSUITE_HOME, else ~/.mrsuite."""
-    return Path(os.environ.get("MRSUITE_HOME", Path.home() / ".mrsuite"))
+    return Path(os.environ.get("MRSUITE_HOME", Path.home() / ".mrsuite")).expanduser().absolute()
+
+
+#**************#
+#   checkout   #
+#**************#
+def checkout() -> bool:
+    """Whether MRSuite runs from a source checkout, which has the submodules, rather than
+    as installed."""
+    return (CHECKOUT / ".gitmodules").is_file()
+
+
+#***********#
+#   local   #
+#***********#
+def local(name: str) -> Path:
+    """A folder of MRSuite's own, for what it fetches, builds or scratches: the checkout's,
+    else the user's, so an installed MRSuite never writes into its own package."""
+    return (CHECKOUT if checkout() else home()) / name
 
 
 #**********#
@@ -58,9 +86,7 @@ def home() -> Path:
 #**********#
 def root() -> Path:
     """The folder the externals lie in: the checkout's externals/, else the user's."""
-    if (CHECKOUT / ".gitmodules").is_file():
-        return CHECKOUT / "externals"
-    return home() / "externals"
+    return local("externals")
 
 
 #**********#
@@ -69,7 +95,7 @@ def root() -> Path:
 def path(name: str) -> Path:
     """Where an external lies, or will once fetched: the checkout's submodule, else a folder
     per pinned commit, so an upgraded MRSuite runs what it pins, not what an older one fetched."""
-    if (CHECKOUT / ".gitmodules").is_file():
+    if checkout():
         return root() / name
     return root() / name / REGISTRY[name][1][:12]
 
@@ -94,7 +120,7 @@ def ensure(name: str) -> Path:
     dest = path(name)
     if dest.is_dir() and any(dest.iterdir()):
         return dest
-    if (CHECKOUT / ".gitmodules").is_file():
+    if checkout():
         raise RuntimeError(f"{dest} is empty: git -C {CHECKOUT} submodule update --init "
                            f"externals/{name}")
 
@@ -111,11 +137,94 @@ def ensure(name: str) -> Path:
             if run.returncode != 0:
                 raise RuntimeError(f"fetching {name} at {commit[:7]} from {url} failed:\n"
                                    f"{run.stderr.strip()}")
-        try:
-            part.rename(dest)
-        except OSError:
-            if not (dest.is_dir() and any(dest.iterdir())):   # not another process' clone
-                raise
+        move_in(part, dest)
     finally:
         shutil.rmtree(part, ignore_errors=True)
+    return dest
+
+
+#*************#
+#   move in   #
+#*************#
+def move_in(part: Path, dest: Path) -> None:
+    """A folder made whole beside its place, moved into it; where another process moved its
+    own in first, that one stands and ``part`` is left to the caller to remove."""
+    part.chmod(0o777 & ~_UMASK)                  # a temporary folder is its owner's alone
+    try:
+        part.rename(dest)
+    except OSError:
+        if not (dest.is_dir() and any(dest.iterdir())):
+            raise
+
+
+#**************#
+#   fetching   #
+#**************#
+@contextlib.contextmanager
+def fetching(what: str, where: Path, say: bool = True) -> Iterator[None]:
+    """
+    Say what is downloading while it does: once on stderr, and in now() for the GUI.
+
+    Args:
+        what (str): What, as a person reads it, its size included.
+        where (Path): The folder it goes into.
+        say (bool): Whether to say it on stderr too; not where the fetch says it already.
+    """
+    message = f"Downloading {what} into {where}…"
+    if say:
+        print(message, file=sys.stderr, flush=True)
+    _FETCHING.append(message)
+    try:
+        yield
+    finally:
+        _FETCHING.remove(message)
+
+
+#*********#
+#   now   #
+#*********#
+def now() -> Optional[str]:
+    """What is downloading now, as fetching says it, or None."""
+    return _FETCHING[-1] if _FETCHING else None
+
+
+#**************#
+#   download   #
+#**************#
+def download(url: str, dest: Path, size: Optional[int] = None,
+             md5: Optional[str] = None) -> Path:
+    """
+    One file, written beside its place and moved in once it is whole and checked, so an
+    interrupted or corrupted download never passes for the file.
+
+    Args:
+        url (str): Where it is served.
+        dest (Path): Where it goes.
+        size (Optional[int]): Its published size in bytes, checked.
+        md5 (Optional[str]): Its published MD5, checked.
+
+    Returns:
+        Path: dest.
+
+    Raises:
+        RuntimeError: If what arrived is not the size or checksum published.
+    """
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    digest = hashlib.md5()
+    with tempfile.NamedTemporaryFile(prefix=".part", dir=dest.parent, delete=False) as part:
+        try:
+            with urllib.request.urlopen(url, timeout=120) as response:
+                while chunk := response.read(1 << 20):
+                    part.write(chunk)
+                    digest.update(chunk)
+            part.close()
+            got = os.path.getsize(part.name)
+            if size is not None and got != size:
+                raise RuntimeError(f"{url} gave {got} bytes, not the {size} published")
+            if md5 and digest.hexdigest() != md5:
+                raise RuntimeError(f"{url} does not match its published MD5 {md5}")
+            os.chmod(part.name, 0o666 & ~_UMASK)
+            os.replace(part.name, dest)
+        finally:
+            Path(part.name).unlink(missing_ok=True)
     return dest

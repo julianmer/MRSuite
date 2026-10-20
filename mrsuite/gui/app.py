@@ -30,7 +30,7 @@ from nicegui import app as nicegui, background_tasks, run, ui
 logger = logging.getLogger(__name__)
 
 from nifti_mrs_plus import NIfTI_MRS_Plus
-from mrsuite import collect
+from mrsuite import collect, externals
 from mrsuite.core.basis import Basis
 from mrsuite.gui import blocks, catalog
 from mrsuite.gui.blocks import ANY, BLOCKS, GROUPS
@@ -685,7 +685,8 @@ class App:
         if self.busy:
             self.draw()
             node = self.graph.nodes.get(self.running or "")
-            self.status.text = f"Running {node.name}…" if node else "Running…"
+            self.status.text = externals.now() or (f"Running {node.name}…" if node else
+                                                   "Running…")
 
     #***************#
     #   inspector   #

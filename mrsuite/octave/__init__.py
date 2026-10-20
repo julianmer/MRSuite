@@ -28,6 +28,7 @@ from typing import Optional
 from octave_kernel.kernel import STDIN_PROMPT
 from oct2py import Oct2Py
 
+from mrsuite import externals
 from mrsuite.octave import docker, matlab
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -121,11 +122,11 @@ class FreshExchange(Unprompted):
 def scratch(prefix: str = "mrsuite_") -> str:
     """A temporary directory both runtimes can see.
 
-    Under the repo rather than the system one: the container has only the repo
-    bind-mounted, so a /var/folders path exists on the host and nowhere else. Anything
-    Octave has to open by name has to live somewhere both agree on.
+    Under the repo, or an installed MRSuite's own folder, rather than the system one: the
+    container has only those bind-mounted, so a /var/folders path exists on the host and
+    nowhere else. Anything Octave has to open by name has to live somewhere both agree on.
     """
-    docker.TEMP_DIR.mkdir(exist_ok=True)
+    docker.TEMP_DIR.mkdir(parents=True, exist_ok=True)
     return tempfile.mkdtemp(prefix=prefix, dir=str(docker.TEMP_DIR))
 
 
@@ -205,7 +206,7 @@ def session(root: str, runtime: Optional[str] = None, verbose: bool = False) -> 
 
     if which == "docker":
         docker.start()
-        docker.TEMP_DIR.mkdir(exist_ok=True)
+        docker.TEMP_DIR.mkdir(parents=True, exist_ok=True)
         # oct2py reads OCTAVE_EXECUTABLE when it builds the engine, and nowhere else
         previous = os.environ.get("OCTAVE_EXECUTABLE")
         os.environ["OCTAVE_EXECUTABLE"] = docker.executable()
@@ -276,7 +277,7 @@ def _platform_tag(which: str, image: str) -> str:
 #*************#
 def mex_path(runtime: Optional[str] = None) -> str:
     """Directory holding the MEX files built for this runtime."""
-    return os.path.join(HERE, "mex", platform_tag(runtime))
+    return os.path.join(externals.local(".octave-mex"), platform_tag(runtime))
 
 
 #******************#

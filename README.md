@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/logo/logo.png" alt="MRSuite Logo" width="130" style="margin-bottom: -5px;"/>
+  <img src="https://raw.githubusercontent.com/julianmer/MRSuite/main/assets/logo/logo.png" alt="MRSuite Logo" width="130" style="margin-bottom: -5px;"/>
   <h1 style="margin-top: 5px; margin-bottom: 5px;">MRSuite</h1>
   <p style="margin-top: 0px;"><em>MRS Processing, Analysis, AI Model Integration, and Benchmarking</em></p>
 
@@ -35,7 +35,7 @@ MRSuite is designed to support the full MRS workflow, from raw data processing t
 MRSuite needs Python 3.11 or newer:
 
 ```bash
-pip install "mrsuite[gui] @ git+https://github.com/julianmer/MRSuite"
+pip install "mrsuite[gui]"
 ```
 
 The extras are `gui` (the graphical interface), `train` (training models, Keras 3) and `dev`
@@ -62,20 +62,24 @@ A part of MRSuite whose toolbox is missing says how to install it when first use
 A modular pipeline for preprocessing MRS data, including:
 - **Data Import**: Load data from various formats.
 - **Processing**: Choose from a collection of processing steps or add your own.
-- **Reporting**: Generate reproducible reports with detailed documentation of each step.
+- **Provenance**: Every step is recorded in the data's own processing history (NIfTI-MRS): the
+  toolbox, its exact version and every argument.
 
 ### AI Model Zoo
 A collection of (pre-trained) AI models for MRS analysis, including:
 - **Interface**: A standardized interface for integrating AI models into the processing pipeline.
-- **Model Management**: Tools for managing model versions, training, and retraining.
-- **GPU Acceleration**: Leverage GPU capabilities for faster processing.
+- **Training**: Train or retrain a model in MRSuite (`model.learn`, one Keras 3 loop, on the CPU,
+  CUDA or Apple's MPS), its recipe recorded with it.
+- **Sharing**: Push a model to the Hugging Face Hub and load anyone's by its name.
 
 ### Benchmarking Suite
 A suite of tools for benchmarking MRS processing and analysis methods, including:
-- **Performance Metrics**: Evaluate speed, accuracy, and resource usage.
-- **Comparative Analysis**: Compare different methods and configurations.
-- **Reporting**: Generate detailed reports on benchmarking results.
-- **Visualization**: Visualize performance metrics and results.
+- **Accuracy and agreement**: MRSuite's own errors (MAE, MOSAE) and every analysis of
+  [MRSValidate](https://github.com/JohnLaMaster/MRSValidate) that compares fits with the truth:
+  errors, Lin's CCC, regression, Bland-Altman, normality; per metabolite and pooled.
+- **Comparative Analysis**: Compare different methods and configurations on the same data.
+- **Score tables**: One table per measure, by method, reference and metabolite.
+- **Visualization**: A radar of the methods, a corner per aspect, and MRSValidate's plots.
 
 ### Graphical Interface
 Build an analysis from blocks wired on a canvas: read data in, a file or a whole study folder,
@@ -97,14 +101,14 @@ that makes it again.
 - **Everything shows and exports**: a preview on every block; data as NIfTI-MRS, results, figures;
   graphs in tabs, saved and opened again.
 
-![A benchmark in the GUI: the 2016 challenge into LCModel, FSL-MRS, spant, WAND then LCModel, and QuantMLP, scored on five aspects and drawn on a radar](assets/gui/benchmark.png)
+![A benchmark in the GUI: the 2016 challenge into LCModel, FSL-MRS, spant, WAND then LCModel, and QuantMLP, scored on five aspects and drawn on a radar](https://raw.githubusercontent.com/julianmer/MRSuite/main/assets/gui/benchmark.png)
 
-![In vivo processing in the GUI: COWS (OpenNeuro ds006812) through FSL-MRS, FID-A and spant into LCModel](assets/gui/processing.png)
+![In vivo processing in the GUI: COWS (OpenNeuro ds006812) through FSL-MRS, FID-A and spant into LCModel](https://raw.githubusercontent.com/julianmer/MRSuite/main/assets/gui/processing.png)
 
 Start it with one command:
 
 ```bash
-uvx --from "mrsuite[gui] @ git+https://github.com/julianmer/MRSuite" mrsuite-gui
+uvx --from "mrsuite[gui]" mrsuite-gui
 ```
 
 It opens a window of its own, or the browser where none can open (`--browser` asks for it);
@@ -112,10 +116,13 @@ It opens a window of its own, or the browser where none can open (`--browser` as
 
 ### Reporting Standards
 A set of standards for generating reproducible reports, including:
-- **Documentation**: Automatically document each step of the processing pipeline.
-- **Contribution List**: Construct a list of contributors for the utilized modules.
-- **Version Control**: Track changes to modules versions and hardware specifications.
-- **Contribution Guidelines**: Clear guidelines for contributing new modules and improvements.
+- **Documentation**: Each step of the processing pipeline is documented automatically, in the
+  data's history.
+- **Training recipes**: A trained model carries how its training spectra were made, reported as
+  the MRSsynMRS minimum standard for synthetic data.
+- **Contribution Guidelines**:
+  [CONTRIBUTING.md](https://github.com/julianmer/MRSuite/blob/main/CONTRIBUTING.md) says how to
+  add a method, check it, and share a trained model.
 
 
 ## External Tools and Their Licences

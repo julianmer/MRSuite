@@ -1,0 +1,40 @@
+####################################################################################################
+# Publishes MRSuite to PyPI when a version tag ("v0.1.0"; mrsuite/__init__.py's __version__ is
+# the source of truth) is pushed. Trusted publishing: PyPI trusts this workflow in the "pypi"
+# environment, so no token is stored. The wheel holds MRSuite alone; the toolboxes, models and
+# datasets it uses come on first use (see mrsuite/externals.py).
+####################################################################################################
+name: release
+
+on:
+  push:
+    tags: ['v[0-9]*']
+
+permissions:
+  contents: read
+
+jobs:
+  pypi:
+    name: publish to PyPI
+    runs-on: ubuntu-24.04
+    environment: pypi
+    permissions:
+      id-token: write          # trusted publishing
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Check that the tag matches the package version
+        # Read the file as text: importing the package would need its dependencies installed.
+        run: |
+          version=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' mrsuite/__init__.py)
+          [ "v${version}" = "${GITHUB_REF_NAME}" ] \
+            || { echo "tag ${GITHUB_REF_NAME} but mrsuite/__init__.py says ${version}" >&2; exit 1; }
+
+      - name: Build sdist and wheel
+        run: pip install -q build && python -m build
+
+      - uses: pypa/gh-action-pypi-publish@release/v1

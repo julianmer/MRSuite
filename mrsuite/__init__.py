@@ -26,7 +26,7 @@ import nifti_mrs_plus
 
 from mrsuite.core.method import Method, method
 
-__version__ = "0.1.0a0"
+__version__ = "0.1.0"
 
 # Same pattern as Augmentrum: stamp the shared wrapper's provenance metadata so
 # processed data records which toolbox touched it.

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mrsuite"
-version = "0.1.0a0"
+dynamic = ["version"]           # mrsuite.__version__, the one place it is written
 description = "MRS Processing, Analysis, AI Model Integration, and Benchmarking"
 readme = "README.md"
 license = "MIT"
@@ -12,11 +12,7 @@ requires-python = ">=3.11"
 authors = [{ name = "Julian P. Merkofer", email = "j.p.merkofer@tue.nl" }]
 keywords = ["MRS", "magnetic resonance spectroscopy", "NIfTI-MRS", "fitting"]
 
-# Private for now. PyPI rejects any distribution carrying a "Private ::" classifier,
-# so this makes an accidental `twine upload` fail instead of publishing. Remove this
-# line (and nothing else) when the project is ready to go public.
 classifiers = [
-    "Private :: Do Not Upload",
     "Development Status :: 3 - Alpha",
     "Programming Language :: Python :: 3",
     "Intended Audience :: Science/Research",
@@ -52,6 +48,9 @@ mrsuite-gui = "mrsuite.gui.__main__:main"
 
 [project.urls]
 Repository = "https://github.com/julianmer/MRSuite"
+
+[tool.setuptools.dynamic]
+version = {attr = "mrsuite.__version__"}
 
 [tool.setuptools.packages.find]
 include = ["mrsuite*"]

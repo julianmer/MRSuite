@@ -178,6 +178,7 @@ def load(n: Optional[int] = None, root: Path = ROOT,
 
         Each spectrum's processing history starts with the file it was read from.
     """
+    import mrsuite.bridges.fsl_mrs        # where FSL-MRS is missing, says how to install it
     import fsl_mrs
     from fsl_mrs.utils import mrs_io
 

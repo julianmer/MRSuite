@@ -168,6 +168,8 @@ def _run_job(folder: Path, method: Any, dataset: Any, job: Any, workers: int, ra
 
     def fit(indices: List[int]) -> List[FitResult]:
         kwargs = dict(method.options)
+        if method.timeout is not None:
+            kwargs["timeout"] = method.timeout
         if water is not None:
             kwargs.update(method.water, water=NIfTI_MRS_Plus([water[i] for i in indices]))
         return method.fit(NIfTI_MRS_Plus([items[i] for i in indices]), *method.args(dataset),

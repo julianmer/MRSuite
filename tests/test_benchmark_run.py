@@ -136,10 +136,17 @@ def test_a_crash_loses_one_chunk_and_the_rerun_fits_only_the_rest(tmp_path):
 #   failing   #
 #*************#
 @needs_2016
-def test_an_osprey_fit_is_given_half_an_hour():
-    """A crawling Osprey fit ends as a failed spectrum, before and after WAND alike."""
-    assert config.METHODS["osprey"].options == {"timeout": 1800}
-    assert config.METHODS["wand-osprey"].options == {"timeout": 1800}
+def test_an_osprey_fit_is_given_half_an_hour(tmp_path):
+    """A crawling Osprey fit ends as a failed spectrum, before and after WAND alike; the
+    limit is the run's, so a job fitted without one resumes under it."""
+    assert config.METHODS["osprey"].timeout == 1800
+    assert config.METHODS["wand-osprey"].timeout == 1800
+    assert "timeout" not in config.METHODS["osprey"].options
+
+    _toy_run(tmp_path)
+    CALLS.clear()
+    _toy_run(tmp_path, methods={"toy": config.Fit(toy, chunk=1, timeout=5)})
+    assert CALLS == [] and run.read(tmp_path / "challenge2016" / "toy")[1] == {}
 
 
 def test_a_failed_spectrum_is_recorded_scored_as_omitted_and_retried(tmp_path):

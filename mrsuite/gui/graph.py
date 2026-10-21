@@ -862,7 +862,7 @@ def results(value: Any) -> bool:
 #   traces   #
 #************#
 def traces(spectrum: Any, limit: int = 64, spread: Optional[str] = None,
-           stack: float = 0.0) -> Tuple[np.ndarray, List[np.ndarray], List[str]]:
+           stack: float = 0.0, magnitude: bool = False) -> Tuple[np.ndarray, List[np.ndarray], List[str]]:
     """
     A spectrum's real part on its ppm axis, one trace per element of one higher dimension
     (its first by default), at most ``limit``; a basis set's, one per metabolite, by name.
@@ -875,6 +875,7 @@ def traces(spectrum: Any, limit: int = 64, spread: Optional[str] = None,
             (DIM_DYN) and taken at their first element otherwise.
         stack (float): How far each trace sits above the one before, as a fraction of
             the largest amplitude; 0 draws them over each other.
+        magnitude (bool): The magnitude in place of the real part.
 
     Returns:
         The ppm axis, the traces and a label for each, e.g. 'coil 3'.
@@ -895,7 +896,7 @@ def traces(spectrum: Any, limit: int = 64, spread: Optional[str] = None,
     hz = np.fft.fftshift(np.fft.fftfreq(n, dwell))
     ppm = hz / spectrum.spectrometer_frequency[0] + spectrum.SpecFreqChemShift   # by nucleus
     count = min(specs.shape[1], limit)
-    ys = [specs[:, j].real for j in range(count)]
+    ys = [np.abs(specs[:, j]) if magnitude else specs[:, j].real for j in range(count)]
     if stack and count > 1:
         step = stack * max(float(np.abs(y).max()) for y in ys)
         ys = [y + j * step for j, y in enumerate(ys)]
@@ -926,7 +927,9 @@ def table(result: FitResult) -> Tuple[List[str], List[List[Any]]]:
 def thumb(value: Any, points: int = 120) -> Dict[str, Any]:
     """
     A small picture of a value, for its block: a spectrum's mean real part over 0.5-4.2 ppm
-    where it covers them, ppm falling, scaled to 0-1; a basis set's spectra the same way,
+    where it covers them, ppm falling, scaled to 0-1, in magnitude while it still has coils
+    or averages to combine (raw coils differ in phase: their real parts cancel); a basis
+    set's spectra the same way,
     stacked one above the other as a basis set is shown; a fit's largest concentrations as
     bars; anything else in a few words.
     """
@@ -939,7 +942,8 @@ def thumb(value: Any, points: int = 120) -> Dict[str, Any]:
                 for y in ys]
 
     if isinstance(value, NIfTI_MRS_Plus) and len(value):
-        ppm, ys, _ = traces(value.list()[0])
+        first = value.list()[0]
+        ppm, ys, _ = traces(first, magnitude=first.ndim > 4)
         y, = picture(ppm, [np.mean(ys, axis=0)])
         span = np.ptp(y) or 1.0
         return {"kind": "line", "y": [round(float(v), 3) for v in (y - y.min()) / span]}

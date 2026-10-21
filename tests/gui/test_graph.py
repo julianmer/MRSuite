@@ -859,6 +859,26 @@ def test_a_thumbnail_shows_from_half_a_ppm():
     assert np.argmax(y) / len(y) == pytest.approx((4.2 - 2.0) / (4.2 - 0.5), abs=0.02)
 
 
+def test_a_thumbnail_of_raw_coils_is_their_magnitude():
+    """Two coils in opposite phase: their real parts cancel, their magnitudes show the peak;
+    one spectrum, with no coils or averages left, is drawn by its real part (a dispersive
+    one goes below zero)."""
+    from nifti_mrs.create_nmrs import gen_nifti_mrs
+    from nifti_mrs_plus import NIfTI_MRS_Plus
+
+    t, sf = np.arange(2048) * 2.5e-4, 123.2
+    fid = np.exp(2j * np.pi * (2.0 - 4.65) * sf * t - t / 0.05)
+    coils = np.stack([fid, -fid], axis=-1).reshape(1, 1, 1, -1, 2)
+    raw = gen_nifti_mrs(coils, 2.5e-4, sf, dim_tags=["DIM_COIL", None, None])
+    one = gen_nifti_mrs((1j * fid).reshape(1, 1, 1, -1), 2.5e-4, sf)
+
+    y = thumb(NIfTI_MRS_Plus([raw]))["y"]
+    assert np.argmax(y) / len(y) == pytest.approx((4.2 - 2.0) / (4.2 - 0.5), abs=0.02)
+    _, cancelled, _ = traces(raw)
+    assert np.abs(np.mean(cancelled, axis=0)).max() < 1e-9, "real parts cancel"
+    assert traces(one)[1][0].min() < 0 < traces(one)[1][0].max(), "one spectrum: real part"
+
+
 #****************#
 #   call lines   #
 #****************#

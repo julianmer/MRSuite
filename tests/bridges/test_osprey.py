@@ -156,6 +156,25 @@ def test_fit_options_fill_what_fit_runFit_leaves_out():
     assert bridge.fit_options(range=[0.5, 4.0])["range"] == [0.5, 4.0]
 
 
+def test_a_fit_hands_its_timeout_to_octave(spectrum, monkeypatch):
+    """The seconds a fit may take go with the Octave call, so a crawling fit is interrupted."""
+    from types import SimpleNamespace
+    from mrsuite.bridges import osprey
+
+    calls = []
+
+    def run_fit(*args, **kwargs):
+        calls.append(kwargs)
+        raise RuntimeError("stop here")
+
+    real = osprey.bridge
+    monkeypatch.setattr(osprey, "bridge", SimpleNamespace(
+        codec=real.codec, fit_options=real.fit_options, fit_runFit=run_fit))
+    with pytest.raises(RuntimeError, match="stop here"):
+        osprey.fit(spectrum, {"specs": np.ones((4, 1)), "specs_max": 1.0}, timeout=7)
+    assert calls[0]["timeout"] == 7 and calls[0]["nout"] == 2
+
+
 #***************#
 #   discovery   #
 #***************#

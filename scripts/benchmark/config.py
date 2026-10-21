@@ -222,6 +222,10 @@ FITS = {"fsl_mrs": fsl_mrs.fit, "lcmodel": lcmodel.fit, "tarquin": tarquin.fit,
         "spant": spant.fit, "osprey": osprey.fit}
 
 METHODS = {name: Fit(fit, chunk=CHUNK[name]) for name, fit in FITS.items()}
+# Osprey's fit can crawl for hours on one spectrum (its LM at a bound: a WAND-cleaned 2016
+# spectrum stalled the stage for days), and a chunk is written only once every fit returns;
+# half an hour for a worker's five is ten times the usual, and the spectrum is a failure
+METHODS["osprey"] = replace(METHODS["osprey"], options={"timeout": 1800})
 METHODS.update({f"{name}-water": Fit(FITS[name], water=options, chunk=CHUNK[name])
                 for name, options in challenge2016.WATER.items()})
 # Vespa and pyAMARES take the challenge's priors in place of a basis, ~450 s and ~400 s per

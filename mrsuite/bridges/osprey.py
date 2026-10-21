@@ -466,7 +466,7 @@ def _basis(path: str, mtime: float) -> Any:
 @method("Osprey", version=lambda: bridge.version(), runtime=lambda: bridge.runtime(),
         name="fit_runFit", parallel=True)      # per call: a caller may swap in a MATLAB bridge
 def fit(data: Any, basis: Any, fit_opts: Optional[dict] = None,
-        crlb: bool = False) -> Any:
+        crlb: bool = False, timeout: Optional[float] = None) -> Any:
     """
     Fit with Osprey, as MRSuite's uniform result.
 
@@ -483,6 +483,8 @@ def fit(data: Any, basis: Any, fit_opts: Optional[dict] = None,
             Osprey's own macromolecules and lipids: a basis handed to all fitters brings
             its own, and adding Osprey's would fit them twice.
         fit_opts (Optional[dict]): Overrides for ``bridge.fit_options()``.
+        timeout (Optional[float]): Seconds the fit may take in Octave, for the batch;
+            interrupted after that, as an error. None waits for it.
         crlb (bool): Also run fit_Osprey_CRLB. Off by default, and left that way: the
             fit does not produce bounds, because Osprey computes them in its quantify
             stage against data the fit has already zero-filled and re-splined, so the
@@ -507,12 +509,13 @@ def fit(data: Any, basis: Any, fit_opts: Optional[dict] = None,
     struct["fids"] = np.asarray(struct["fids"]) / scale
     struct["specs"] = np.asarray(struct["specs"]) / scale
 
-    params, res_basis = bridge.fit_runFit(struct, basis, "Osprey", opts, nout=2)
+    params, res_basis = bridge.fit_runFit(struct, basis, "Osprey", opts, nout=2,
+                                          timeout=timeout)
     bounds = None
     if crlb:
         _, _, bounds = bridge.fit_Osprey_CRLB(
             struct, basis, opts["bLineKnotSpace"], opts["range"], params,
-            float(np.asarray(params["refShift"]).ravel()[0]), nout=3)
+            float(np.asarray(params["refShift"]).ravel()[0]), nout=3, timeout=timeout)
     return to_result(params, res_basis, bounds, scale=scale)
 
 

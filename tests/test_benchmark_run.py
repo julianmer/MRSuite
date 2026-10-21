@@ -136,6 +136,12 @@ def test_a_crash_loses_one_chunk_and_the_rerun_fits_only_the_rest(tmp_path):
 #   failing   #
 #*************#
 @needs_2016
+def test_an_osprey_fit_is_given_half_an_hour():
+    """A crawling Osprey fit ends as a failed spectrum, before and after WAND alike."""
+    assert config.METHODS["osprey"].options == {"timeout": 1800}
+    assert config.METHODS["wand-osprey"].options == {"timeout": 1800}
+
+
 def test_a_failed_spectrum_is_recorded_scored_as_omitted_and_retried(tmp_path):
     data, _, _ = challenge2016.load(3)
     BROKEN.add(float(abs(data.list()[1][:].ravel()[0])))

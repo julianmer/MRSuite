@@ -36,6 +36,7 @@ def _slice():
 def test_the_voxels_come_apart_placed_and_noted():
     spectra, index = mrsi.voxels(_slice())
     assert len(spectra) == 5 and index.shape == (5, 3) and [2, 1, 0] not in index.tolist()
+    assert index[0].tolist() == [1, 1, 0] and index[-1].tolist() == [0, 0, 0], "strongest first"
     one = spectra.list()[-1]
     assert one.shape == (1, 1, 1, 256) and one.hdr_ext["EchoTime"] == 0.03
     assert np.allclose(np.asarray(one.voxToWorldMat)[:3, 3], [-15.0 + 10 * index[-1][0],
@@ -47,7 +48,10 @@ def test_the_voxels_come_apart_placed_and_noted():
     mask = np.zeros((3, 2, 1), bool)
     mask[0, 0, 0] = mask[2, 1, 0] = True
     masked, where = mrsi.voxels(_slice(), mask=mask)
-    assert len(masked) == 2 and where.tolist() == [[0, 0, 0], [2, 1, 0]], "the mask, as it is"
+    assert len(masked) == 2 and where.tolist() == [[0, 0, 0], [2, 1, 0]], "the mask as it is, empty last"
+    mask[1, 1, 0] = True
+    _, where = mrsi.voxels(_slice(), mask=mask)
+    assert where.tolist() == [[1, 1, 0], [0, 0, 0], [2, 1, 0]], "strongest first, empty last"
 
 
 def test_the_fits_go_back_on_the_grid_as_maps():

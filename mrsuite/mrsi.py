@@ -68,18 +68,20 @@ def voxels(spectra: Any, mask: Optional[np.ndarray] = None,
             fraction of the strongest voxel's are left out; 0 leaves out only empty voxels.
 
     Returns:
-        Tuple[NIfTI_MRS_Plus, np.ndarray]: One spectrum per voxel, the header carried over
-        and the voxel noted in each one's history, placed where the voxel is; and the
-        (n, 3) voxel indices on the grid, in the spectra's order.
+        Tuple[NIfTI_MRS_Plus, np.ndarray]: One spectrum per voxel, the strongest first (so
+        the batch's first spectrum, the one previews show, is a telling one), the header
+        carried over and the voxel noted in each one's history, placed where the voxel is;
+        and the (n, 3) voxel indices on the grid, in the spectra's order.
     """
     item = spectra.list()[0] if isinstance(spectra, NIfTI_MRS_Plus) else spectra
     data = np.asarray(item[:])                                  # (x, y, z, points, ...)
+    strength = signal(item)
     if mask is not None:
         index = np.argwhere(np.asarray(mask).reshape(data.shape[:3]))
     else:
-        strength = signal(item)
         index = np.argwhere(strength > threshold * strength.max()) if strength.max() > 0 \
             else np.argwhere(np.ones(data.shape[:3], bool))
+    index = index[np.argsort(-strength[tuple(index.T)], kind="stable")]
     affine, out = np.asarray(item.voxToWorldMat), []
     for x, y, z in index:
         placed = affine.copy()

@@ -214,7 +214,8 @@ def test_a_basis_set_comes_through_as_it_was(home):
     before, after = read_basis(str(BASIS_2016)), read_basis(str(basis.lcmodel()))
 
     assert list(after.names) == list(before.names) and len(basis.names) == 21
-    assert np.array_equal(after.original_basis_array, before.original_basis_array)
+    A, B = after.original_basis_array, before.original_basis_array    # to print precision
+    assert np.abs(A - B).max() < 1e-5 * np.abs(B).max()
     assert (basis.bandwidth, basis.frequency, basis.te) == (4000, 123.261703, -1)
     assert basis.source["format"] == "LCModel .BASIS"
     assert basis.source["files"] == [provenance.portable_file(BASIS_2016)]
@@ -456,7 +457,8 @@ def test_a_basis_set_in_another_format_is_lcmodels_own():
     written = read_basis(str(basis.lcmodel()))
     fid = written.original_basis_array[:, list(written.names).index("NAA")]
     raw = np.asarray(lcm_io.readLCModelRaw(str(SAMPLES / "LCModel" / "raw_files" / "NAA.raw"))[0])
-    raw = raw.ravel()[:len(fid)]
+    raw = raw.ravel()
+    fid = fid[:len(raw)]                         # the .BASIS is zero-filled to twice its length
     scale = np.vdot(raw, fid) / np.vdot(raw, raw)
 
     assert len(basis.names) == 23 and basis.source["format"] == "jMRUI .txt"

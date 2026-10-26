@@ -33,7 +33,7 @@ from typing import Iterator, List, Optional
 # name -> (git url, commit), as the checkout's submodules pin them (a test holds them equal)
 REGISTRY = {
     "basic": ("https://github.com/julianmer/BasiC.git",
-              "3d7ae2ecb9d3918582d5cba7e7576c07b6494de6"),
+              "e53037b3f0f59eaa812c02ae365e156b3d16e9ab"),
     "fid-a": ("https://github.com/CIC-methods/FID-A.git",
               "1eaa2075625745beb7632f608dc2947b73295309"),
     "mrs-sim": ("https://github.com/JohnLaMaster/MRS-Sim.git",

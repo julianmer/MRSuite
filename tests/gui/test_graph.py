@@ -208,7 +208,8 @@ def test_a_basis_set_block_gives_a_fit_its_basis(tmp_path, monkeypatch):
     assert made.names == namespace["basis"].names and len(made.names) == 21
     assert made.checksum() == namespace["basis"].checksum()
     conc = [r.conc("raw") for r in graph.output(fit)]
-    assert conc == [r.conc("raw") for r in graph.output(given)]
+    assert conc == [pytest.approx(r.conc("raw"), rel=1e-3)          # basis to print precision
+                    for r in graph.output(given)]
     assert conc == [r.conc("raw") for r in namespace["fsl_mrs_fit"]]
     said = json.loads(graph.output(fit)[0].provenance[-1]["Details"])
     assert said["kwargs"]["basis"]["basis"]["sha256"] == made.checksum()

@@ -25,9 +25,10 @@ import os
 import warnings
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
+from nifti_mrs_plus import NIfTI_MRS_Plus
 
 try:
     from fsl_mrs.utils.preproc import nifti_mrs_proc
@@ -435,6 +436,111 @@ def to_result(res: Any) -> FitResult:
                               ("percentage", "raw", "internal", "molarity", "molality")),
         qc=qc,
         raw=res)
+
+
+#**************#
+#   fit mrsi   #
+#**************#
+def fit_mrsi(data: Any, basis: Any, mask: Any = None, ppmlim: tuple = (0.2, 4.2),
+             baseline_order: int = 2, algo: str = "Newton", workers: Optional[int] = None,
+             **options: Any) -> Tuple[List[FitResult], np.ndarray]:
+    """
+    FSL-MRS's MRSI fit, ``fsl_mrsi``, on a spatial NIfTI-MRS: every voxel fitted inside
+    FSL-MRS, in parallel, and the maps it writes read back as MRSuite's results, one per
+    fitted voxel, with their indices on the grid, as ``mrsi.voxels`` gives them (the
+    strongest voxel first).
+
+    Args:
+        data: NIfTI-MRS+ holding the slice or volume, or the NIfTI-MRS itself.
+        basis: A Basis, or a basis file or folder FSL-MRS reads.
+        mask: The voxels to fit: an array on the grid (a brain mask), or a NIfTI file;
+            every voxel when None.
+        ppmlim (tuple): The fitted ppm range.
+        baseline_order (int): Of FSL-MRS's polynomial baseline.
+        algo (str): 'Newton' or 'MH'.
+        workers (Optional[int]): Cores for FSL-MRS's parallel fit; all when None.
+        **options: Further ``fsl_mrsi`` flags by name, e.g. ``h2o='water.nii.gz'``,
+            ``tissue_frac=['csf.nii.gz', 'gm.nii.gz', 'wm.nii.gz']``, ``lorentzian=True``.
+
+    Returns:
+        Tuple[List[FitResult], np.ndarray]: The fits, concentrations by scaling ('raw',
+        'internal', and 'molarity' and 'molality' with a water reference), the percentage
+        uncertainties, the mean SNR and FWHM as QC, the data's history and this call in
+        their provenance; and the (n, 3) voxel indices, in the fits' order.
+
+    Raises:
+        RuntimeError: If fsl_mrsi fails, with what it said.
+    """
+    import subprocess
+    import sys
+    import tempfile
+    import nibabel as nib
+    from mrsuite.core import provenance
+    from mrsuite.mrsi import signal
+
+    item = data.list()[0] if isinstance(data, NIfTI_MRS_Plus) else data
+    folder = Path(tempfile.mkdtemp(prefix="mrsuite_fsl_mrsi_"))
+    _fsl(item).save(str(folder / "data.nii.gz"))
+    command = [sys.executable, "-c", "from fsl_mrs.scripts.fsl_mrsi import main; main()",
+               "--data", str(folder / "data.nii.gz"), "--basis", str(as_file(basis)),
+               "--output", str(folder / "fit"), "--ppmlim", str(ppmlim[0]), str(ppmlim[1]),
+               "--baseline_order", str(baseline_order), "--algo", algo, "--overwrite"]
+    grid = tuple(item.shape[:3])
+    if mask is not None and not isinstance(mask, (str, Path)):
+        chosen = np.asarray(mask).reshape(grid).astype(bool)
+        nib.save(nib.Nifti1Image(chosen.astype(np.uint8), np.asarray(item.voxToWorldMat)),
+                 str(folder / "mask.nii.gz"))
+        mask = folder / "mask.nii.gz"
+    elif mask is not None:
+        chosen = np.asarray(nib.load(str(mask)).dataobj).reshape(grid) > 0
+    else:
+        chosen = np.ones(grid, bool)
+    if mask is not None:
+        command += ["--mask", str(mask)]
+    if workers is not None:
+        command += ["--parallel", "local", "--parallel-workers", str(int(workers))]
+    for key, value in options.items():
+        if value is True:
+            command.append(f"--{key}")
+        elif value not in (False, None):
+            command += [f"--{key}", *map(str, value if isinstance(value, (list, tuple))
+                                            else [value])]
+    run = subprocess.run(command, capture_output=True, text=True)
+    if run.returncode != 0:
+        raise RuntimeError(f"fsl_mrsi failed:\n{run.stderr[-3000:]}")
+
+    def maps(sub: Path, suffix: str = "") -> Dict[str, np.ndarray]:
+        """The .nii.gz maps of a folder by metabolite, the suffix taken off the name."""
+        return {f.name[:-len(".nii.gz")].removesuffix(suffix): np.asarray(nib.load(str(f)).dataobj)
+                for f in sorted(sub.glob("*.nii.gz"))} if sub.is_dir() else {}
+
+    out = folder / "fit"
+    concentrations = {scale.name: maps(scale) for scale in sorted((out / "concs").iterdir())
+                      if scale.is_dir()}
+    percentage = maps(out / "uncertainties", "_sd")
+    snr, fwhm = maps(out / "qc", "_snr"), maps(out / "qc", "_fwhm")
+    snr = {k: v for k, v in snr.items() if not k.endswith("_fwhm")}
+    fwhm = {k: v for k, v in fwhm.items() if not k.endswith("_snr")}
+    metabolites = list(concentrations.get("raw", {}))
+    index = np.argwhere(chosen)
+    index = index[np.argsort(-signal(item)[tuple(index.T)], kind="stable")]
+    entry = provenance.entry("FSL-MRS", bridge.version(), "fsl_mrsi",
+                             {"ppmlim": list(ppmlim), "baseline_order": baseline_order,
+                              "algo": algo, "workers": workers, "mask": mask is not None,
+                              **{k: str(v) for k, v in options.items()}})
+    history = provenance.history(item)
+    results = []
+    for x, y, z in index:
+        at = (x, y, z)
+        results.append(FitResult(
+            method="fsl_mrs:fsl_mrsi", metabolites=metabolites,
+            concentrations={scale: {m: float(v[at]) for m, v in by.items()}
+                            for scale, by in concentrations.items()},
+            uncertainties={"percentage": {m: float(v[at]) for m, v in percentage.items()}},
+            qc={"snr": float(np.mean([v[at] for v in snr.values()])) if snr else float("nan"),
+                "fwhm": float(np.mean([v[at] for v in fwhm.values()])) if fwhm else float("nan")},
+            provenance=history + [entry], raw={"folder": str(out), "voxel": list(map(int, at))}))
+    return results, index
 
 
 #************#

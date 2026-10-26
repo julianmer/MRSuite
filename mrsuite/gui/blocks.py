@@ -801,6 +801,14 @@ BLOCKS: Dict[str, Block] = {b.key: b for b in [
           outputs=(Port("spectra", SPECTRA), Port("index")),
           help="The grid's voxels inside a mask (the brain's) as single-voxel spectra, and "
                "their indices, for the maps."),
+    Block("mrsi-fit", "mrsi", "MRSI fit", call="fsl_mrs.fit_mrsi",
+          imports=("from mrsuite.bridges import fsl_mrs",),
+          inputs=(Port("spectra", SPECTRA), Port("basis", BASIS), Port("mask")),
+          fields=(_value("ppmlim", "(0.2, 4.2)"), _value("baseline_order", "2"),
+                  _choice("algo", ["Newton", "MH"], "'Newton'"), _value("workers", "None")),
+          outputs=(Port("results", RESULTS), Port("index")),
+          help="FSL-MRS's fsl_mrsi on the whole grid: every voxel in the mask fitted inside "
+               "FSL-MRS, in parallel; the fits and their indices, for the maps."),
     Block("maps", "mrsi", "Metabolite maps", call="mrsi.maps",
           imports=("from mrsuite import mrsi",),
           inputs=(Port("results", RESULTS), Port("index")),

@@ -40,5 +40,6 @@ def test_fsl_mrsi_fits_a_grid_voxel_by_voxel():
     assert set(first.concentrations) >= {"raw", "internal"}
     assert first.crlb()["NAA"] > 0 and np.isfinite(first.qc["snr"])
     assert first.provenance[-1]["Program"] == "FSL-MRS" and first.provenance[-1]["Method"] == "fsl_mrsi"
+    assert '"internal_ref": ["Cr", "PCr"]' in first.provenance[-1]["Details"], "the reference the basis has"
     weaker = next(r for r, at in zip(results, index.tolist()) if at == [0, 0, 0])
     assert first.concentrations["raw"]["NAA"] > 2 * weaker.concentrations["raw"]["NAA"], "scaled thrice"

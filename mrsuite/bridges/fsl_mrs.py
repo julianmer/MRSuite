@@ -25,12 +25,13 @@ import os
 import warnings
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 from nifti_mrs_plus import NIfTI_MRS_Plus
 
 try:
+    from fsl_mrs.utils import mrs_io
     from fsl_mrs.utils.preproc import nifti_mrs_proc
     from fsl_mrs.utils.preproc import mrsi as mrsi_proc
 except ModuleNotFoundError as err:
@@ -40,7 +41,7 @@ except ModuleNotFoundError as err:
                       "https://fsl.fmrib.ox.ac.uk/fsldownloads/fslconda/public/ fsl_mrs") from err
 
 from mrsuite.bridges.base import Bridge, defaults
-from mrsuite.core.basis import as_file
+from mrsuite.core.basis import Basis, as_file
 from mrsuite.core.method import method
 from mrsuite.core.result import FitResult
 
@@ -286,7 +287,6 @@ def _defaulted(target: Callable, given: Dict[str, Any]) -> Callable:
 def _basis(path: str, mtime: float) -> Any:
     """A basis file, read once per process and version of the file: a batch is fitted
     spectrum by spectrum, and reading the basis for each would dominate a quick fit."""
-    from fsl_mrs.utils import mrs_io
     return mrs_io.read_basis(path)
 
 
@@ -443,6 +443,7 @@ def to_result(res: Any) -> FitResult:
 #**************#
 def fit_mrsi(data: Any, basis: Any, mask: Any = None, ppmlim: tuple = (0.2, 4.2),
              baseline_order: int = 2, algo: str = "Newton", workers: Optional[int] = None,
+             internal_ref: Optional[Sequence[str]] = None,
              **options: Any) -> Tuple[List[FitResult], np.ndarray]:
     """
     FSL-MRS's MRSI fit, ``fsl_mrsi``, on a spatial NIfTI-MRS: every voxel fitted inside
@@ -459,6 +460,9 @@ def fit_mrsi(data: Any, basis: Any, mask: Any = None, ppmlim: tuple = (0.2, 4.2)
         baseline_order (int): Of FSL-MRS's polynomial baseline.
         algo (str): 'Newton' or 'MH'.
         workers (Optional[int]): Cores for FSL-MRS's parallel fit; all when None.
+        internal_ref (Optional[Sequence[str]]): The metabolites summed as the internal
+            reference; those of Cr and PCr the basis has when None (FSL-MRS's own default
+            names both and refuses a basis missing one).
         **options: Further ``fsl_mrsi`` flags by name, e.g. ``h2o='water.nii.gz'``,
             ``tissue_frac=['csf.nii.gz', 'gm.nii.gz', 'wm.nii.gz']``, ``lorentzian=True``.
 
@@ -481,10 +485,15 @@ def fit_mrsi(data: Any, basis: Any, mask: Any = None, ppmlim: tuple = (0.2, 4.2)
     item = data.list()[0] if isinstance(data, NIfTI_MRS_Plus) else data
     folder = Path(tempfile.mkdtemp(prefix="mrsuite_fsl_mrsi_"))
     _fsl(item).save(str(folder / "data.nii.gz"))
+    names = list(basis.names) if isinstance(basis, Basis) else \
+        list(mrs_io.read_basis(str(basis)).names)
+    reference = list(internal_ref) if internal_ref else [m for m in ("Cr", "PCr") if m in names]
     command = [sys.executable, "-c", "from fsl_mrs.scripts.fsl_mrsi import main; main()",
                "--data", str(folder / "data.nii.gz"), "--basis", str(as_file(basis)),
                "--output", str(folder / "fit"), "--ppmlim", str(ppmlim[0]), str(ppmlim[1]),
                "--baseline_order", str(baseline_order), "--algo", algo, "--overwrite"]
+    if reference:
+        command += ["--internal_ref", *reference]
     grid = tuple(item.shape[:3])
     if mask is not None and not isinstance(mask, (str, Path)):
         chosen = np.asarray(mask).reshape(grid).astype(bool)
@@ -527,6 +536,7 @@ def fit_mrsi(data: Any, basis: Any, mask: Any = None, ppmlim: tuple = (0.2, 4.2)
     entry = provenance.entry("FSL-MRS", bridge.version(), "fsl_mrsi",
                              {"ppmlim": list(ppmlim), "baseline_order": baseline_order,
                               "algo": algo, "workers": workers, "mask": mask is not None,
+                              "internal_ref": reference,
                               **{k: str(v) for k, v in options.items()}})
     history = provenance.history(item)
     results = []

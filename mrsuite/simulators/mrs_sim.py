@@ -57,11 +57,16 @@ def config(name: str = "coil_combined_with_artifacts") -> Dict[str, Any]:
         name (str): The file in MRS-Sim's ``src/config/predefined``, without '.json'. At
             the pinned commit 'coil_combined_with_artifacts' and 'denoising_dataset'
             simulate; three others need several coils, which this driver does not take
-            apart yet, and the rest predate MRS-Sim's code.
+            apart yet, and the rest predate MRS-Sim's code. Or 'ismrm2016': the 2016
+            fitting challenge's own distribution (``challenge2016.mrs_sim_config``), clean
+            spectra on the challenge's basis.
 
     Returns:
         Dict[str, Any]: The config, as MRS-Sim reads it.
     """
+    if name == "ismrm2016":
+        from mrsuite.datasets import challenge2016
+        return challenge2016.mrs_sim_config()
     with open(externals.ensure("mrs-sim") / "src" / "config" / "predefined" / f"{name}.json") as fh:
         return json.load(fh)
 

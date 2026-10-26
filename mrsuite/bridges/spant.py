@@ -60,10 +60,16 @@ def _read_back(path: str, source: NIFTI_MRS) -> NIFTI_MRS:
         # the dimensions are unchanged, though spant writes length-one ones away
         samples, tags = samples.reshape(source.shape), list(source.dim_tags)
     else:
+        # spant's own layout: a dimension for every one it knows, of length one where the
+        # data have none (a coil dimension before the transients); only those with
+        # elements are dimensions of the data
         tags = []
         for n in range(5, samples.ndim + 1):
             tag = fields.get(f"dim_{n}")
             tags.append(tag[0] if isinstance(tag, list) else tag)
+        kept = [k for k in range(samples.ndim - 4) if samples.shape[4 + k] > 1]
+        samples = samples.reshape(samples.shape[:4] + tuple(samples.shape[4 + k] for k in kept))
+        tags = [tags[k] for k in kept]
 
     # the dwell time survives only to float32 in pixdim; keep the exact one unless it changed
     dwell = float(image.header["pixdim"][4])
@@ -143,12 +149,13 @@ class SpantBridge(Bridge):
     #   steps   #
     #***********#
     def steps(self) -> List[str]:
-        """The functions that take spectra first: mrs_data, or a method for it, as lb has.
-        Most give spectra back; those that give a number, such as Npts, hand that on."""
+        """The functions that take spectra first: mrs_data, or metab as the MRSI ones call it,
+        or a method for it, as lb has; not the fits, which give a fit. Most give spectra
+        back; those that give a number, such as Npts, hand that on."""
         about = r.about()
-        return [name for name in self.available()
-                if next(iter(about["arguments"].get(name) or {}), "") == "mrs_data"
-                or "S3 method for class 'mrs_data'" in about["help"].get(name, "")]
+        return [name for name in self.available() if not name.startswith("fit_")
+                and (next(iter(about["arguments"].get(name) or {}), "") in ("mrs_data", "metab")
+                     or "S3 method for class 'mrs_data'" in about["help"].get(name, ""))]
 
     #***********#
     #   about   #
@@ -279,7 +286,8 @@ def _ppmsep(path: str) -> Optional[float]:
 #***************#
 #   to result   #
 #***************#
-def to_result(row: Dict[str, Any], amplitudes: List[str], method: str) -> FitResult:
+def to_result(row: Dict[str, Any], amplitudes: List[str], method: str,
+              fits: Optional[Dict[str, Any]] = None) -> FitResult:
     """
     Map one row of spant's result table onto MRSuite's uniform result.
 
@@ -287,10 +295,13 @@ def to_result(row: Dict[str, Any], amplitudes: List[str], method: str) -> FitRes
         row (Dict[str, Any]): A row of ``fit_mrs``'s ``res_tab``.
         amplitudes (List[str]): Its amplitude columns: the basis, then spant's sums.
         method (str): The fitting method, e.g. 'ABFIT'.
+        fits (Optional[dict]): The spectrum's entry of ``fit_mrs``'s ``fits``, at the
+            data's scale: PPMScale, Data, Fit and Baseline, a column each.
 
     Returns:
         FitResult: Amplitudes, their standard deviations and CRLBs, the creatine-referenced
-        values, and spant's own quality measures.
+        values, spant's own quality measures, and as raw the row and the fitted series
+        under spant's names, ``res_tab`` and ``fits``.
     """
     raw = {m: float(row[m]) for m in amplitudes if row.get(m) is not None}
     sd = {m: float(row[f"{m}.sd"]) for m in raw if row.get(f"{m}.sd") is not None}
@@ -303,7 +314,18 @@ def to_result(row: Dict[str, Any], amplitudes: List[str], method: str) -> FitRes
                                                   ("phase", "phase"), ("shift", "shift"))
           if isinstance(row.get(key), (int, float))}
     return FitResult(method=f"spant:{method}", metabolites=list(raw),
-                     concentrations=concentrations, uncertainties=uncertainties, qc=qc, raw=row)
+                     concentrations=concentrations, uncertainties=uncertainties, qc=qc,
+                     raw={"res_tab": row, "fits": fits})
+
+
+#************#
+#   curves   #
+#************#
+def curves(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """spant's fitted series by MRSuite's names."""
+    fits = raw["fits"]
+    return {"ppm": fits["PPMScale"], "data": fits["Data"], "fit": fits["Fit"],
+            "baseline": fits["Baseline"]}
 
 
 #*********#
@@ -342,7 +364,8 @@ def fit(data: Any, basis: Any, method: str = "ABFIT", opts: Optional[dict] = Non
                      "method": method, "opts": _plain(opts or {})}, folder)
     finally:
         shutil.rmtree(folder, ignore_errors=True)
-    return [to_result(row, out["amplitudes"], method) for row in out["rows"]]
+    return [to_result(row, out["amplitudes"], method, fits)
+            for row, fits in zip(out["rows"], out["fits"])]
 
 
 #*************#

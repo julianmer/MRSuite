@@ -75,6 +75,29 @@ def test_a_value_is_given_back_for_every_spectrum_even_none(spectra, tmp_path):
     assert [type(v) for v in spant.Npts(spectra)] == [int] * len(spectra), "counts stay"
 
 
+#*******************#
+#   changed shape   #
+#*******************#
+def test_a_step_that_resamples_keeps_only_the_dimensions_the_data_have():
+    """spant writes a dimension for every one it knows, of length one where the data have
+    none; transients downsampled come back with their one dimension, as FSL-MRS's outlier
+    removal needs them."""
+    from nifti_mrs.create_nmrs import gen_nifti_mrs
+    from nifti_mrs_plus import NIfTI_MRS_Plus
+    from mrsuite import spant
+
+    t = np.arange(4096) * 1.25e-4
+    fid = np.exp(2j * np.pi * (2.0 - 4.65) * 123.2 * t - t / 0.05)
+    dyn = np.stack([fid * (1 + 0.01 * k) for k in range(4)], -1).reshape(1, 1, 1, -1, 4)
+    transients = NIfTI_MRS_Plus([gen_nifti_mrs(dyn, 1.25e-4, 123.2,
+                                               dim_tags=["DIM_DYN", None, None])])
+
+    item = spant.downsample_mrs_td(transients).list()[0]
+
+    assert item.shape == (1, 1, 1, 2048, 4) and item.dim_tags[0] == "DIM_DYN"
+    assert item.dwelltime == pytest.approx(2.5e-4)
+
+
 #*************#
 #   unknown   #
 #*************#
@@ -130,3 +153,23 @@ def test_r_dots_first_still_take_the_data():
     from mrsuite.bridges.spant import bridge
 
     assert str(bridge.about("append_coils")[0]) == "(*args, **kwargs)"
+
+
+#************#
+#   curves   #
+#************#
+def test_a_fit_keeps_the_curves_spant_drew(spectrum):
+    """The driver hands back spant's fitted series beside the result row, scaled back to
+    the data as the amplitudes are: over ABfit's range, the fit on the data."""
+    from mrsuite.bridges import spant
+    from tests.conftest import CHALLENGE_BASIS
+
+    out = spant.fit(spectrum, CHALLENGE_BASIS)
+
+    curves = out.curves()
+    ppm, data, fit = curves["ppm"], curves["data"], curves["fit"]
+    assert len(ppm) == len(data) == len(fit) == len(curves["baseline"]) > 100
+    assert 0.15 < ppm[0] < 0.25 and 3.9 < ppm[-1] < 4.1
+    assert np.linalg.norm(data - fit) < 0.2 * np.linalg.norm(data)
+    peak = np.abs(np.fft.fft(np.asarray(spectrum[:]).ravel())).max()   # the data's units
+    assert 0.8 * peak < data.max() < 1.25 * peak

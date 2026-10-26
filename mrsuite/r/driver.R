@@ -71,10 +71,37 @@ if (job$task == "info") {
     }
     out <- list(ok = TRUE, values = values)
 
+} else if (job$task == "simulate") {
+    # a spant simulation, run once from its arguments alone: a pulse sequence by name,
+    # the acquisition parameters as def_acq_paras takes them, the rest as given; a basis
+    # set comes back as its arrays, spectra as a file
+    fun <- getExportedValue("spant", job$func)
+    if (!is.null(job$seed)) set.seed(job$seed)
+    given <- c(job$args, job$kwargs)
+    if (!is.null(job$pul_seq)) given$pul_seq <- getExportedValue("spant", job$pul_seq)
+    if (!is.null(job$acq_paras)) given$acq_paras <- do.call(def_acq_paras, job$acq_paras)
+    result <- do.call(fun, given)
+    amps <- NULL
+    if (is.list(result) && !is.null(result$mrs_data)) {    # full_output: the amplitudes too
+        amps <- as.list(result$amps)
+        result <- result$mrs_data
+    }
+    if (inherits(result, "basis_set")) {
+        # written as spant writes a basis set, LCModel's format, which io.basis reads
+        write_basis(result, job$output)
+        out <- list(kind = "basis", names = result$names)
+    } else if (inherits(result, "mrs_data")) {
+        write_mrs(result, job$output, format = "nifti", force = TRUE)
+        out <- list(kind = "spectra", amps = amps)
+    } else {
+        out <- list(kind = "value", value = unclass(result))
+    }
+
 } else if (job$task == "fit") {
     basis <- read_basis(job$basis, ref = job$basis_ref)
     opts <- if (length(job$opts)) do.call(abfit_opts, job$opts) else NULL
     rows <- list()
+    fits <- list()
     scales <- numeric()
     for (i in seq_along(job$inputs)) {
         data <- read_spectrum(job$inputs[[i]], job$refs[[i]])
@@ -87,6 +114,10 @@ if (job$task == "info") {
         fit <- fit_mrs(scale_mrs_amp(data, 1 / scales[i]), resampled,
                        method = job$method, opts = opts, progress = "none", time = FALSE)
         rows[[i]] <- as.list(fit$res_tab[1, ])
+        # the fitted series at the data's scale too: ppm, data, fit and baseline
+        drawn <- fit$fits[[1]][c("PPMScale", "Data", "Fit", "Baseline")]
+        drawn[-1] <- drawn[-1] * scales[i]
+        fits[[i]] <- as.list(drawn)
     }
     # amp_cols counts the amplitude columns - the basis, then spant's sums such as tCr -
     # which start where the first basis name does
@@ -95,7 +126,7 @@ if (job$task == "info") {
     for (i in seq_along(rows))
         for (col in c(amps, paste0(amps, ".sd")))
             if (is.numeric(rows[[i]][[col]])) rows[[i]][[col]] <- rows[[i]][[col]] * scales[i]
-    out <- list(rows = rows, amplitudes = amps)
+    out <- list(rows = rows, amplitudes = amps, fits = fits)
 
 } else {
     stop("unknown task ", job$task)

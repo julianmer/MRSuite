@@ -44,9 +44,31 @@ def test_a_subject_loads_as_the_batches_its_dataset_holds(dataset):
     entries = collect.discover(openneuro.DATA / f"openneuro_{dataset}" / "sub-01")
     left_out = sum(len(str(m.message).split(": ")[-1].split(", ")) for m in said)
 
+    inside = openneuro.WATER_INSIDE.get(dataset, {}).values()      # not files of their own
     assert len(batches) == len(openneuro.DATASETS[dataset])
     assert all(len(b) for b in batches)
-    assert sum(len(b) for b in batches) + left_out == len(entries)
+    assert sum(len(b) for name, b in zip(openneuro.DATASETS[dataset], batches)
+               if name not in inside) + left_out == len(entries)
+
+
+#******************#
+#   water inside   #
+#******************#
+def test_cows_water_references_come_apart_from_the_suppressed_transients():
+    if not _fetched("ds006812"):
+        pytest.skip("ds006812 sub-01 is not fetched")
+    import numpy as np
+
+    data, water, mm, mm_water = openneuro.load("ds006812")
+    assert len(water) == len(data) and len(mm_water) == len(mm)
+    for suppressed, reference in zip(data.list(), water.list()):
+        assert suppressed.dim_tags[:2] == ["DIM_COIL", "DIM_DYN"]
+        assert "DIM_USER_0" not in suppressed.dim_tags and suppressed.shape[5] == 32
+        assert reference.ndim == 5 and reference.shape[4] == suppressed.shape[4]   # coils
+        assert reference.hdr_ext["WaterSuppressed"] is False
+        assert suppressed.hdr_ext["WaterSuppressed"] is True
+        # the reference is the water scan: its first point towers over any suppressed one
+        assert np.abs(reference[:]).max() > 20 * np.abs(suppressed[:]).max()
 
 
 #***************#
@@ -92,15 +114,18 @@ def test_a_file_spec2nii_cannot_read_is_left_out_and_named(tmp_path, monkeypatch
 
     with pytest.warns(UserWarning, match="1 of 3 files could not be read by spec2nii and are "
                                          "left out: sub-01_acq-06_svs_slaser_vapor7_metab_Occipital.dat"):
-        data, mm = openneuro.load("ds006812")
-    assert len(data) == 1 and len(mm) == 1
+        data, water, mm, mm_water = openneuro.load("ds006812")
+    assert len(data) == len(water) == len(mm) == len(mm_water) == 1
 
 
 def _spectra(n):
+    """Spectra as COWS' come from spec2nii: the water reference beside the suppressed
+    transients on DIM_USER_0."""
     import numpy as np
     from nifti_mrs.create_nmrs import gen_nifti_mrs
     from nifti_mrs_plus import NIfTI_MRS_Plus
-    return NIfTI_MRS_Plus([gen_nifti_mrs(np.ones((1, 1, 1, 64), dtype=complex), 2.5e-4, 123.2)
+    return NIfTI_MRS_Plus([gen_nifti_mrs(np.ones((1, 1, 1, 64, 2), dtype=complex), 2.5e-4,
+                                         123.2, dim_tags=["DIM_USER_0", None, None])
                            for _ in range(n)])
 
 

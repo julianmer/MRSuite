@@ -26,6 +26,9 @@ import warnings
 from pathlib import Path
 from typing import Iterator, Optional, Tuple
 
+import numpy as np
+from nifti_mrs import tools
+from nifti_mrs.nifti_mrs import NIFTI_MRS
 from nifti_mrs_plus import NIfTI_MRS_Plus
 
 from mrsuite import collect, externals
@@ -37,8 +40,13 @@ SPECTRA = ("_svs.nii", "_mrsref.nii", "_mrsi.nii", "_unloc.nii")
 # each dataset: what it holds, by the names collect gives its files, in the order load gives them
 DATASETS = {
     "ds005371": ("data", "water"),        # Mikkelsen: HERMES and HERCULES, PRESS and sLASER, 3T GE
-    "ds006812": ("data", "mm"),           # COWS: sLASER TE 26 ms with water suppression schemes
-}
+    "ds006812": ("data", "water", "mm", "mm_water"),   # COWS: sLASER TE 26 ms, three water
+}                                                      # suppression schemes, water inside
+# whose raw files hold the water reference inside the metabolite scan: spec2nii hands COWS'
+# 'Phs' loop out as DIM_USER_0, the unsuppressed transient at index 0, zero-padded to the
+# suppressed ones' count, and the suppressed transients at index 1; each such batch comes
+# apart into the suppressed spectra under its own name and the references under the other
+WATER_INSIDE = {"ds006812": {"data": "water", "mm": "mm_water"}}
 # the snapshot of each that its submodule pins (a test holds them equal), and OpenNeuro's API,
 # which lists a snapshot's files with a URL each, pinned to that snapshot
 TAGS = {"ds005371": "2.3.1", "ds006812": "1.0.1"}
@@ -95,7 +103,33 @@ def load(dataset: str, subject: str = "sub-01") -> Tuple[NIfTI_MRS_Plus, ...]:
     if unread:
         warnings.warn(f"{dataset} {subject}: {len(unread)} of {len(entries)} files could not "
                       f"be read by spec2nii and are left out: {', '.join(unread)}")
+    for name, water in WATER_INSIDE.get(dataset, {}).items():
+        found[name], found[water] = map(list, zip(*map(_water_apart, found.get(name, [])))) \
+            if found.get(name) else ([], [])
     return tuple(NIfTI_MRS_Plus(found.get(name, [])) for name in DATASETS[dataset])
+
+
+#*****************#
+#   water apart   #
+#*****************#
+def _water_apart(spectrum: NIFTI_MRS) -> Tuple[NIFTI_MRS, NIFTI_MRS]:
+    """A spectrum's water-suppressed transients and its water reference, handed out together
+    on DIM_USER_0 (see ``WATER_INSIDE``): the suppressed ones, and the reference without
+    the zero transients it was padded with, each marked for what it is."""
+    water, suppressed = (part.copy(remove_dim="DIM_USER_0")
+                         for part in tools.split(spectrum, "DIM_USER_0", 0))
+    if "DIM_DYN" in water.dim_tags:
+        axis = 4 + list(water.dim_tags).index("DIM_DYN")
+        dead = [i for i in range(water.shape[axis]) if not np.any(np.take(water[:], i, axis))]
+        if dead:
+            water = tools.split(water, "DIM_DYN", dead)[0]
+        if water.shape[axis] == 1:
+            water = water.copy(remove_dim="DIM_DYN")
+    for part, suppressed_ in ((water, False), (suppressed, True)):
+        if "WaterSuppressed" in part.hdr_ext:
+            part.remove_hdr_field("WaterSuppressed")
+        part.add_hdr_field("WaterSuppressed", suppressed_)
+    return suppressed, water
 
 
 #**************#

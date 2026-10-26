@@ -28,3 +28,6 @@
 [submodule "data/openneuro_ds006812"]
 	path = data/openneuro_ds006812
 	url = https://github.com/OpenNeuroDatasets/ds006812.git
+[submodule "externals/simntg"]
+	path = externals/simntg
+	url = https://github.com/mrshub/SimnTG.git

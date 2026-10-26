@@ -723,7 +723,8 @@ BLOCKS: Dict[str, Block] = {b.key: b for b in [
           help="Signal-to-noise ratio, as each toolbox defines it."),
     Block("linewidth", "evaluate", "Linewidth", out=ANY,
           options=(("fid_a", "op_getLW"), ("osprey", "op_getLW")),
-          help="Full width at half maximum."),
+          help="Full width at half maximum. FID-A and Osprey measure the water peak unless a "
+               "range is given: ppmmin 1.8, ppmmax 2.2 for NAA on water-suppressed spectra."),
     Block("mosae", "evaluate", "MOSAE", call="scoring.score", imports=(_SCORE,),
           fields=(_value("output_dir", "None"),), inputs=_JUDGED, outputs=_SCORED,
           fixed={"references": "['optimal']", "metrics": "{'mosae': scoring.mae}"},

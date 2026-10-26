@@ -68,6 +68,23 @@ TRAIN = tuple(f'Sub{i}' for i in range(1, 20))
 VALIDATION = tuple(f'Sub{i}' for i in range(20, 25))
 
 
+# The release's metabolite array (xtMeta) is 180 degrees from its full one (xtAll) and from
+# the VtMeta basis: its lines point down where xtAll's and the basis's point up (NAA at 169
+# against -11 degrees at one voxel, from the .mat and the NIfTI alike). Augmentrum reads it
+# verbatim, so every signal built on it comes out upside down. MRSuite turns those to
+# xtAll's convention, so the spectra read like every other and fit without a half turn.
+UPRIGHT = ('all', 'nuisance')                 # the arrays already in xtAll's convention
+
+
+#***********#
+#   array   #
+#***********#
+def _array(module: Any, subject: str, signal: str) -> np.ndarray:
+    """A subject's (x, y, z, t) array of ``signal``, in xtAll's convention (see UPRIGHT)."""
+    volume = np.asarray(module.load([subject], signal=signal)[0][0][:])
+    return volume if module.canonical_signal(signal) in UPRIGHT else -volume
+
+
 #************#
 #   module   #
 #************#
@@ -124,7 +141,7 @@ def load(subject: str, signal: str = 'all', voxels: Optional[int] = None,
     module = _module(data_dir, subject)
     import augmentrum
 
-    volume = module.load([subject], signal=signal)[0][0][:]         # (x, y, z, t)
+    volume = _array(module, subject, signal)                          # (x, y, z, t)
     aux = module.read_aux(subject, signal='meta')                   # test truth lives apart
     acquisition = module.read_acquisition(subject)
 
@@ -174,12 +191,10 @@ def volume(subject: str, signal: str = 'all', z: Optional[int] = None,
     module = _module(data_dir, subject)
     import augmentrum
 
-    whole = module.load([subject], signal=signal)[0][0]
     aux = module.read_aux(subject, signal='meta')
     acquisition = module.read_acquisition(subject)
     sl = slice(None) if z is None else slice(z, z + 1)
-    item = module.to_nifti(np.asarray(whole[:])[:, :, sl], acquisition) if z is not None \
-        else whole
+    item = module.to_nifti(_array(module, subject, signal)[:, :, sl], acquisition)
     item.add_hdr_field('SpecFreqChemShift', acquisition['ppm_offset'])
     source = module.mat_path(subject, need_truth=module.canonical_signal(signal) != 'all')
     provenance.append(item, provenance.entry(
@@ -321,12 +336,14 @@ class Release(Source):
 def _brain(module: Any, subject: str, signal: str, data_dir: Path) -> np.ndarray:
     """A subject's brain voxels of one signal as a (voxels, points) array, in the brain
     mask's own order (as ``load`` indexes them), written once and read memory-mapped."""
-    path = data_dir / '_mrsuite_cache' / f'{subject}_{module.canonical_signal(signal)}.npy'
+    canonical = module.canonical_signal(signal)
+    turned = '' if canonical in UPRIGHT else '_upright'      # caches from before the turn stay unread
+    path = data_dir / '_mrsuite_cache' / f'{subject}_{canonical}{turned}.npy'
     if not path.exists():
         path.parent.mkdir(exist_ok=True)
         mask = module.read_aux(subject, signal='meta')['brainMask'] > 0
         writing = path.with_name(f'{path.stem}.{os.getpid()}.partial.npy')   # one per run
-        np.save(writing, module.load([subject], signal=signal)[0][0][:][mask])
+        np.save(writing, _array(module, subject, signal)[mask])
         os.replace(writing, path)
     return np.load(path, mmap_mode='r')
 

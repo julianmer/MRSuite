@@ -542,3 +542,23 @@ def test_a_subject_loads_whole_as_one_spatial_nifti_with_its_truth_maps():
     assert (truth["NAA"][mask] > 0).mean() > 0.9, "the truth lives in the brain"
     step = item.hdr_ext["ProcessingApplied"][-1]
     assert step["Method"].endswith("mrsi_challenge.volume") and '"z": 16' in step["Details"]
+
+
+#*************#
+#   upright   #
+#*************#
+@needs_mrsi
+def test_the_metabolite_signals_point_up_like_the_full_one():
+    """The release's xtMeta is 180 degrees from xtAll; MRSuite turns what is built on it."""
+    def phase(item, x, y):
+        fid = np.asarray(item[:]).reshape(*item.shape[:3], -1)[x, y, 0]
+        spec = np.fft.fftshift(np.fft.fft(fid))
+        ppm = np.fft.fftshift(np.fft.fftfreq(len(fid), item.dwelltime)) / item.spectrometer_frequency[0] + 4.7
+        win = (ppm > 1.9) & (ppm < 2.1)
+        return np.degrees(np.angle(spec[win][np.abs(spec[win]).argmax()]))
+    for signal in ("all", "all-nuisance", "meta"):
+        data, _, _ = mrsi_challenge.volume(MRSI_SUBJECT, signal, z=16)
+        assert abs(phase(data.list()[0], 48, 19)) < 45, signal
+    one, _, index = mrsi_challenge.load(MRSI_SUBJECT, "meta", voxels=50)
+    k = int(np.argmax(np.abs(np.asarray([np.asarray(i[:]).ravel()[0] for i in one.list()]))))
+    assert abs(phase(one.list()[k], 0, 0)) < 60, "load() turns it too"

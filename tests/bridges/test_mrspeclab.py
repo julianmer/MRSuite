@@ -331,11 +331,12 @@ def test_the_driver_states_the_acquisition_as_suspect_reads_it():
     suspect's 30 ms."""
     fids, meta = mrspeclab._transients(_acquisition(coils=2, transients=1))
     meta["tr"] = None
-    code = ("import json, sys; sys.path.insert(0, sys.argv[1]); import numpy as np; "
-            "from mrspeclab_driver import transients; "
-            "m = transients(np.zeros((1, 2, 8), complex), json.loads(sys.argv[2]))[0]; "
-            "print(json.dumps([m.te, m.tr, m.ppm0, m.f0, m.dt]))")
-    out = subprocess.run([mrspeclab.python(), "-c", code, str(mrspeclab.DRIVER.parent),
+    code = ("import importlib.util, json, sys; import numpy as np; "      # the driver by its file:
+            "spec = importlib.util.spec_from_file_location('mrspeclab_driver', sys.argv[1]); "
+            "driver = importlib.util.module_from_spec(spec); spec.loader.exec_module(driver); "
+            "m = driver.transients(np.zeros((1, 2, 8), complex), json.loads(sys.argv[2]))[0]; "
+            "print(json.dumps([m.te, m.tr, m.ppm0, m.f0, m.dt]))")   # its folder off the path
+    out = subprocess.run([mrspeclab.python(), "-P", "-c", code, str(mrspeclab.DRIVER),
                           json.dumps(meta)], capture_output=True, text=True, check=True)
     te, tr, ppm0, f0, dt = json.loads(out.stdout.replace("NaN", "null"))
     assert (te, tr, ppm0, f0, dt) == (30.0, None, CENTRE, FREQUENCY, DWELL)

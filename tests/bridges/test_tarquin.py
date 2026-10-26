@@ -86,7 +86,7 @@ def test_a_report_maps_onto_the_result(tmp_path):
     assert out.crlb("raw")["NAA"] == 0.25
     assert out.qc == {"metab_fwhm_ppm": 0.041, "metab_fwhm_hz": 5.24, "snr_residual": 25.3,
                       "snr_max": 35.0, "q": 1.23}
-    assert out.raw.sections["fitting_parameters"]["max_iters"] == 100   # the whole report
+    assert out.raw["report"].sections["fitting_parameters"]["max_iters"] == 100   # whole
 
 
 #**************#
@@ -152,3 +152,21 @@ def test_a_fit_finds_naa_where_naa_is(spectrum):
     tcr = tarquin.fit(spectrum, CHALLENGE_BASIS).conc("internal")
 
     assert 1.0 < tcr["NAA"] < 2.0, f"NAA/tCr = {tcr['NAA']}, physiologically ~1.5"
+
+
+#************#
+#   curves   #
+#************#
+@needs_tarquin
+def test_a_fit_keeps_the_curves_tarquin_drew(spectrum):
+    """TARQUIN writes its fit as a CSV when asked; the fit asks, reads it back and keeps
+    the series: the whole spectrum, as TARQUIN exports it, with the fit on the data."""
+    out = tarquin.fit(spectrum, CHALLENGE_BASIS)
+
+    curves = out.curves()
+    ppm, data, fit = curves["ppm"], curves["data"], curves["fit"]
+    assert len(ppm) == len(data) == len(fit) == len(curves["baseline"]) >= spectrum.shape[3]
+    assert ppm[0] < 0.0 < 4.2 < ppm[-1]
+    within = (ppm > 0.5) & (ppm < 4.2)
+    assert np.linalg.norm(data[within] - fit[within]) < 0.2 * np.linalg.norm(data[within])
+    assert np.abs(fit[within]).max() > 0.5 * np.abs(data).max()   # the fit is where the data are

@@ -215,3 +215,36 @@ def test_a_pickle_saved_with_other_results_is_refused(tmp_path):
     with pytest.raises(ValueError, match="other results"):
         load(path)
     assert load(path, raw=False)[0].raw is None
+
+
+#************#
+#   curves   #
+#************#
+def test_curves_come_from_the_methods_bridge_with_ppm_rising(monkeypatch):
+    """The bridge the method names reads the curves off raw, in whatever order the tool
+    keeps them; the result hands them back along a rising ppm axis."""
+    import sys
+    import types
+
+    fake = types.ModuleType("mrsuite.bridges.fake")
+    fake.curves = lambda raw: {"ppm": [3.0, 1.0, 2.0], "data": raw["d"], "fit": [30, 10, 20],
+                               "baseline": [3, 1, 2]}
+    monkeypatch.setitem(sys.modules, "mrsuite.bridges.fake", fake)
+
+    out = FitResult(method="fake:Fit", raw={"d": [300, 100, 200]}).curves()
+
+    assert sorted(out) == ["baseline", "data", "fit", "ppm"]
+    assert out["ppm"].tolist() == [1.0, 2.0, 3.0]
+    assert out["data"].tolist() == [100.0, 200.0, 300.0]
+    assert out["fit"].tolist() == [10.0, 20.0, 30.0] and out["baseline"].tolist() == [1, 2, 3]
+
+
+#**************#
+#   no curves   #
+#**************#
+def test_a_method_without_curves_says_so():
+    """A model's result, and a fit loaded without its raw, both say what is missing."""
+    with pytest.raises(ValueError, match="mrsuite:MLP keeps no curves"):
+        FitResult(method="mrsuite:MLP", raw={}).curves()
+    with pytest.raises(ValueError, match="without its raw"):
+        FitResult(method="fsl_mrs:Newton", raw=None).curves()

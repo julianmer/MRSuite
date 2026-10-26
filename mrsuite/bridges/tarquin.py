@@ -17,6 +17,8 @@
 #*************#
 #   imports   #
 #*************#
+import os
+import shutil
 import sys
 from functools import lru_cache
 from typing import Any, Dict, Optional
@@ -27,25 +29,30 @@ from mrsuite.bridges.base import Deferred
 from mrsuite.core.basis import as_file
 from mrsuite.core.method import method
 from mrsuite.core.result import FitResult
+from mrsuite.octave import scratch
 
 
 #***************#
 #   to result   #
 #***************#
-def to_result(report: Any, method: str = "tarquin:TARQUIN") -> FitResult:
+def to_result(report: Any, method: str = "tarquin:TARQUIN",
+              fit: Optional[Dict[str, np.ndarray]] = None) -> FitResult:
     """
     Map one PyTARQUIN report onto MRSuite's uniform result.
 
     Args:
         report (tarquin_wrapper.Report): One fit, as PyTARQUIN read TARQUIN's results.
         method (str): Recorded on the result.
+        fit (Optional[dict]): The fit's CSV (``--output_fit``) as columns: PPMScale, Data,
+            Fit, Baseline.
 
     Returns:
         FitResult: TARQUIN's table, whose units say the scaling - 'au' unreferenced, filed
         under 'raw', or 'mM' water-scaled, filed under 'molarity' as LCModel and FSL-MRS
         file theirs - with the combined signals (TNAA, TCr, ...) after the single ones, the
         creatine-referenced values, %SD and SD as uncertainties, TARQUIN's fit quality as
-        QC under snake_case names ('snr_max', 'metab_fwhm_hz', 'q'), and the report as raw.
+        QC under snake_case names ('snr_max', 'metab_fwhm_hz', 'q'), and as raw the
+        report and the fitted series.
     """
     scaling = "molarity" if report.units == "mM" else "raw"
     conc = dict(zip(report.metabolites, report.concentrations))
@@ -58,7 +65,30 @@ def to_result(report: Any, method: str = "tarquin:TARQUIN") -> FitResult:
                      concentrations=concentrations,
                      uncertainties={"percentage": dict(zip(report.metabolites, report.percent_sd)),
                                     scaling: dict(zip(report.metabolites, report.sd))},
-                     qc={k: v for k, v in quality.items() if isinstance(v, float)}, raw=report)
+                     qc={k: v for k, v in quality.items() if isinstance(v, float)},
+                     raw={"report": report, "fit": fit})
+
+
+#************#
+#   curves   #
+#************#
+def curves(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """TARQUIN's fitted series by MRSuite's names."""
+    fit = raw["fit"]
+    return {"ppm": fit["PPMScale"], "data": fit["Data"], "fit": fit["Fit"],
+            "baseline": fit["Baseline"]}
+
+
+#**************#
+#   read fit   #
+#**************#
+def _read_fit(path: str) -> Dict[str, np.ndarray]:
+    """TARQUIN's fit CSV as columns: a 'Row : ..' line names the voxel, then the column
+    names, then a value each per line."""
+    with open(path) as fh:
+        lines = [line.strip() for line in fh if "," in line and ":" not in line]
+    values = np.array([[float(v) for v in line.split(",")] for line in lines[1:]])
+    return dict(zip(lines[0].split(","), values.T))
 
 
 #****************#
@@ -127,7 +157,9 @@ def fit(data: Any, basis: Any = None, water: Any = None, te: Optional[float] = N
             own default - PRESS, and a start point it picks itself, skipping about the
             first 10 ms of the FID to keep broad baseline out of the fit. The binary is
             chosen with ``TARQUIN_EXEC``, so the provenance can tell it; without it
-            PyTARQUIN finds one (PATH, its cache, its release, a container).
+            PyTARQUIN finds one (PATH, its cache, its release, a container). The fit's
+            curves are read from ``output_fit``, written to a folder of this call's
+            own unless the option names a file to keep.
         workers (int): Processes to spread a batch over (see ``mrsuite.core.parallel``).
 
     Returns:
@@ -150,9 +182,19 @@ def fit(data: Any, basis: Any = None, water: Any = None, te: Optional[float] = N
         raise ValueError("TARQUIN simulates its internal basis at the data's echo time, which "
                          "the header does not state; pass te= or a basis")
 
-    # conj: PyTARQUIN hands out NIfTI-MRS as indexed, the conjugate of what TARQUIN reads
-    engine = PyTARQUIN(path2basis=as_file(basis), opts=opts, echo_time=te, conj=True)
-    return to_result(engine.report(data, water)[0])
+    opts = dict(opts or {})
+    own = "output_fit" not in opts
+    workdir = scratch("tarquin_") if own else None
+    if own:
+        opts["output_fit"] = os.path.join(workdir, "fit.csv")
+    try:
+        # conj: PyTARQUIN hands out NIfTI-MRS as indexed, the conjugate of what TARQUIN reads
+        engine = PyTARQUIN(path2basis=as_file(basis), opts=opts, echo_time=te, conj=True)
+        report = engine.report(data, water)[0]
+        return to_result(report, fit=_read_fit(opts["output_fit"]))
+    finally:
+        if own:
+            shutil.rmtree(workdir, ignore_errors=True)
 
 
 #************#

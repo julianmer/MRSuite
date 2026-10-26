@@ -401,7 +401,8 @@ class OspreyBridge(FIDABridge):
 #   to result   #
 #***************#
 def to_result(params: dict, res_basis: dict, crlb: Any = None,
-              method: str = "osprey:Osprey", scale: float = 1.0) -> FitResult:
+              method: str = "osprey:Osprey", scale: float = 1.0,
+              model: Optional[dict] = None) -> FitResult:
     """
     Map an Osprey fit onto MRSuite's uniform result.
 
@@ -417,10 +418,14 @@ def to_result(params: dict, res_basis: dict, crlb: Any = None,
         method (str): Recorded on the result.
         scale (float): What the data were divided by before the fit; the raw amplitudes
             are multiplied back, so they stay in the units of the data passed in.
+        model (Optional[dict]): ``ModelOutput`` from ``fit_OspreyParamsToModel``: the
+            data as fitted, the complete fit, baseline, residual and each basis
+            function's share over the fit range, at the scale the fit ran at.
 
     Returns:
-        FitResult: Raw and creatine-referenced concentrations, CRLBs when available, and
-        the linewidth and residual Osprey reports as QC.
+        FitResult: Raw and creatine-referenced concentrations, CRLBs when available, the
+        linewidth and residual Osprey reports as QC, and as raw the fit parameters, the
+        resampled basis, the scale and the model.
     """
     names = [str(n) for n in np.asarray(res_basis["name"]).ravel()]
     ampl = np.asarray(params["ampl"], dtype=float).ravel() * scale
@@ -444,7 +449,21 @@ def to_result(params: dict, res_basis: dict, crlb: Any = None,
 
     return FitResult(method=method, metabolites=names, concentrations=concentrations,
                      uncertainties=uncertainties, qc=qc,
-                     raw={"fitParams": params, "resBasisSet": res_basis, "scale": scale})
+                     raw={"fitParams": params, "resBasisSet": res_basis, "scale": scale,
+                          "model": model})
+
+
+#************#
+#   curves   #
+#************#
+def curves(raw: dict) -> dict:
+    """Osprey's model by MRSuite's names, multiplied back to the units of the data
+    passed in."""
+    model, scale = raw["model"], raw["scale"]
+    return {"ppm": model["ppm"],
+            **{name: np.asarray(model[key], dtype=float) * scale
+               for name, key in (("data", "data"), ("fit", "completeFit"),
+                                 ("baseline", "baseline"))}}
 
 
 bridge = OspreyBridge()
@@ -511,12 +530,17 @@ def fit(data: Any, basis: Any, fit_opts: Optional[dict] = None,
 
     params, res_basis = bridge.fit_runFit(struct, basis, "Osprey", opts, nout=2,
                                           timeout=timeout)
+    # the curves, as Osprey draws them from the parameters; the data are at scale already
+    model = bridge.fit_OspreyParamsToModel(
+        {"dataToFit": struct, "basisSet": res_basis},
+        {"fitRangePPM": opts["range"], "minKnotSpacingPPM": opts["bLineKnotSpace"],
+         "scale": 1.0, "GAP": opts["GAP"]}, params, timeout=timeout)
     bounds = None
     if crlb:
         _, _, bounds = bridge.fit_Osprey_CRLB(
             struct, basis, opts["bLineKnotSpace"], opts["range"], params,
             float(np.asarray(params["refShift"]).ravel()[0]), nout=3, timeout=timeout)
-    return to_result(params, res_basis, bounds, scale=scale)
+    return to_result(params, res_basis, bounds, scale=scale, model=model)
 
 
 #*************#

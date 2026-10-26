@@ -18,11 +18,14 @@
 #   imports   #
 #*************#
 import hashlib
+import importlib
 import json
 import os
 import pickle
 from dataclasses import dataclass, field, fields
 from typing import Any, Dict, List, Sequence
+
+import numpy as np
 
 
 #**************************************************************************************************#
@@ -111,6 +114,35 @@ class FitResult:
             raise KeyError(f"{self.method} reports no '{kind}' uncertainties; "
                            f"it has {sorted(self.uncertainties)}")
         return self.uncertainties[kind]
+
+    #************#
+    #   curves   #
+    #************#
+    def curves(self) -> Dict[str, np.ndarray]:
+        """
+        The fit drawn: the data, the fit and its baseline over the method's own range, as
+        its own object holds them. Each fitting bridge reads them off its ``raw``; the
+        bridge is found by the toolbox the method names.
+
+        Returns:
+            Dict[str, np.ndarray]: 'ppm', rising, and 'data', 'fit' and 'baseline' along
+            it, real, in the method's own units.
+
+        Raises:
+            ValueError: If the method keeps no curves - a model, say - or the result was
+                loaded without its ``raw``.
+        """
+        toolbox = self.method.partition(":")[0]
+        try:
+            drawn = importlib.import_module(f"mrsuite.bridges.{toolbox}").curves
+        except (ModuleNotFoundError, AttributeError):
+            raise ValueError(f"{self.method} keeps no curves") from None
+        if self.raw is None:
+            raise ValueError(f"this {self.method} result was loaded without its raw "
+                             "object, which holds the curves")
+        curves = {k: np.asarray(v, dtype=float).ravel() for k, v in drawn(self.raw).items()}
+        order = np.argsort(curves["ppm"])
+        return {k: v[order] for k, v in curves.items()}
 
     #*************#
     #   to dict   #

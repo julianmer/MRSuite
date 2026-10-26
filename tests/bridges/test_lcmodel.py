@@ -16,6 +16,7 @@
 #*************#
 #   imports   #
 #*************#
+import numpy as np
 import pytest
 
 from nifti_mrs_plus import NIfTI_MRS_Plus
@@ -165,3 +166,19 @@ def test_save_path_leaves_the_lcmodel_files_behind(spectrum, tmp_path):
 
     assert (tmp_path / "temp0.coord").exists()
     assert (tmp_path / "temp0.raw").exists()
+
+
+#************#
+#   curves   #
+#************#
+def test_a_fit_keeps_the_curves_lcmodel_drew(spectrum):
+    """The .coord's phased data, complete fit and background, read before the working
+    folder goes: over LCModel's fit range, and the fit lies on the data."""
+    out = lcmodel.fit(spectrum, CHALLENGE_BASIS, ppmlim=(0.5, 4.2))
+
+    curves = out.curves()
+    ppm, data, fit, baseline = (curves[k] for k in ("ppm", "data", "fit", "baseline"))
+    assert len(ppm) == len(data) == len(fit) == len(baseline) > 100
+    assert 0.45 < ppm[0] < 0.55 and 4.15 < ppm[-1] < 4.25
+    assert np.linalg.norm(data - fit) < 0.2 * np.linalg.norm(data)
+    assert np.abs(baseline).max() < 0.2 * np.abs(data).max()

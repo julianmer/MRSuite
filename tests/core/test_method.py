@@ -269,3 +269,27 @@ def test_a_model_is_written_out_as_loaded_by_name():
 
     assert "models.load('MRSuite/wand-mrsi2024', revision='abc123').step(remove=['nuisance'])" \
         in code
+
+
+#****************#
+#   resampling   #
+#****************#
+def test_a_step_that_resamples_keeps_its_own_spectral_width(spectrum):
+    """The header comes over from the input, but the spectral width describes the
+    output's sampling: a downsampling step halves it, and the output must stay valid."""
+    from nifti_mrs.create_nmrs import gen_nifti_mrs
+
+    @method("test", version="1.0")
+    def halve(item):
+        return gen_nifti_mrs(np.asarray(item[:])[..., ::2].copy(), item.dwelltime * 2,
+                             item.spectrometer_frequency[0], nucleus=item.nucleus[0], no_conj=True)
+
+    source = spectrum.copy()
+    source.add_hdr_field("SpectralWidth", 1.0 / source.dwelltime)
+    source.add_hdr_field("EchoTime", 0.03)
+
+    out = halve(source)
+
+    assert out.hdr_ext["SpectralWidth"] == pytest.approx(1.0 / out.dwelltime)
+    assert out.hdr_ext["SpectralWidth"] == pytest.approx(0.5 / source.dwelltime)
+    assert out.hdr_ext["EchoTime"] == 0.03

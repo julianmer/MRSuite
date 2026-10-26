@@ -481,3 +481,25 @@ def test_spectral_registration_starts_from_oprefs_frequency_and_finds_known_shif
     asked.clear()
     bridge._resolve("op_robustSpecReg")(struct, "unedited", 0, np.zeros(8), nout=4)
     assert "op_preref" not in asked
+
+
+#************#
+#   curves   #
+#************#
+@needs_octave
+@pytest.mark.skipif(not BASIS.exists(), reason="osprey submodule not checked out")
+def test_a_fit_keeps_the_curves_osprey_drew(spectrum):
+    """Osprey draws a fit from its parameters with fit_OspreyParamsToModel, which the fit
+    runs on its way out: over the fit range, multiplied back to the data's units, with the
+    fit on the data."""
+    from mrsuite.bridges import osprey
+
+    out = osprey.fit(spectrum, osprey.bridge.basis(str(BASIS)))
+
+    curves = out.curves()
+    ppm, data, fit = curves["ppm"], curves["data"], curves["fit"]
+    assert len(ppm) == len(data) == len(fit) == len(curves["baseline"]) > 100
+    assert 0.15 < ppm[0] < 0.25 and 4.15 < ppm[-1] < 4.25
+    assert np.linalg.norm(data - fit) < 0.2 * np.linalg.norm(data)
+    peak = np.abs(np.fft.fft(np.asarray(spectrum[:]).ravel())).max()   # the data's units
+    assert 0.8 * peak < data.max() < 1.25 * peak

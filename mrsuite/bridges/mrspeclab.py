@@ -35,7 +35,7 @@ from nifti_mrs.nifti_mrs import NIFTI_MRS
 from nifti_mrs_plus import NIfTI_MRS_Plus
 from mrsuite import externals
 from mrsuite.bridges.base import Bridge
-from mrsuite.core.method import _keep_header
+from mrsuite.core.method import keep_header
 from mrsuite.core.provenance import git_version
 from mrsuite.octave import scratch
 
@@ -91,7 +91,7 @@ def _driver(job: Dict[str, Any], folder: str) -> None:
     with open(path, "w") as fh:
         json.dump({**job, "root": str(externals.ensure("mrspeclab"))}, fh)
     proc = subprocess.run(
-        [python(), str(DRIVER), path], cwd=folder, capture_output=True, text=True,
+        [python(), "-P", str(DRIVER), path], cwd=folder, capture_output=True, text=True,
         env={**os.environ, "MPLBACKEND": "Agg",
              "PYTHONPYCACHEPREFIX": str(ENVIRONMENT / "pycache")})
     if proc.returncode != 0 or not os.path.exists(job["result"]):
@@ -189,7 +189,7 @@ def _spectrum(fids: np.ndarray, source: NIFTI_MRS) -> NIFTI_MRS:
                         source.dwelltime, source.spectrometer_frequency[0],
                         nucleus=source.nucleus[0], dim_tags=(tags + [None] * 3)[:3],
                         no_conj=False)                  # untouched; see fid_a.fida2nifti
-    _keep_header(source, out)
+    keep_header(source, out)
     header = source.hdr_ext.to_dict()
     for k, tag in enumerate(tags):
         i = source.dim_tags.index(tag)

@@ -207,3 +207,4 @@ def test_a_checksum_is_the_values_whatever_their_byte_order():
     values = np.arange(6, dtype=complex).reshape(2, 3) * (1 + 2j)
     assert provenance.checksum(values) == provenance.checksum(values.astype(">c16"))
     assert provenance.checksum(values) != provenance.checksum(values.astype("<c8"))
+

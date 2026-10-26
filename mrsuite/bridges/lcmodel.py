@@ -50,7 +50,7 @@ def _diagnostics(coord: Path) -> str:
 #   to result   #
 #***************#
 def to_result(parsed: tuple, method: str = "lcmodel:LCModel",
-              scaling: str = "raw") -> FitResult:
+              scaling: str = "raw", fit: Optional[Dict[str, Any]] = None) -> FitResult:
     """
     Map one parsed LCModel ``.coord`` onto MRSuite's uniform result.
 
@@ -62,10 +62,12 @@ def to_result(parsed: tuple, method: str = "lcmodel:LCModel",
             column whose meaning depends on the fit: unreferenced numbers ('raw'), or
             mM when a water reference enabled its water scaling ('molarity', matching
             where FSL-MRS files water-scaled values).
+        fit (Optional[dict]): The fitted series of the same ``.coord``, as
+            ``coord.read_fit`` returns them: ppm, data, completeFit, baseline.
 
     Returns:
         FitResult: With the reported and creatine-referenced concentrations, %SD as
-        the uncertainty, and LCModel's own FWHM and S/N as QC.
+        the uncertainty, LCModel's own FWHM and S/N as QC, and the series as raw.
     """
     metabs, concs, crlbs, tcr, fwhm, snr, shift, phase = parsed
 
@@ -75,13 +77,24 @@ def to_result(parsed: tuple, method: str = "lcmodel:LCModel",
         concentrations={scaling: dict(zip(metabs, (float(c) for c in concs))),
                         "internal": dict(zip(metabs, (float(t) for t in tcr)))},
         uncertainties={"percentage": dict(zip(metabs, (float(c) for c in crlbs)))},
-        raw={"shift": shift, "phase": phase, "coord": parsed})
+        raw={"shift": shift, "phase": phase, "coord": parsed, "fit": fit})
 
     # LCModel reports these itself, so they are its own numbers rather than ours
     for name, value in (("fwhm", fwhm), ("snr", snr)):
         if value is not None:
             out.qc[name] = float(value)
     return out
+
+
+#************#
+#   curves   #
+#************#
+def curves(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """The .coord's fitted series by MRSuite's names: LCModel's phased data, its
+    complete fit and the background it fitted, over its fit range."""
+    fit = raw["fit"]
+    return {"ppm": fit["ppm"], "data": fit["data"], "fit": fit["completeFit"],
+            "baseline": fit["baseline"]}
 
 
 #*************#
@@ -135,7 +148,7 @@ def fit(data: Any, basis: Any, water: Any = None, ppmlim: tuple = (0.5, 4.2),
         A FitResult, or one per spectrum for a batch, each with the data's processing
         history and the fit itself as its provenance.
     """
-    from lcmodel_wrapper import PyLCModel
+    from lcmodel_wrapper import PyLCModel, coord
 
     if "path2exec" in kwargs:
         raise TypeError("choose the LCModel binary with LCMODEL_EXEC instead of path2exec")
@@ -151,7 +164,8 @@ def fit(data: Any, basis: Any, water: Any = None, ppmlim: tuple = (0.5, 4.2),
             if not report[0]:                      # no metabolites: LCModel said why
                 raise RuntimeError("LCModel fitted nothing: "
                                    + _diagnostics(Path(workdir) / f"temp{i}.coord"))
-            results.append(to_result(report, scaling=scaling))
+            results.append(to_result(report, scaling=scaling,
+                                     fit=coord.read_fit(Path(workdir) / f"temp{i}.coord")))
         return results
     finally:
         if own:

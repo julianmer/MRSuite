@@ -198,7 +198,7 @@ class Method:
                     one.provenance = provenance.history(item) + [entry]
                 elif isinstance(one, NIFTI_MRS) and not any(one is x for x in inputs):
                     if k == 0:
-                        _keep_header(item, one)
+                        keep_header(item, one)
                     if self.records:
                         provenance.append(one, entry)
 
@@ -329,21 +329,25 @@ def method(program: str, version: Union[str, Callable[[], Optional[str]], None] 
 #*****************#
 #   keep header   #
 #*****************#
-def _keep_header(source: NIFTI_MRS, out: NIFTI_MRS) -> None:
+def keep_header(source: NIFTI_MRS, out: NIFTI_MRS) -> None:
     """Carry the input's header fields over to the output.
 
     A toolbox working on its own struct hands back the samples and little else, so the
     echo time, the ppm reference and the processing history would be lost at the first
     step. Fields the output already states win, and the dimension fields are left to
-    the output, since a step may have removed a dimension. A user-defined field goes with
-    its description, which nifti_mrs asks of it.
+    the output, since a step may have removed a dimension, as is the spectral width,
+    since a step may have resampled. A user-defined field goes with its description,
+    which nifti_mrs asks of it.
     """
     for key, value in source.hdr_ext.to_dict().items():
-        if not key.startswith("dim_") and key not in out.hdr_ext:
-            if key in standard_defined:
-                out.add_hdr_field(key, value)
-            else:
-                out.add_hdr_field(key, value.get("Value", value), doc=value["Description"])
+        if key.startswith("dim_") or key in out.hdr_ext:
+            continue
+        if key == "SpectralWidth":
+            value = 1.0 / out.dwelltime
+        if key in standard_defined:
+            out.add_hdr_field(key, value)
+        else:
+            out.add_hdr_field(key, value.get("Value", value), doc=value["Description"])
 
 
 #*************#

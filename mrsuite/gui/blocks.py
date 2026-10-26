@@ -25,6 +25,14 @@ from typing import Any, Dict, List, Tuple
 
 from mrsuite.gui import catalog
 from mrsuite.gui.catalog import Field
+from mrsuite.simulators import bases
+from mrsuite.simulators.mrsandbox import SEQUENCES
+
+# spant's pulse sequences with ideal pulses, as its simulators take them
+SPANT_SEQUENCES = ["seq_press_ideal", "seq_slaser_ideal", "seq_steam_ideal",
+                   "seq_steam_ideal_cof", "seq_steam_ideal_young", "seq_mega_press_ideal",
+                   "seq_spin_echo_ideal", "seq_cpmg_ideal", "seq_pulse_acquire",
+                   "seq_press_2d_shaped"]
 
 # what a file to load is read as: NIfTI-MRS as it is, ground truth (io.truth), or spec2nii's
 # formats that need no options of their own (its text and raw need dwell times and such)
@@ -34,9 +42,9 @@ FORMATS = ["nifti", "truth", "twix", "ge", "philips", "dicom", "rda", "bruker", 
 # what flows along a wire; 'any' meets everything. A challenge's truth is concentrations per
 # spectrum, as scoring takes it; a simulation's is MRS-Sim's own (amplitudes, signals); a
 # basis is a basis set (mrsuite.core.basis); files are one written for another tool; scores
-# are scoring.score's table
-SPECTRA, RESULTS, TRUTH, SIMULATED, BASIS, FILES, SCORES, ANY = \
-    "spectra", "results", "truth", "simulated", "basis", "files", "scores", "any"
+# are scoring.score's table; a sequence is a pulse sequence a simulator plays
+SPECTRA, RESULTS, TRUTH, SIMULATED, BASIS, FILES, SCORES, SEQUENCE, ANY = \
+    "spectra", "results", "truth", "simulated", "basis", "files", "scores", "sequence", "any"
 
 
 #**************************************************************************************************#
@@ -68,7 +76,17 @@ GROUPS = {g.key: g for g in [
           "Load spectra and ground truth from files and folders, named as you like, or the "
           "challenges; and basis sets, in any format. Every block exports what it made; "
           "Convert basis set writes its files itself."),
-    Group("simulate", "Simulate", "#8ea4ff", "Synthetic spectra with known contents."),
+    Group("simulate", "Simulate", "#8ea4ff",
+          "Basis sets and spectra with known contents, by every simulator: FID-A's, spant's and "
+          "FSL-MRS's density-matrix simulations, FSL-MRS's and spant's synthetic spectra, "
+          "MRS-Sim, and MRSandbox's virtual scanner on its virtual brain; the pulse sequences "
+          "they play, from MRSandbox's library or any Pulseq file, and the toolboxes' RF pulse "
+          "tools under All functions."),
+    Group("augment", "Augment", "#7a8ff6",
+          "Vary the spectra, physically consistently, with Augmentrum: the signal (noise, line "
+          "broadening, baselines, phase and frequency, amplitude), artifacts (residual water, "
+          "macromolecules, eddy currents, spurious echoes, contaminant peaks), and what the scan "
+          "sampled (coils, transients, k-space); a water reference wired in is varied alike."),
     Group("preprocess", "Preprocess", "#5274f0",
           "Prepare the spectra for analysis: correct imperfections, reduce dimensionality "
           "(Near et al., NMR Biomed 2021, Tables 2-4)."),
@@ -83,6 +101,12 @@ GROUPS = {g.key: g for g in [
           "Judge the spectra and the fits: spectral quality (SNR, linewidth), and fits against "
           "the ground truth with every analysis of MRSValidate that compares the two (Kreis et "
           "al., NMR Biomed 2021, section 4.3), its plots, and a radar of the scores."),
+    Group("mrsi", "MRSI", "#3a9ac7",
+          "Spectroscopic imaging on a spatial NIfTI-MRS: spant's k-space, mask and voxel "
+          "tools and FSL-MRS's alignment, phasing and lipid removal across the voxels; then "
+          "the voxels apart, so every step and fitter takes them, and the fits back on the "
+          "grid as metabolite maps. FID-A's CSI functions are under All functions (they need "
+          "the MATLAB runtime)."),
     Group("other", "Other", "#6f7f99",
           "Further operations the toolboxes offer: modelling peaks, cropping, conjugating, "
           "shifting, matching linewidths, resampling, adding and selecting."),
@@ -103,7 +127,8 @@ class Port:
 
     Attributes:
         name (str): The argument it gives, or the output it is.
-        kind (str): What flows: SPECTRA, RESULTS, TRUTH, SIMULATED, BASIS, FILES or ANY.
+        kind (str): What flows: SPECTRA, RESULTS, TRUTH, SIMULATED, BASIS, FILES, SCORES,
+            SEQUENCE or ANY.
         many (bool): Takes any number of wires, as one dictionary by block name.
     """
 
@@ -214,7 +239,8 @@ def _pick(name: str, choices: Tuple[str, ...]) -> Field:
 _PREPROCESS = [
     ("coil-combination", "Coil combination",
      [("fsl_mrs", "coilcombine"), ("fid_a", "op_addrcvrs"), ("osprey", "op_addrcvrs"),
-      ("mrspeclab", "CoilCombinationSVD"), ("mrspeclab", "CoilCombinationAdaptive")],
+      ("mrspeclab", "CoilCombinationSVD"), ("mrspeclab", "CoilCombinationAdaptive"),
+      ("suspect", "combine_channels")],
      "Combine the receive coils' signals into one."),
     ("eddy-current", "Eddy-current correction",
      [("fsl_mrs", "ecc"), ("fid_a", "op_ecc"), ("osprey", "op_eccKlose"),
@@ -226,7 +252,7 @@ _PREPROCESS = [
      "Remove corrupted transients, e.g. from motion."),
     ("alignment", "Frequency & phase alignment",
      [("fsl_mrs", "align"), ("fid_a", "op_alignAverages"), ("osprey", "op_robustSpecReg"),
-      ("spant", "align"), ("mrspeclab", "FreqPhaseAlignment")],
+      ("spant", "align"), ("mrspeclab", "FreqPhaseAlignment"), ("suspect", "alignment")],
      "Correct frequency and phase drift between transients."),
     ("averaging", "Averaging",
      [("fsl_mrs", "average"), ("fid_a", "op_averaging"), ("osprey", "op_averaging"),
@@ -240,10 +266,11 @@ _PREPROCESS = [
      "Subtract edited sub-spectra."),
     ("water-removal", "Residual water removal",
      [("fsl_mrs", "remove_peaks"), ("osprey", "op_iterativeWaterFilter"),
-      ("fid_a", "op_removeWater"), ("spant", "hsvd_filt")],
+      ("fid_a", "op_removeWater"), ("spant", "hsvd_filt"), ("suspect", "water_removal")],
      "Remove the residual water peak (HLSVD)."),
     ("phasing", "Phasing",
-     [("fsl_mrs", "phase_correct"), ("fid_a", "op_autophase"), ("spant", "auto_phase")],
+     [("fsl_mrs", "phase_correct"), ("fid_a", "op_autophase"), ("spant", "auto_phase"),
+      ("suspect", "phasing")],
      "Zero-order phase correction."),
     ("referencing", "Frequency referencing",
      [("fsl_mrs", "shift_to_reference"), ("fid_a", "op_ppmref"), ("osprey", "op_ppmref")],
@@ -254,7 +281,7 @@ _PREPROCESS = [
      "Remove a smooth baseline or offset; most fitting tools model the baseline instead."),
     ("apodization", "Apodization",
      [("fsl_mrs", "apodize"), ("fid_a", "op_filter"), ("spant", "lb"),
-      ("mrspeclab", "LineBroadening")],
+      ("mrspeclab", "LineBroadening"), ("suspect", "apodization")],
      "Line broadening; not recommended before fitting (Near 2021, Table 4)."),
     ("zero-filling", "Zero-filling",
      [("fsl_mrs", "truncate_or_pad"), ("fid_a", "op_zeropad"), ("spant", "zf"),
@@ -270,7 +297,8 @@ _OTHER = [
     ("crop", "Crop", [("fid_a", "op_freqrange"), ("osprey", "op_freqrange"),
                       ("spant", "crop_spec")],
      "Keep a ppm range of the spectrum."),
-    ("conjugate", "Conjugate", [("fsl_mrs", "conjugate"), ("fid_a", "op_complexConj")],
+    ("conjugate", "Conjugate", [("fsl_mrs", "conjugate"), ("fid_a", "op_complexConj"),
+                                ("nifti_mrs", "conjugate")],
      "Mirror the frequency axis, for data stored the other way round."),
     ("shift-phase", "Shift or phase",
      [("fsl_mrs", "fshift"), ("fid_a", "op_freqshift"), ("osprey", "op_freqshift"),
@@ -365,6 +393,22 @@ BLOCKS: Dict[str, Block] = {b.key: b for b in [
           help="Files and folders from anywhere, each file named as you like (data, water, mm, "
                "truth, ...); a folder is searched and its files named by BIDS or by words in "
                "their names. One output per name, in group order."),
+    Block("suspect-read", "data", "Read with suspect", folder="Files", call="suspect.read",
+          imports=("from mrsuite.bridges import suspect",),
+          fields=(_value("files", ""),
+                  _choice("format", ["twix", "rda", "sdat", "siemens_dicom", "dicom", "bruker"],
+                          "'twix'")),
+          outputs=(Port("spectra", SPECTRA),),
+          help="Raw scanner files read by suspect's own readers (Twix, RDA, SDAT, DICOM, "
+               "Bruker), one spectrum each, as acquired; spec2nii (Load data) reads more."),
+    Block("inspector-spectrum", "data", "INSPECTOR synthetic spectrum", folder="Simulated datasets",
+          call="mr_science_lab.spectrum",
+          imports=("from mrsuite.datasets import mr_science_lab",),
+          fields=(_choice("model", ["perfect", "imperfect"], "'perfect'"),
+                  _choice("broadening", [3, 8, 20], "8")),
+          outputs=(Port("spectra", SPECTRA),),
+          help="A brain spectrum simulated in INSPECTOR by the MR SCIENCE Lab (Siemens 3 T), "
+               "perfect or with its macromolecules changed, at 3, 8 or 20 Hz² of broadening."),
     Block("ismrm2016", "data", "2016 fitting challenge", folder="Simulated datasets",
           call="challenge2016.load",
           imports=("from mrsuite.datasets import challenge2016",),
@@ -387,9 +431,21 @@ BLOCKS: Dict[str, Block] = {b.key: b for b in [
     Block("openneuro-ds006812", "data", "COWS (ds006812)", folder="In vivo datasets",
           call="openneuro.load", imports=("from mrsuite.datasets import openneuro",),
           fixed={"dataset": "'ds006812'"}, fields=(_value("subject", "'sub-01'"),),
-          outputs=(Port("spectra", SPECTRA), Port("mm", SPECTRA)),
+          outputs=(Port("spectra", SPECTRA), Port("water", SPECTRA), Port("mm", SPECTRA),
+                   Port("mm_water", SPECTRA)),
           help="OpenNeuro ds006812 (Igwe): sLASER at 3 T under three water suppression "
-               "schemes, one subject's raw acquisitions and their macromolecule ones."),
+               "schemes, one subject's raw acquisitions with their water references, and "
+               "the macromolecule ones with theirs."),
+    Block("marss-basis", "data", "MARSS basis set (MR SCIENCE Lab)", folder="Basis sets",
+          call="mr_science_lab.basis",
+          imports=("from mrsuite.datasets import mr_science_lab",),
+          fields=(_choice("sequence", ["press", "slaser", "steam"], "'press'"),
+                  _choice("vendor", ["siemens", "ge", "philips", "bruker"], "'siemens'"),
+                  _value("te", "30"), _value("bandwidth", "4000"), _value("points", "2048"),
+                  _value("tm", "None")),
+          outputs=(Port("basis", BASIS),),
+          help="The MR SCIENCE Lab's MARSS-simulated basis sets for the vendors' PRESS, sLASER "
+               "and STEAM with their exact pulses and timings, fetched on first use."),
     Block("basis", "data", "Load basis set", folder="Basis sets", call="io.basis",
           imports=("from mrsuite import io",),
           fields=(_value("files", positional=True), _value("format", "'auto'"),
@@ -411,18 +467,220 @@ BLOCKS: Dict[str, Block] = {b.key: b for b in [
           outputs=(Port("files", FILES),),
           help="A basis set written for another tool by BasiC; tool is BasiC's id for it, "
                "e.g. 'osprey', 'fsLmrs', 'jmrui', 'niftimrs' (a wrong one is told the rest)."),
-    # simulate
-    Block("simulation", "simulate", "MRS-Sim spectra", call="mrs_sim.simulate",
+    Block("dimensions", "data", "Dimensions",
+          options=(("nifti_mrs", "remove_dim"), ("nifti_mrs", "reorder"),
+                   ("nifti_mrs", "reshape"), ("nifti_mrs", "split")),
+          help="Drop, reorder, reshape or split the higher dimensions of NIfTI-MRS (coils, "
+               "transients, sub-spectra), with nifti_mrs_tools."),
+    # simulate: basis sets
+    Block("fid-a-basis", "simulate", "FID-A basis set", folder="Basis set simulation", call="bases.fid_a",
+          imports=("from mrsuite.simulators import bases",),
+          fields=(_value("metabolites", repr(list(bases.METABOLITES))),
+                  _choice("seq", ["press", "steam", "se", "laser"], "'press'"),
+                  _value("te1", "11.0"), _value("te2", "19.0"), _value("points", "2048"),
+                  _value("bandwidth", "2000.0"), _value("field", "3.0"),
+                  _value("linewidth", "2.0")),
+          outputs=(Port("basis", BASIS),),
+          help="A basis set simulated by FID-A with ideal pulses, a density-matrix "
+               "simulation per metabolite of its spin systems (sim_lcmrawbasis); te1 and "
+               "te2 in ms (TE and TM for STEAM)."),
+    Block("spant-basis", "simulate", "spant basis set", folder="Basis set simulation", call="bases.spant",
+          imports=("from mrsuite.simulators import bases",),
+          fields=(_choice("pul_seq", SPANT_SEQUENCES, "'seq_press_ideal'"),
+                  _value("frequency", "123.2"), _value("bandwidth", "2000.0"),
+                  _value("points", "1024"), _value("centre", "4.65"),
+                  _choice("lcm_compat", [True, False], "False")),
+          outputs=(Port("basis", BASIS),),
+          help="spant's 1H brain basis set through one of its ideal sequences "
+               "(sim_basis_1h_brain); the sequence's timings in seconds (TE1, TE2, TE3, TE, "
+               "TM) under further arguments."),
+    Block("fsl-basis", "simulate", "FSL-MRS basis simulation", folder="Basis set simulation",
+          call="bases.fsl_mrs", imports=("from mrsuite.simulators import bases",),
+          fields=(_value("sequence_json", positional=True),
+                  _value("metabolites", repr(list(bases.METABOLITES))), _value("te", "None"),
+                  _value("autophase", "None")),
+          outputs=(Port("basis", BASIS),),
+          help="A basis set simulated by FSL-MRS's fsl_mrs_sim from a sequence described in "
+               "its JSON (RF pulses, gradients, delays, coherence filter); needs FSL-MRS "
+               "with fsl-denmatsim."),
+    Block("mrsandbox-basis", "simulate", "MRSandbox basis set", folder="Basis set simulation",
+          call="mrsandbox.basis", imports=("from mrsuite.simulators import mrsandbox",),
+          fields=(_choice("sequence", list(SEQUENCES), "'press'"),
+                  _value("brain", "'icbm152'"), _value("scanner", "'generic_3t'"),
+                  _value("position", "(0.0, -45.0, 35.0)"), _value("size", "20.0"),
+                  _value("seed", "0"), _value("points", "2048"), _value("bandwidth", "4000.0"),
+                  _choice("imperfections", [True, False], "True")),
+          outputs=(Port("basis", BASIS),),
+          help="The basis set of MRSandbox's own simulation: every metabolite in the voxel "
+               "rendered by its engine through the sequence, of its library or wired in, at "
+               "the relaxation and transmit the seed draws."),
+    # simulate: spectra
+    Block("simulation", "simulate", "MRS-Sim spectra", folder="Spectrum simulation", call="mrs_sim.simulate",
           imports=("from mrsuite.simulators import mrs_sim",),
-          fields=(_choice("config", ["coil_combined_with_artifacts", "denoising_dataset"],
-                          positional=True),
+          fields=(_choice("config", ["ismrm2016", "coil_combined_with_artifacts",
+                                     "denoising_dataset"], positional=True),
                   _value("n", "", positional=True), _value("seed", "0")),
           outputs=(Port("spectra", SPECTRA), Port("truth", SIMULATED)),
           wrap={"config": "mrs_sim.config({})"},
-          help="Spectra simulated by MRS-Sim from one of its configs, and their truth."),
+          help="Spectra simulated by MRS-Sim from one of its configs - the 2016 challenge's "
+               "distribution, or its own with artifacts - and their truth."),
+    Block("simntg-basis", "simulate", "SimnTG triglyceride", folder="Basis set simulation",
+          call="bases.simntg", imports=("from mrsuite.simulators import bases",),
+          fields=(_value("chain_length", "18"), _value("double_bonds", "(6, 9)"),
+                  _choice("seq", ["press", "steam", "se", "laser"], "'press'"),
+                  _value("te1", "11.0"), _value("te2", "19.0"), _value("points", "2048"),
+                  _value("bandwidth", "2000.0"), _value("field", "3.0"),
+                  _value("linewidth", "2.0")),
+          outputs=(Port("basis", BASIS),),
+          help="Lipid basis functions: SimnTG's triglyceride spin systems (chain length, double "
+               "bonds) through FID-A's ideal sequence, one per system and their sum; needs the "
+               "MATLAB runtime until SimnTG's round(x, 1) is fixed upstream."),
+    Block("fsl-synthetic", "simulate", "FSL-MRS synthetic spectra", folder="Spectrum simulation",
+          call="synthetic.fsl_mrs", imports=("from mrsuite.simulators import synthetic",),
+          inputs=(Port("basis", BASIS),),
+          fields=(_value("n", "1"), _value("concentrations", "None"),
+                  _value("broadening", "(9.0, 0.0)"), _value("shift", "0.0"),
+                  _value("phi0", "0.0"), _value("phi1", "0.0"), _value("noise", "0.1"),
+                  _value("baseline", "None"), _value("seed", "0")),
+          outputs=(Port("spectra", SPECTRA), Port("truth", TRUTH)),
+          help="Spectra synthesised by FSL-MRS from a basis set: its signal model at given "
+               "or standard concentrations, broadened, shifted, phased, with noise; the "
+               "concentrations as truth."),
+    Block("spant-brain", "simulate", "spant brain spectra", folder="Spectrum simulation",
+          call="synthetic.spant", imports=("from mrsuite.simulators import synthetic",),
+          fields=(_value("n", "1"), _value("type", "'normal_v2'"),
+                  _choice("pul_seq", SPANT_SEQUENCES, "'seq_slaser_ideal'"),
+                  _value("frequency", "123.2"), _value("bandwidth", "2000.0"),
+                  _value("points", "1024"), _value("centre", "4.65"), _value("seed", "0")),
+          outputs=(Port("spectra", SPECTRA), Port("truth", TRUTH)),
+          help="Brain-like spectra simulated by spant (sim_brain_1h) through one of its ideal "
+               "sequences, its amplitudes as truth; timings under further arguments."),
+    Block("mrsandbox-scan", "simulate", "MRSandbox scan", folder="Spectrum simulation",
+          call="mrsandbox.scan", imports=("from mrsuite.simulators import mrsandbox",),
+          fields=(_choice("sequence", list(SEQUENCES), "'press'"),
+                  _value("brain", "'icbm152'"), _value("scanner", "'generic_3t'"),
+                  _value("position", "(0.0, -45.0, 35.0)"), _value("size", "20.0"),
+                  _value("n", "1"), _value("seed", "0"), _value("points", "2048"),
+                  _value("bandwidth", "4000.0"), _value("averages", "1"),
+                  _choice("imperfections", [True, False], "True"),
+                  _choice("mm", [True, False], "True"), _choice("lipids", [True, False], "True")),
+          outputs=(Port("spectra", SPECTRA), Port("truth", TRUTH), Port("basis", BASIS)),
+          help="A voxel of MRSandbox's virtual brain acquired by its virtual scanner, every "
+               "quantity drawn from its priors per seed, through a sequence of its library or "
+               "one wired in; the drawn concentrations (mM) as truth, and the basis set of "
+               "the very sequence it played."),
+    Block("mrsandbox-mrsi", "simulate", "MRSandbox MRSI scan", folder="Spectrum simulation",
+          call="mrsandbox.mrsi", imports=("from mrsuite.simulators import mrsandbox",),
+          fields=(_choice("sequence", list(SEQUENCES), "'press'"),
+                  _value("brain", "'icbm152'"), _value("scanner", "'generic_3t'"),
+                  _value("centre", "(0.0, -20.0, 35.0)"), _value("matrix", "(16, 16)"),
+                  _value("voxel", "10.0"), _value("seed", "0"), _value("points", "2048"),
+                  _value("bandwidth", "4000.0"), _value("averages", "None"),
+                  _choice("imperfections", [True, False], "True"),
+                  _choice("mm", [True, False], "True"), _choice("lipids", [True, False], "True")),
+          outputs=(Port("spectra", SPECTRA), Port("truth", TRUTH), Port("basis", BASIS)),
+          help="A slice of MRSandbox's virtual brain acquired by its virtual scanner as one "
+               "spatial NIfTI-MRS, phase encoded and decoded; the drawn concentrations (mM) as "
+               "truth, and the basis set of the very sequence it played."),
+    # simulate: RF pulses
+    Block("rf-sinc", "simulate", "Sinc pulse", folder="RF pulses", call="pulses.sinc",
+          imports=("from mrsuite.simulators import pulses",),
+          fields=(_value("lobes", "4"), _value("points", "256"),
+                  _choice("kind", ["exc", "ref", "inv"], "'exc'")),
+          outputs=(Port("pulse"),),
+          help="A sinc RF pulse by FID-A: its lobes and points, for excitation, refocusing or "
+               "inversion, with its time-bandwidth product."),
+    Block("rf-gauss", "simulate", "Gaussian pulse", folder="RF pulses", call="pulses.gauss",
+          imports=("from mrsuite.simulators import pulses",),
+          fields=(_value("duration", "2.0"), _value("bandwidth", "2000.0"), _value("points", "256"),
+                  _choice("kind", ["exc", "ref", "inv"], "'exc'"), _value("offset", "0.0")),
+          outputs=(Port("pulse"),),
+          help="A Gaussian RF pulse by FID-A: duration (ms), bandwidth (Hz), points, kind and "
+               "frequency offset; FID-A's other pulses (hyperbolic secant, GOIA, dual-band) and "
+               "its Bloch simulation are under All functions."),
+    # simulate: pulse sequences
+    *[Block(f"seq-{kind}", "simulate", title, folder="Pulse sequences", call="mrsandbox.sequence",
+            imports=("from mrsuite.simulators import mrsandbox",), fixed={"kind": repr(kind)},
+            fields=tuple(_value(name, repr(value)) for name, value in SEQUENCES[kind][1].items()),
+            outputs=(Port("sequence", SEQUENCE),),
+            help=f"{title} from MRSandbox's library, its timings in seconds"
+                 f"{'; a physical design, which a Pulseq file can hold' * localized}.")
+      for kind, title, localized in [("press", "PRESS", False), ("steam", "STEAM", False),
+                                     ("slaser", "sLASER", False),
+                                     ("megapress", "MEGA-PRESS", False),
+                                     ("hermes", "HERMES", False), ("hercules", "HERCULES", False),
+                                     ("press-localized", "PRESS, localized", True),
+                                     ("steam-localized", "STEAM, localized", True),
+                                     ("slaser-localized", "sLASER, localized", True)]],
+    Block("pulseq-read", "simulate", "Pulseq file", folder="Pulse sequences",
+          call="mrsandbox.read_pulseq",
+          imports=("from mrsuite.simulators import mrsandbox",),
+          fields=(_value("path", positional=True), _value("centre", "4.65"),
+                  _value("readout", "0")),
+          outputs=(Port("sequence", SEQUENCE),),
+          help="A sequence read from a Pulseq .seq file by MRSandbox, block by block, one "
+               "readout of it."),
+    Block("pulseq-write", "simulate", "Write Pulseq", folder="Pulse sequences",
+          call="mrsandbox.write_pulseq",
+          imports=("from mrsuite.simulators import mrsandbox",),
+          inputs=(Port("sequence", SEQUENCE),),
+          fields=(_value("path", positional=True), _value("points", "2048"),
+                  _value("bandwidth", "4000.0"), _value("frequency", "127.73"),
+                  _value("centre", "4.65")),
+          outputs=(Port("files", FILES),),
+          help="A physical sequence written as a Pulseq .seq file by MRSandbox through "
+               "pypulseq; an idealized one is refused."),
     # preprocess
     *[Block(key, "preprocess", title, options=tuple(options), help=help)
       for key, title, options, help in _PREPROCESS],
+    # augment
+    Block("noise", "augment", "Noise", folder="Signal", options=(("augmentrum", "noise"),),
+          help="Complex Gaussian acquisition noise, at an SNR or a sigma, absolute or relative."),
+    Block("line-broadening", "augment", "Line broadening", folder="Signal",
+          options=(("augmentrum", "line_broadening"),),
+          help="Lorentzian, Gaussian or Voigt broadening of every line, in Hz."),
+    Block("baseline-distortion", "augment", "Baseline", folder="Signal",
+          options=(("augmentrum", "baseline"),),
+          help="A baseline added: a random walk, a B-spline or a polynomial, scaled to the data."),
+    Block("phase-shift", "augment", "Phase shift", folder="Signal",
+          options=(("augmentrum", "phase"),),
+          help="Zero- and first-order phase, in degrees."),
+    Block("frequency-shift", "augment", "Frequency shift", folder="Signal",
+          options=(("augmentrum", "frequency_shift"),), help="The spectrum shifted, in Hz."),
+    Block("amplitude-scaling", "augment", "Amplitude scaling", folder="Signal",
+          options=(("augmentrum", "amplitude"),),
+          help="The whole signal scaled by a factor, or one drawn from a range."),
+    Block("residual-water", "augment", "Residual water", folder="Artifacts",
+          options=(("augmentrum", "residual_water"),),
+          help="Residual water added at the centre, with its lobes."),
+    Block("macromolecules", "augment", "Macromolecules", folder="Artifacts",
+          options=(("augmentrum", "macromolecules"),),
+          help="A macromolecular background added: parametrized, measured or supplied."),
+    Block("eddy-currents", "augment", "Eddy currents", folder="Artifacts",
+          options=(("augmentrum", "eddy_current"),),
+          help="Eddy-current phase distortions along the FID."),
+    Block("spurious-echoes", "augment", "Spurious echoes", folder="Artifacts",
+          options=(("augmentrum", "spurious_echoes"),),
+          help="Spurious echoes added along the FID, on all or a fraction of the transients."),
+    Block("artificial-peaks", "augment", "Contaminant peaks", folder="Artifacts",
+          options=(("augmentrum", "artificial_peaks"),),
+          help="Contaminant peaks added at given or random positions."),
+    Block("coil-sampling", "augment", "Coil sampling", folder="Sampling",
+          options=(("augmentrum", "coil_sampling"),),
+          help="A receive array drawn from the coils there, or synthesised."),
+    Block("average-sampling", "augment", "Transient sampling", folder="Sampling",
+          options=(("augmentrum", "average_sampling"),),
+          help="A subset of the transients, as a shorter scan would have."),
+    Block("transient-synthesis", "augment", "Transient synthesis", folder="Sampling",
+          options=(("augmentrum", "transient_synthesis"),),
+          help="Transients synthesised from one FID, with a real scan's drift, jitter and "
+               "motion events."),
+    Block("undersampling", "augment", "k-space undersampling", folder="Sampling",
+          options=(("augmentrum", "undersampling"),),
+          help="MRSI k-space undersampled on a Cartesian or a non-Cartesian trajectory."),
+    Block("spatial", "augment", "Spatial augmentation", folder="Sampling",
+          options=(("augmentrum", "spatial"),),
+          help="Affine transformations of an MRSI volume and its coil sensitivities."),
     # fit
     Block("lcm-fit", "fit", "Linear-combination fit", out=RESULTS,
           options=(("fsl_mrs", "fit"), ("lcmodel", "fit"), ("osprey", "fit"), ("spant", "fit"),
@@ -430,6 +688,12 @@ BLOCKS: Dict[str, Block] = {b.key: b for b in [
           help="Model the spectrum as a combination of basis spectra."),
     Block("peak-fit", "fit", "Peak fit (AMARES)", out=RESULTS, options=(("pyamares", "fit"),),
           help="Model the spectrum as peaks with prior knowledge."),
+    Block("ratios", "fit", "Ratios to creatine", call="scoring.ratios", imports=(_SCORE,),
+          inputs=(Port("results", RESULTS),),
+          fields=(_choice("to", ["tCr"], "'tCr'"), _value("scaling", "None")),
+          outputs=(Port("out", RESULTS),),
+          help="Each fit's concentrations as ratios to total creatine, Cr + PCr, the most "
+               "common reference (Near 2021), as a result of its own."),
     # models
     Block("wand", "models", "WAND", model="mrsuite.models.wand.WAND",
           imports=("from mrsuite import models",),
@@ -489,6 +753,46 @@ BLOCKS: Dict[str, Block] = {b.key: b for b in [
     # other
     *[Block(key, "other", title, options=tuple(options), help=help)
       for key, title, options, help in _OTHER],
+    # mrsi
+    Block("mrsi-coils", "mrsi", "MRSI coil combination",
+          options=(("spant", "comb_coils_mrsi_gls"), ("fsl_mrs", "coilcombine")),
+          help="The coils of every voxel combined: spant's generalised least squares on the "
+               "noise, or FSL-MRS's weights."),
+    Block("kspace", "mrsi", "k-space",
+          options=(("spant", "zf_xy"), ("spant", "apodise_xy"), ("spant", "grid_shift_xy"),
+                   ("spant", "pg_extrap_xy"), ("spant", "img2kspace_xy"),
+                   ("spant", "kspace2img_xy")),
+          help="The slice in k-space: zero-filled, apodised, shifted, extrapolated, or "
+               "transformed there and back, with spant."),
+    Block("mrsi-alignment", "mrsi", "MRSI frequency alignment",
+          options=(("fsl_mrs", "mrsi_freq_align"),),
+          help="Every voxel aligned in frequency to a target or to their mean, with FSL-MRS."),
+    Block("mrsi-phasing", "mrsi", "MRSI phase correction",
+          options=(("fsl_mrs", "mrsi_phase_corr"),),
+          help="Every voxel phased, with FSL-MRS."),
+    Block("lipid-removal", "mrsi", "Lipid removal",
+          options=(("fsl_mrs", "lipid_removal_l2"), ("spant", "ssp")),
+          help="Lipids from the skull taken out of the voxels: FSL-MRS's L2 regularisation "
+               "on a lipid mask or basis, or spant's signal-space projection."),
+    Block("voxel-mask", "mrsi", "Voxel mask",
+          options=(("spant", "mask_xy_ellipse"), ("spant", "mask_xy_corners"),
+                   ("spant", "crop_xy")),
+          help="Voxels outside an ellipse or in the corners masked, or the grid cropped."),
+    Block("voxel", "mrsi", "Voxel",
+          options=(("spant", "get_voxel"), ("spant", "get_slice")),
+          help="One voxel, or one slice, out of the grid."),
+    Block("voxels", "mrsi", "Voxels apart", call="mrsi.voxels",
+          imports=("from mrsuite import mrsi",),
+          inputs=(Port("spectra", SPECTRA),), fields=(_value("threshold", "0.0"),),
+          outputs=(Port("spectra", SPECTRA), Port("index")),
+          help="The grid's voxels as single-voxel spectra, one per voxel with signal, which "
+               "every step and fitter takes; and their indices, for the maps."),
+    Block("maps", "mrsi", "Metabolite maps", call="mrsi.maps",
+          imports=("from mrsuite import mrsi",),
+          inputs=(Port("results", RESULTS), Port("index")),
+          fields=(_value("metabolites", "None"), _value("scaling", "None")),
+          outputs=(Port("figure"),),
+          help="Fits of the voxels back on the grid, one map per metabolite."),
 ]}
 
 
@@ -509,13 +813,20 @@ def block(key: str) -> Block:
 #   categories   #
 #****************#
 # where a toolbox keeps a function says what it is for: FID-A's and Osprey's folders, spant's
-# name prefixes; what the curated blocks offer keeps their group, a fit is a fit, and the
-# remaining steps (spectra in, spectra out) are preprocessing
-FOLDERS = {"fid_a": {"inputOutput": "data", "simulationTools": "simulate"},
+# name prefixes, and what a name says; what the curated blocks offer keeps their group, a fit
+# is a fit, and the remaining steps (spectra in, spectra out) are preprocessing
+FOLDERS = {"fid_a": {"inputOutput": "data", "simulationTools": "simulate",
+                     "rfPulseTools": "simulate"},
            "osprey": {"load": "data", "process": "preprocess", "fit": "fit", "quantify": "fit",
                       "plot": "evaluate", "overview": "evaluate"}}
-PREFIXES = {"spant": {"read_": "data", "write_": "data", "sim_": "simulate", "fit_": "fit",
-                      "calc_": "evaluate", "plot_": "evaluate"}}
+PREFIXES = {"spant": {"read_": "data", "write_": "data", "sim_": "simulate", "seq_": "simulate",
+                      "fit_": "fit", "calc_": "evaluate", "plot_": "evaluate"}}
+# and what a name says before either: FID-A's CSI functions, spant's MRSI ones
+PATTERNS = {"fid_a": {r"^(op|io)_CSI": "mrsi"},
+            "spant": {r"mrsi|_xy(_|$)|slice|voi|psf|kspace": "mrsi"}}
+# and a toolbox that does one thing: every module of Augmentrum augments
+DEFAULTS = {"augmentrum": "augment"}
+PREFIXES["suspect"] = {"load_": "data"}
 
 
 def categories(bridge: str) -> Dict[str, str]:
@@ -529,12 +840,17 @@ def categories(bridge: str) -> Dict[str, str]:
             return curated[(bridge, name)]
         if name == "fit":
             return "fit"
+        for pattern, group in PATTERNS.get(bridge, {}).items():
+            if re.search(pattern, name):
+                return group
         group = FOLDERS.get(bridge, {}).get(folders.get(name, ""))
         if group:
             return group
         for prefix, group in PREFIXES.get(bridge, {}).items():
             if name.startswith(prefix):
                 return group
+        if bridge in DEFAULTS:
+            return DEFAULTS[bridge]
         return "preprocess" if name in steps else "other"
     return {name: category(name) for name in catalog.functions(bridge, True)}
 
@@ -549,8 +865,9 @@ def label(option: Tuple[str, str]) -> str:
     where = "MRSValidate" if where.startswith(f"{_MRSV}.") else where
     return {"fsl_mrs": "FSL-MRS", "fid_a": "FID-A", "osprey": "Osprey", "spant": "spant",
             "mrspeclab": "MRSpecLAB", "lcmodel": "LCModel", "tarquin": "TARQUIN",
-            "pyamares": "pyAMARES", "vespa": "Vespa", _CHALLENGE: "2016 challenge",
-            _SCORING: "MRSuite"}.get(where, where) + f" · {function}"
+            "pyamares": "pyAMARES", "vespa": "Vespa", "nifti_mrs": "NIfTI-MRS tools",
+            "augmentrum": "Augmentrum", "suspect": "suspect",
+            _CHALLENGE: "2016 challenge", _SCORING: "MRSuite"}.get(where, where) + f" · {function}"
 
 
 #***********#
@@ -561,14 +878,15 @@ def ports(b: Block, arguments: List[str]) -> Tuple[List[Port], List[Port]]:
     A block's inputs and outputs: a step takes spectra, and each of its arguments, which
     a wire gives or else the form; it makes what it makes. An argument named basis takes
     a basis set (every fit's does); one named files takes files, as a block reads them.
-    A load's outputs are its names, which the graph knows (``Graph.ports``).
+    One named sequence takes a pulse sequence. A load's outputs are its names, which the
+    graph knows (``Graph.ports``).
 
     Args:
         b (Block): The block.
         arguments (List[str]): Its arguments, each an input of its own.
     """
-    given = [Port(n, BASIS if n == "basis" else FILES if n == "files" else ANY)
-             for n in arguments]
+    kinds = {"basis": BASIS, "files": FILES, "sequence": SEQUENCE}
+    given = [Port(n, kinds.get(n, ANY)) for n in arguments]
     if b.step:
         return [Port("data", SPECTRA), *given], [Port("out", b.out)]
     return [*b.inputs, *given], list(b.outputs)

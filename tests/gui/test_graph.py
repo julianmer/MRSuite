@@ -25,7 +25,8 @@ import pytest
 from mrsuite import externals
 from mrsuite.datasets import challenge2016
 from mrsuite.gui import blocks, catalog
-from mrsuite.gui.graph import Graph, brief, export, exports, thumb, traces
+from mrsuite.gui.graph import Graph, applied, brief, export, exports, thumb, traces
+from tests.conftest import needs_octave
 
 needs_challenge = pytest.mark.skipif(not challenge2016.BASIS.exists(),
                                      reason="challenge submodule not checked out")
@@ -399,9 +400,10 @@ def test_a_basis_set_is_drawn_by_metabolite_and_written_out_as_a_basis_file(tmp_
     assert labels == ["NAA", "Cr"]
     assert np.allclose([ppm[np.argmax(y)] for y in ys], [2.01, 3.03],   # the nearest point
                        atol=(ppm[1] - ppm[0]) / 2)
-    assert line["kind"] == "lines" and len(line["ys"]) == 2, "a line per basis spectrum"
-    assert all(0 <= v <= 1 for y in line["ys"] for v in y)
-    assert np.mean(line["ys"][1]) > np.mean(line["ys"][0]), "stacked: Cr drawn above NAA"
+    assert line["kind"] == "spectra" and len(line["faint"]) == 2, "a line per basis spectrum"
+    assert all(0 <= v <= 1 for y in line["faint"] for v in y) and line["line"] is None
+    assert np.mean(line["faint"][1]) > np.mean(line["faint"][0]), "stacked: Cr drawn above NAA"
+    assert line["label"] == "2 basis functions"
     assert exports(basis) == ["basis"] and written == tmp_path / "out" / "set.BASIS"
     assert written.read_bytes() == basis.lcmodel().read_bytes()
 
@@ -600,7 +602,8 @@ def test_scores_of_fits_draw_on_a_radar_as_the_script_draws_them(graph):
         ["Agreement\nLin's CCC", "Errors\nMOSAE"]
     for score in (mosae, ccc):
         assert graph.output(score).equals(namespace[graph.nodes[score].name])
-    assert exports(drawn) == ["figure"] and thumb(drawn) == {"kind": "text", "text": "figure"}
+    assert exports(drawn) == ["figure"]
+    assert thumb(drawn)["kind"] == "image" and thumb(drawn)["src"].startswith("data:image/png;base64,")
 
 
 def test_another_toolbox_starts_its_form_and_keeps_the_wires_it_takes():
@@ -771,11 +774,51 @@ def test_what_a_block_made_is_written_out(graph, tmp_path):
 #************#
 @needs_challenge
 def test_thumbnails_show_a_spectrum_and_a_fit(graph):
-    graph.run()
-    line, bars = thumb(graph.output("n1")), thumb(graph.output("n3"))
+    """A fit is drawn as its curve and baseline over the data, the residual beneath; a
+    model's result, which keeps no curves, as its largest concentrations; each says what it
+    is, and how it came about is told from the history."""
+    from mrsuite.core.result import FitResult
 
-    assert line["kind"] == "line" and 0 <= min(line["y"]) and max(line["y"]) == 1
-    assert bars["kind"] == "bars" and bars["labels"] and max(bars["y"]) == 1
+    graph.run()
+    line, drawn = thumb(graph.output("n1")), thumb(graph.output("n3"))
+    bars = thumb([FitResult(method="mrsuite:MLP", metabolites=["NAA", "Cr"],
+                            concentrations={"raw": {"NAA": 2.0, "Cr": 1.0}})])
+
+    assert line["kind"] == "spectra" and 0 <= min(line["line"]) and max(line["line"]) == 1
+    assert line["faint"] == [] and line["label"] == "2 spectra"
+    assert drawn["kind"] == "fit" and max(drawn["data"]) == 1 and min(drawn["data"]) >= 0.3
+    assert drawn["label"].startswith("2 fits · ")
+    assert len(drawn["fit"]) == len(drawn["data"]) == len(drawn["baseline"]) == len(drawn["residual"])
+    assert max(drawn["fit"]) > 0.6 and max(drawn["residual"]) <= 0.3, "the residual beneath"
+    assert bars["kind"] == "bars" and bars["labels"] == ["NAA", "Cr"] and bars["y"] == [1, 0.5]
+    assert bars["label"] == "1 fit · MLP"
+    assert "FSL-MRS" in applied(graph.output("n2")) and applied(graph.output("n3")).count(":") == 1
+    assert applied(3) == ""
+
+
+def test_thumbnails_of_transients_numbers_and_scores():
+    """Transients are drawn stacked, each above the one before; numbers and a score table
+    as bars, the table's pooled values by method."""
+    import pandas as pd
+    from nifti_mrs.create_nmrs import gen_nifti_mrs
+    from nifti_mrs_plus import NIfTI_MRS_Plus
+
+    t, sf = np.arange(2048) * 2.5e-4, 123.2
+    fid = np.exp(2j * np.pi * (2.0 - 4.65) * sf * t - t / 0.05)
+    dyn = np.stack([fid, fid], axis=-1).reshape(1, 1, 1, -1, 2)
+    spectrum = gen_nifti_mrs(dyn, 2.5e-4, sf, dim_tags=["DIM_DYN", None, None])
+
+    waterfall = thumb(NIfTI_MRS_Plus([spectrum]))
+    numbers = thumb([3.0, 1.5, np.nan])
+    scores = thumb(pd.DataFrame({"method": ["a", "b", "a"], "metric": ["mae"] * 3,
+                                 "metabolite": ["all", "all", "NAA"], "score": [1.0, 0.5, 9.0]}))
+
+    assert waterfall["kind"] == "spectra" and waterfall["line"] is None
+    assert waterfall["label"] == "1 spectrum · 2 transients" and len(waterfall["faint"]) == 2
+    assert np.mean(waterfall["faint"][1]) > np.mean(waterfall["faint"][0]), "stacked"
+    assert numbers == {"kind": "bars", "y": [1, 0.5], "labels": [],
+                       "label": "3 values · median 2.25"}
+    assert scores == {"kind": "bars", "y": [1, 0.5], "labels": ["a", "b"], "label": "mae"}
 
 
 #************#
@@ -854,15 +897,44 @@ def test_a_thumbnail_shows_from_half_a_ppm():
     ppm, ys, _ = traces(spectrum)
     assert ppm[np.argmax(ys[0])] == pytest.approx(0.35, abs=0.02)
 
-    y = thumb(NIfTI_MRS_Plus([spectrum]))["y"]
+    y = thumb(NIfTI_MRS_Plus([spectrum]))["line"]
 
     assert np.argmax(y) / len(y) == pytest.approx((4.2 - 2.0) / (4.2 - 0.5), abs=0.02)
 
 
+def test_a_pulse_sequence_shows_as_its_diagram():
+    pytest.importorskip("mrsandbox")
+    from mrsuite.simulators import mrsandbox
+
+    picture = thumb(mrsandbox.sequence("slaser", te_s=0.030))
+
+    assert picture["kind"] == "image" and picture["src"].startswith("data:image/png;base64,")
+    assert picture["label"].startswith("SemiLaser")
+
+
+def test_a_thumbnail_of_a_water_reference_reaches_to_six_ppm():
+    """The water at 4.65 ppm towers over the metabolites: the picture widens to 6 ppm, so
+    the peak is in it rather than its tail alone."""
+    from nifti_mrs.create_nmrs import gen_nifti_mrs
+    from nifti_mrs_plus import NIfTI_MRS_Plus
+
+    t, sf = np.arange(2048) * 2.5e-4, 123.2
+    fid = sum(a * np.exp(2j * np.pi * (p - 4.65) * sf * t - t / 0.05) for a, p in
+              [(100, 4.65), (1, 2.0)])
+    water = gen_nifti_mrs(fid.reshape(1, 1, 1, -1), 2.5e-4, sf)
+
+    y = thumb(NIfTI_MRS_Plus([water]))["line"]
+    assert np.argmax(y) / len(y) == pytest.approx((6.0 - 4.65) / (6.0 - 0.5), abs=0.02)
+
+    water.add_hdr_field("WaterSuppressed", True)       # a suppressed scan with residual water
+    y = thumb(NIfTI_MRS_Plus([water]))["line"]
+    assert np.argmax(y) / len(y) == pytest.approx((4.2 - 2.0) / (4.2 - 0.5), abs=0.02)
+
+
 def test_a_thumbnail_of_raw_coils_is_their_magnitude():
-    """Two coils in opposite phase: their real parts cancel, their magnitudes show the peak;
-    one spectrum, with no coils or averages left, is drawn by its real part (a dispersive
-    one goes below zero)."""
+    """Two coils in opposite phase: their real parts cancel, their magnitudes show the peak,
+    each coil faint and their combination on top; one spectrum, with no coils or averages
+    left, is drawn by its real part (a dispersive one goes below zero)."""
     from nifti_mrs.create_nmrs import gen_nifti_mrs
     from nifti_mrs_plus import NIfTI_MRS_Plus
 
@@ -872,8 +944,11 @@ def test_a_thumbnail_of_raw_coils_is_their_magnitude():
     raw = gen_nifti_mrs(coils, 2.5e-4, sf, dim_tags=["DIM_COIL", None, None])
     one = gen_nifti_mrs((1j * fid).reshape(1, 1, 1, -1), 2.5e-4, sf)
 
-    y = thumb(NIfTI_MRS_Plus([raw]))["y"]
+    picture = thumb(NIfTI_MRS_Plus([raw]))
+    y = picture["line"]
     assert np.argmax(y) / len(y) == pytest.approx((4.2 - 2.0) / (4.2 - 0.5), abs=0.02)
+    assert len(picture["faint"]) == 2 and picture["label"] == "1 spectrum · 2 coils"
+    assert max(picture["faint"][0]) == max(picture["faint"][1]) == 1, "the coils at their scale"
     _, cancelled, _ = traces(raw)
     assert np.abs(np.mean(cancelled, axis=0)).max() < 1e-9, "real parts cancel"
     assert traces(one)[1][0].min() < 0 < traces(one)[1][0].max(), "one spectrum: real part"
@@ -899,7 +974,8 @@ def test_a_call_blocks_line_fits_its_function(key):
     for p in b.inputs:
         key, output = {blocks.RESULTS: ("lcm-fit", "out"), blocks.BASIS: ("basis", "basis"),
                        blocks.SPECTRA: ("ismrm2016", "spectra"),
-                       blocks.SCORES: ("errors", "scores")}.get(p.kind, ("ismrm2016", "truth"))
+                       blocks.SCORES: ("errors", "scores"),
+                       blocks.SEQUENCE: ("seq-press", "sequence")}.get(p.kind, ("ismrm2016", "truth"))
         graph.connect(graph.add(key), output, id, p.name)
 
     call = ast.parse(graph.code(id)[0]).body[0].value
@@ -920,6 +996,11 @@ def test_what_flows_meets_only_what_takes_it():
     graph.connect(mlp, "out", score, "methods")                     # an MLP fits
     with pytest.raises(ValueError, match="cannot go into"):
         graph.connect(mlp, "out", averaging, "data")
+    press, scan = graph.add("seq-press"), graph.add("mrsandbox-scan")
+    graph.show(scan, "sequence")                       # on the block, as any defaulted argument
+    graph.connect(press, "sequence", scan, "sequence")              # a sequence is played
+    with pytest.raises(ValueError, match="cannot go into"):
+        graph.connect(simulated, "truth", scan, "sequence")
 
 
 #************#
@@ -1127,3 +1208,52 @@ def test_every_toolbox_function_lands_in_a_tab_by_where_its_toolbox_keeps_it(mon
     spant = blocks.categories("spant")
     assert spant == {"fit": "fit", "read_ima": "data", "sim_basis": "simulate", "fit_mrs": "fit",
                      "calc_spec_snr": "evaluate", "lb": "preprocess", "Npts": "preprocess"}
+
+
+def test_every_augmentrum_module_augments():
+    pytest.importorskip("augmentrum")
+    found = blocks.categories("augmentrum")
+    assert found and set(found.values()) == {"augment"}, found
+    assert all(b.step for b in blocks.BLOCKS.values() if b.group == "augment")
+
+
+def test_a_slice_previews_as_a_map_and_comes_apart_in_the_graph():
+    pytest.importorskip("mrsandbox")
+    graph = Graph()
+    scan = graph.add("mrsandbox-mrsi")
+    graph.set(scan, "matrix", (4, 4))
+    graph.set(scan, "points", 256)
+    graph.set(scan, "imperfections", False)
+    apart = graph.add("voxels")
+    graph.connect(scan, "spectra", apart, "spectra")
+    graph.run()
+    picture = thumb(graph.output(scan, "spectra"))
+    assert picture["kind"] == "image" and picture["label"].startswith("4×4 voxels")
+    assert len(graph.output(apart, "spectra")) == 16 and graph.output(apart, "index").shape == (16, 3)
+    assert thumb(graph.output(apart, "spectra"))["kind"] == "spectra"
+
+
+@needs_octave
+def test_an_rf_pulse_block_runs_and_previews_its_waveform():
+    graph = Graph()
+    pulse = graph.add("rf-sinc")
+    graph.run()
+    picture = thumb(graph.output(pulse))
+    assert picture["kind"] == "image" and picture["label"].startswith("RF pulse · exc")
+
+
+def test_an_augment_block_runs_and_is_credited_to_augmentrum():
+    pytest.importorskip("augmentrum")
+    graph = Graph()
+    data = graph.add("ismrm2016")
+    graph.set(data, "n", 1)
+    noise = graph.add("noise")
+    graph.set(noise, "sigma_frac", 0.05)
+    graph.set(noise, "seed", 0)
+    graph.connect(data, "spectra", noise, "data")
+    graph.run()
+    assert "augmentrum.step.noise(" in graph.code(noise)[0]
+    step = graph.output(noise).list()[0].hdr_ext["ProcessingApplied"][-1]
+    assert (step["Program"], step["Method"]) == ("Augmentrum", "Noise")
+    assert np.asarray(graph.output(data).list()[0][:]).std() < \
+        np.asarray(graph.output(noise).list()[0][:]).std(), "noise added, the input left alone"

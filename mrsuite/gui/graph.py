@@ -17,6 +17,8 @@
 #   imports   #
 #*************#
 import ast
+import base64
+import io
 import json
 import logging
 import keyword
@@ -33,6 +35,7 @@ import numpy as np
 from nifti_mrs_plus import NIfTI_MRS_Plus
 from mrsuite import collect
 from mrsuite.core.basis import Basis
+from mrsuite.core.provenance import history
 from mrsuite.core.result import FitResult
 from mrsuite.gui import blocks, catalog
 from mrsuite.gui.blocks import Block, Port
@@ -924,46 +927,135 @@ def table(result: FitResult) -> Tuple[List[str], List[List[Any]]]:
 #***********#
 #   thumb   #
 #***********#
-def thumb(value: Any, points: int = 120) -> Dict[str, Any]:
+# what each dimension is called on a block
+DIMS = {"DIM_COIL": "coils", "DIM_DYN": "transients", "DIM_EDIT": "sub-spectra",
+        "DIM_MEAS": "measurements", "DIM_ISIS": "ISIS", "DIM_INDIRECT_0": "indirect"}
+
+
+def thumb(value: Any, points: int = 120, limit: int = 32) -> Dict[str, Any]:
     """
-    A small picture of a value, for its block: a spectrum's mean real part over 0.5-4.2 ppm
-    where it covers them, ppm falling, scaled to 0-1, in magnitude while it still has coils
-    or averages to combine (raw coils differ in phase: their real parts cancel); a basis
-    set's spectra the same way,
-    stacked one above the other as a basis set is shown; a fit's largest concentrations as
-    bars; anything else in a few words.
+    A small picture of a value, for its block, with a line saying what it is.
+
+    A spectrum over 0.5-4.2 ppm where it covers them, to 6 ppm for a water reference (the
+    header's WaterSuppressed False, or, unstated, the strongest signal above 4.2 ppm), ppm
+    falling, scaled to 0-1: while it
+    has coils, each coil in magnitude (raw coils differ in phase: their real parts cancel)
+    and their combination on top; while it has transients, each one's real part stacked
+    above the one before, so drift shows; else the one spectrum. A basis set's spectra
+    the same way, stacked as a basis set is shown. A fit as its curve and baseline over
+    the data with the residual beneath, where the method keeps them, else its largest
+    concentrations as bars; a score table as its pooled values by method; numbers as
+    bars; a figure as itself, small; a pulse sequence as its diagram; anything else in a
+    few words.
+
+    Args:
+        value: What a block made.
+        points (int): Points per trace.
+        limit (int): Traces at most.
+
+    Returns:
+        Dict[str, Any]: 'kind' ('spectra', 'fit', 'bars', 'image' or 'text') with what
+        the kind draws, all between 0 and 1, and 'label', the line.
     """
-    def picture(ppm, ys):
-        """Each trace over 0.5-4.2 ppm, ppm falling, in ``points`` points keeping the peaks."""
+    def picture(ppm, ys, suppressed=None):
+        """Each trace over 0.5-4.2 ppm, or to 6 ppm for a water reference - one the header
+        says is unsuppressed, or, where it says nothing, one whose strongest signal sits
+        above 4.2 (water at 4.65) - ppm falling, in ``points`` points keeping the peaks."""
         ppm, ys = ppm[::-1], [y[::-1] for y in ys]
-        keep = (ppm > 0.5) & (ppm < 4.2)
+        strongest = ppm[np.argmax(sum(np.abs(y) for y in ys))]
+        water = suppressed is False or (suppressed is None and 4.2 < strongest < 6.0)
+        keep = (ppm > 0.5) & (ppm < (6.0 if water else 4.2))
         ys = [y[keep] if keep.sum() > points / 4 else y for y in ys]
         return [np.array([c[np.argmax(np.abs(c))] for c in np.array_split(y, min(points, len(y)))])
                 for y in ys]
 
+    def unit(ys, low=None, high=None):
+        """Traces scaled together, the lowest point 0 and the highest 1."""
+        low = min(y.min() for y in ys) if low is None else low
+        span = (max(y.max() for y in ys) if high is None else high) - low or 1.0
+        return [[round(float(v), 3) for v in (y - low) / span] for y in ys]
+
+    def stacked(ys):
+        """Each trace a step above the one before, all at one scale."""
+        scale = max(float(np.abs(y).max()) for y in ys) or 1.0
+        return unit([y / scale + i * 0.7 / max(len(ys) - 1, 1) for i, y in enumerate(ys)])
+
+    def bars(values, labels, label):
+        peak = max((abs(v) for v in values), default=1.0) or 1.0
+        return {"kind": "bars", "y": [round(abs(v) / peak, 3) for v in values],
+                "labels": labels, "label": label}
+
     if isinstance(value, NIfTI_MRS_Plus) and len(value):
         first = value.list()[0]
-        ppm, ys, _ = traces(first, magnitude=first.ndim > 4)
-        y, = picture(ppm, [np.mean(ys, axis=0)])
-        span = np.ptp(y) or 1.0
-        return {"kind": "line", "y": [round(float(v), 3) for v in (y - y.min()) / span]}
+        suppressed = first.hdr_ext["WaterSuppressed"] if "WaterSuppressed" in first.hdr_ext \
+            else None
+        sizes = {t: n for t, n in zip(first.dim_tags, first.shape[4:]) if t and n > 1}
+        header = first.hdr_ext.to_dict()
+        # each dimension by what its header calls it (WAND's "components"), else by its tag
+        names = {t: str(header.get(f"dim_{k + 5}_info") or DIMS.get(t, t.removeprefix("DIM_").lower()))
+                 .lower().removeprefix("wand ") for k, t in enumerate(first.dim_tags) if t}
+        label = " · ".join([f"{len(value)} spectr{'um' if len(value) == 1 else 'a'}"]
+                           + [f"{n} {names[t]}" for t, n in sizes.items()])
+        if any(n > 1 for n in first.shape[:3]):      # spectroscopic imaging: the slice as a map
+            grid = "×".join(str(n) for n in first.shape[:3] if n > 1)
+            return {"kind": "image", "src": _image(_map(first), width=300),
+                    "label": " · ".join([f"{grid} voxels"] + label.split(" · ")[1:])}
+        spread = next((t for t in ["DIM_COIL", "DIM_DYN", *sizes] if t in sizes), None)
+        if spread == "DIM_COIL":
+            ppm, ys, _ = traces(first, limit=limit, spread=spread, magnitude=True)
+            coils = picture(ppm, ys, suppressed)
+            return {"kind": "spectra", "faint": unit(coils, 0.0), "label": label,
+                    "line": unit([np.sqrt(sum(y ** 2 for y in coils))], 0.0)[0]}
+        if spread:
+            ppm, ys, _ = traces(first, limit=limit, spread=spread)
+            return {"kind": "spectra", "faint": stacked(picture(ppm, ys, suppressed)),
+                    "line": None, "label": label}
+        ppm, ys, _ = traces(first)
+        return {"kind": "spectra", "faint": [], "line": unit(picture(ppm, ys, suppressed))[0],
+                "label": label}
     if isinstance(value, Basis):
-        ppm, ys, _ = traces(value)
-        ys = picture(ppm, ys)
-        step = 0.7 / max(len(ys), 1)           # each spectrum a step up, each at its own height
-        return {"kind": "lines", "ys": [[round(float(v), 3) for v in
-                                         np.clip(i * step + 0.3 * y / (np.abs(y).max() or 1.0),
-                                                 0, 1)]
-                                        for i, y in enumerate(ys)]}
+        ppm, ys, _ = traces(value, limit=limit)
+        return {"kind": "spectra", "faint": stacked(picture(ppm, ys)), "line": None,
+                "label": f"{len(value.names)} basis functions"}
     if results(value):
+        method = value[0].method.partition(":")[2] or value[0].method
+        label = f"{len(value)} fit{'s' * (len(value) != 1)} · {method}"
+        try:
+            curves = value[0].curves()
+        except ValueError:                       # a model's result: its concentrations
+            curves = None
+        if curves is not None:
+            data, fit, baseline = picture(curves["ppm"], [curves["data"], curves["fit"],
+                                                         curves["baseline"]])
+            low, span = data.min(), np.ptp(data) or 1.0
+            top = unit([data, fit, baseline], low, low + span / 0.7)     # the upper 70 %
+            residual = [round(float(v), 3) for v in np.clip(0.15 + (data - fit) / span * 0.7,
+                                                            0, 0.3)]
+            return {"kind": "fit", "data": [round(v + 0.3, 3) for v in top[0]],
+                    "fit": [round(v + 0.3, 3) for v in top[1]],
+                    "baseline": [round(v + 0.3, 3) for v in top[2]], "residual": residual,
+                    "label": label}
         scaling = "raw" if "raw" in value[0].concentrations else \
             next(iter(value[0].concentrations), None)
         concs = value[0].concentrations.get(scaling, {})
         top = sorted(((m, c) for m, c in concs.items() if np.isfinite(c or np.nan)),
                      key=lambda mc: -abs(mc[1]))[:8]
-        peak = max((abs(c) for _, c in top), default=1.0) or 1.0
-        return {"kind": "bars", "y": [round(abs(c) / peak, 3) for _, c in top],
-                "labels": [m for m, _ in top], "text": f"{len(value)} fits"}
+        return bars([c for _, c in top], [m for m, _ in top], label)
+    if hasattr(value, "columns") and {"method", "metric", "score"} <= set(value.columns):
+        table = value[value.metabolite == "all"] if "metabolite" in value.columns and \
+            (value.metabolite == "all").any() else value      # the pooled rows, as the radar
+        metric = table.metric.iloc[0]
+        rows = table[table.metric == metric].groupby("method", sort=False)["score"].mean()
+        return bars([v for v in rows if np.isfinite(v)],
+                    [m for m, v in rows.items() if np.isfinite(v)], metric)
+    if isinstance(value, (list, tuple)) and value and \
+            all(isinstance(v, (int, float, np.integer, np.floating)) for v in value):
+        finite = [float(v) for v in value if np.isfinite(v)]
+        return bars(finite[:limit], [], f"{len(value)} values · median "
+                                        f"{np.median(finite) if finite else np.nan:.3g}")
+    if hasattr(value, "keys") and "waveform" in value and "tbw" in value:     # FID-A's RF pulse
+        return {"kind": "image", "src": _image(_pulse(value), width=300),
+                "label": f"RF pulse · {value.get('type', '')} · tbw {float(value['tbw']):.1f}"}
     if isinstance(value, np.ndarray) and value.size <= 4 or isinstance(value, (int, float)):
         return {"kind": "text", "text": np.array2string(np.asarray(value), precision=4)}
     if hasattr(value, "shape"):
@@ -973,8 +1065,85 @@ def thumb(value: Any, points: int = 120) -> Dict[str, Any]:
     if isinstance(value, Path):
         return {"kind": "text", "text": value.name}
     if drawn(value) is not None:
-        return {"kind": "text", "text": "figure"}
+        return {"kind": "image", "label": "figure", "src": _image(drawn(value))}
+    if type(value).__module__.partition(".")[0] == "mrsandbox" and hasattr(value, "events"):
+        from mrsuite.simulators.mrsandbox import diagram
+        duration = getattr(value, "duration_s", None)
+        return {"kind": "image", "src": _image(diagram(value)),
+                "label": type(value).__name__ + (f" · {1000 * duration:.0f} ms"
+                                                 if isinstance(duration, (int, float)) else "")}
     return {"kind": "text", "text": type(value).__name__}
+
+
+#***********#
+#   image   #
+#***********#
+def _image(figure: Any, width: int = 600) -> str:
+    """A matplotlib figure as a PNG data URI ``width`` pixels wide, transparent."""
+    picture = io.BytesIO()
+    figure.savefig(picture, format="png", dpi=width / figure.get_size_inches()[0],
+                   transparent=True)
+    return "data:image/png;base64," + base64.b64encode(picture.getvalue()).decode()
+
+
+#***********#
+#   pulse   #
+#***********#
+def _pulse(rf: Any) -> Any:
+    """An RF pulse's waveform as FID-A keeps it (phase, amplitude, time per point): the
+    amplitude drawn, the phase faint behind it."""
+    from matplotlib.figure import Figure
+    waveform = np.asarray(rf["waveform"], dtype=float)
+    time = np.cumsum(waveform[:, 2]) / waveform[:, 2].sum()
+    figure = Figure(figsize=(2.4, 1.2))
+    ax = figure.add_axes([0, 0, 1, 1])
+    phase = waveform[:, 0]
+    if np.ptp(phase) > 0:
+        ax.plot(time, (phase - phase.min()) / np.ptp(phase) * waveform[:, 1].max(),
+                color="#8a94a3", linewidth=0.8, alpha=0.6)
+    ax.plot(time, waveform[:, 1], color="#5274f0", linewidth=1.2)
+    ax.set_axis_off()
+    return figure
+
+
+#*********#
+#   map   #
+#*********#
+def _map(spectrum: Any) -> Any:
+    """A slice's metabolite signal as a map (``mrsi.signal``), on the slice holding most."""
+    from matplotlib.figure import Figure
+    from mrsuite.mrsi import signal as strength
+    signal = strength(spectrum)                                          # (x, y, z)
+    z = int(signal.sum(axis=(0, 1)).argmax())
+    figure = Figure(figsize=(2, 2))
+    ax = figure.add_axes([0, 0, 1, 1])
+    ax.imshow(signal[:, :, z].T, origin="lower", cmap="viridis", interpolation="nearest")
+    ax.set_axis_off()
+    return figure
+
+
+#*************#
+#   applied   #
+#*************#
+def applied(value: Any) -> str:
+    """How what a block made came about, in a line: the last step of a spectrum's
+    processing history, its toolbox, version, function and arguments, or a fit's method;
+    '' where nothing is recorded."""
+    first = value.list()[0] if isinstance(value, NIfTI_MRS_Plus) and len(value) else None
+    if first is not None:
+        last = (history(first) or [{}])[-1]
+        if not last:
+            return ""
+        try:
+            details = json.loads(last.get("Details") or "{}")
+        except (TypeError, ValueError):
+            details = {}
+        args = {k: v for k, v in details.items() if k in ("args", "options", "kwargs")}
+        line = f"{last.get('Program', '')} {last.get('Version', '')} · {last.get('Method', '')}"
+        return f"{line} {json.dumps(args, default=str)}" if args else line
+    if results(value):
+        return value[0].method
+    return ""
 
 
 #***********#

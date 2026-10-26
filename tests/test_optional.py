@@ -55,9 +55,9 @@ for name, use in uses.items():
 
     assert run.returncode == 0, run.stderr
     for line in ("mrsuite.bridges.fsl_mrs FSL-MRS is not installed: conda install",
-                 "mrsuite.bridges.augmentrum Augmentrum is not installed: with FSL-MRS installed",
+                 "mrsuite.bridges.augmentrum Augmentrum is not installed: pip install augmentrum",
                  "mrsuite.benchmark MRSValidate is not installed: pip install",
-                 "augmentrum Augmentrum is not installed: with FSL-MRS installed",
+                 "augmentrum Augmentrum is not installed: pip install augmentrum",
                  "compile_basis FSL-MRS is not installed: conda install",
                  "gui The GUI needs nicegui, which comes with MRSuite: pip install mrsuite"):
         assert line in run.stdout, run.stdout

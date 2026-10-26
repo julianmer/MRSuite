@@ -83,8 +83,7 @@ def _module(data_dir: Path, *subjects: str):
     except ModuleNotFoundError as err:
         if (err.name or "").partition(".")[0] != "augmentrum":   # installed, but broken
             raise
-        raise ImportError("Augmentrum is not installed: with FSL-MRS installed, pip install "
-                          "git+https://github.com/julianmer/Augmentrum.git") from err
+        raise ImportError("Augmentrum is not installed: pip install augmentrum") from err
     module = MRSIChallengeDataModule(data_dir=str(data_dir), source='mat')
     missing = [s for s in subjects if not module.available(s)]
     if missing:

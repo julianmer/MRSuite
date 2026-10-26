@@ -30,8 +30,7 @@ try:
 except ModuleNotFoundError as err:
     if (err.name or "").partition(".")[0] != "augmentrum":   # installed, but broken
         raise
-    raise ImportError("Augmentrum is not installed: with FSL-MRS installed, pip install "
-                      "git+https://github.com/julianmer/Augmentrum.git") from err
+    raise ImportError("Augmentrum is not installed: pip install augmentrum") from err
 
 from mrsuite.bridges.base import Bridge
 

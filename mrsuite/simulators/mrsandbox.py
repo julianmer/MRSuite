@@ -57,8 +57,7 @@ def _mrsandbox() -> Any:
     try:
         import mrsandbox
     except ImportError:
-        raise ImportError("MRSandbox is not installed; pip install mrsandbox[jax] (or, from "
-                          "a checkout, pip install -e <MRSandbox>)") from None
+        raise ImportError("MRSandbox is not installed: pip install mrsandbox") from None
     return mrsandbox
 
 

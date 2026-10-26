@@ -1013,8 +1013,8 @@ def thumb(value: Any, points: int = 120, limit: int = 32) -> Dict[str, Any]:
         ppm, ys, _ = traces(first)
         return {"kind": "spectra", "faint": [], "line": unit(picture(ppm, ys, suppressed))[0],
                 "label": label}
-    if isinstance(value, Basis):
-        ppm, ys, _ = traces(value, limit=limit)
+    if isinstance(value, Basis):                 # in magnitude: phases and broad functions aside
+        ppm, ys, _ = traces(value, limit=limit, magnitude=True)
         return {"kind": "spectra", "faint": stacked(picture(ppm, ys)), "line": None,
                 "label": f"{len(value.names)} basis functions"}
     if results(value):

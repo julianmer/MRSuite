@@ -18,6 +18,7 @@
 #   imports   #
 #*************#
 import tempfile
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
@@ -136,6 +137,43 @@ def observations(results: Sequence[FitResult], truth: Sequence[Dict[str, float]]
     ids = np.array(range(len(truth)) if ids is None else ids).astype(str)
     return (ObservationSet(ids, true, schema, model_id="truth"),
             ObservationSet(ids, estimate, schema, model_id=results[0].method))
+
+
+#************#
+#   ratios   #
+#************#
+def ratios(results: Sequence[FitResult], to: str = "tCr",
+           scaling: Optional[str] = None) -> List[FitResult]:
+    """
+    Each fit's concentrations as ratios to total creatine, Cr + PCr summed from the singles
+    as ``observations`` sums them, the most common reference (Near et al., NMR Biomed 2021):
+    a result per fit under the scaling 'tCr' alone, keeping the method, its QC and its
+    provenance.
+
+    Args:
+        results (Sequence[FitResult]): One fit per spectrum.
+        to (str): 'tCr', the one reference so far.
+        scaling (Optional[str]): The fits' scaling read; a ratio is the same on any
+            absolute one, so by default 'raw', else 'molarity', else the first a fit has.
+
+    Raises:
+        ValueError: For another reference.
+        KeyError: Where a fit has neither Cr nor PCr, or not the scaling.
+    """
+    if to != "tCr":
+        raise ValueError(f"ratios go to 'tCr', not {to!r}")
+    out = []
+    for r in results:
+        own = scaling or next((s for s in ("raw", "molarity") if s in r.concentrations),
+                              next(iter(r.concentrations), "raw"))
+        conc = _molecules(r.conc(own))
+        parts = [m for m in TCR if np.isfinite(conc.get(m, np.nan))]
+        if not parts:
+            raise KeyError(f"{r.method} fitted no {' or '.join(TCR)} to reference to")
+        total = sum(conc[m] for m in parts)
+        out.append(replace(r, concentrations={to: {m: v / total for m, v in conc.items()}},
+                           uncertainties={}, raw=None))
+    return out
 
 
 #*******************#

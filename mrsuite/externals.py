@@ -44,6 +44,8 @@ REGISTRY = {
                        "451cf711d3ae4a1f94d531f3a2fbb4d7ceabeabb"),
     "osprey": ("https://github.com/schorschinho/osprey.git",
                "98b2e354f633211e5ff79ab6d263edde674a2e58"),
+    "simntg": ("https://github.com/mrshub/SimnTG.git",
+               "98444f6db495a3e17d3d179e8f36ee1fe0c7b345"),
     "wand-for-mrs": ("https://github.com/julianmer/WAND-for-MRS.git",
                      "2642659ccf8f5ca6376b44a351dd9420a846b1f0"),
 }

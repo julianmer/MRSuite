@@ -19,7 +19,7 @@
 #   imports   #
 #*************#
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Optional
 
 import numpy as np
 
@@ -144,8 +144,9 @@ class MatlabSession:
     #***********#
     #   feval   #
     #***********#
-    def feval(self, func: str, *args, nout: int = 1) -> Any:
-        """Call a MATLAB function; several outputs come back as a tuple, as in oct2py."""
+    def feval(self, func: str, *args, nout: int = 1, timeout: Optional[float] = None) -> Any:
+        """Call a MATLAB function; several outputs come back as a tuple, as in oct2py, whose
+        ``timeout`` is taken too: the engine has no timeout per call, so it is not kept."""
         out = self._engine.feval(func, *(to_matlab(a) for a in args), nargout=nout)
         return tuple(from_matlab(o) for o in out) if nout > 1 else from_matlab(out)
 

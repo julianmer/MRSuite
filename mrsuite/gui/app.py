@@ -1247,9 +1247,8 @@ class App:
         elif isinstance(value, Basis):
             ui.plotly(self._figure(value)).classes("w-full grow basis-0 min-h-[12rem]")
         elif drawn(value) is not None:
-            picture = io.StringIO()
-            drawn(value).savefig(picture, format="svg")
-            data = base64.b64encode(picture.getvalue().encode()).decode()
+            ink = "#e5e9ef" if self.dark.value else "#18202b"
+            data = base64.b64encode(_svg(drawn(value), ink).encode()).decode()
             ui.image(f"data:image/svg+xml;base64,{data}").props("fit=contain") \
                 .classes("w-full grow basis-0 min-h-[12rem]").mark("figure")
         elif results(value):
@@ -1793,6 +1792,37 @@ def _when(time: Any) -> str:
         return datetime.fromisoformat(str(time)).strftime("%d %b %Y, %H:%M:%S")
     except ValueError:
         return str(time)
+
+
+#*********#
+#   svg   #
+#*********#
+def _svg(figure: Any, ink: str) -> str:
+    """A matplotlib figure as SVG for the page: transparent, its text, ticks and axes in the
+    page's ink; the figure itself left as it was, so an export keeps its own colours."""
+    from matplotlib.spines import Spine
+    from matplotlib.text import Text
+    texts = figure.findobj(Text)
+    spines = figure.findobj(Spine)
+    ticks = [(ax, ax.xaxis.get_ticklabels(), ax.yaxis.get_ticklabels()) for ax in figure.axes]
+    before = [(a, a.get_color()) for a in texts] + [(s, s.get_edgecolor()) for s in spines]
+    tick_colours = [(ax, (labels_x[0].get_color() if labels_x else labels_y[0].get_color()
+                          if labels_y else "black")) for ax, labels_x, labels_y in ticks]
+    for a in texts:
+        a.set_color(ink)
+    for s in spines:
+        s.set_edgecolor(ink)
+    for ax in figure.axes:
+        ax.tick_params(colors=ink)
+    picture = io.StringIO()
+    try:
+        figure.savefig(picture, format="svg", transparent=True)
+    finally:
+        for artist, colour in before:
+            (artist.set_color if isinstance(artist, Text) else artist.set_edgecolor)(colour)
+        for ax, colour in tick_colours:
+            ax.tick_params(colors=colour)
+    return picture.getvalue()
 
 
 #***********#

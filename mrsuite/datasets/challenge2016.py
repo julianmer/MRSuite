@@ -178,9 +178,8 @@ def load(n: Optional[int] = None, root: Path = ROOT,
 
         Each spectrum's processing history starts with the file it was read from.
     """
-    import mrsuite.bridges.fsl_mrs        # where FSL-MRS is missing, says how to install it
-    import fsl_mrs
-    from fsl_mrs.utils import mrs_io
+    import spec2nii
+    from mrsuite import io
 
     if Path(root) == ROOT or (Path(truth) == TRUTH and not externals.checkout()):
         fetch()
@@ -188,12 +187,11 @@ def load(n: Optional[int] = None, root: Path = ROOT,
 
     def read(suffix):
         out = []
-        for f in _listing(spectra, suffix)[:n]:
-            spectrum = mrs_io.read_FID(str(spectra / f))
+        for f in _listing(spectra, suffix)[:n]:          # jMRUI text, through spec2nii
+            spectrum = next(iter(io.load(spectra / f, format='jmrui').values())).list()[0]
             provenance.append(spectrum, provenance.entry(
                 'MRSuite', provenance.mrsuite_version(), 'mrsuite.datasets.challenge2016.load',
-                {'file': spectra / f,
-                 'reader': f'FSL-MRS {fsl_mrs.__version__} mrs_io.read_FID'}))
+                {'file': spectra / f, 'reader': f'spec2nii {spec2nii.__version__} jmrui'}))
             out.append(spectrum)
         return NIfTI_MRS_Plus(out)
 

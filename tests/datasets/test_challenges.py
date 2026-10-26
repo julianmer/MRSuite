@@ -111,8 +111,8 @@ def _assert_covers_truth(results, truth, path):
         basis = fit["args"][0]
         assert isinstance(basis["path"], str) and basis["sha256"], \
             "the fit must record which basis it used"
-        origin = result.provenance[0]
-        assert origin["Program"] == "MRSuite" and "load" in origin["Method"]
+        origin = next(e for e in result.provenance if e["Program"] == "MRSuite")  # after spec2nii's
+        assert "load" in origin["Method"]
         source = json.loads(origin["Details"])["file"]
         assert isinstance(source["path"], str) and source["sha256"], "and which file the data is"
 

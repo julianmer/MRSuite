@@ -7,7 +7,8 @@ import { Background } from "@vue-flow/background";
 // (and its check for its styles at every mount) throw on the missing process
 globalThis.process ??= { env: { NODE_ENV: "production" } };
 
-// one block: its ports, a small picture of what it made, and its buttons
+// one block: its ports, a small picture of what it made with a line on it, its buttons, and
+// a card on hover saying what it does and how
 const Block = {
   props: ["id", "data", "selected"],
   components: { Handle },
@@ -27,7 +28,7 @@ const Block = {
   },
   template: `
     <div class="mr-block" :class="['is-' + data.status, { 'is-selected': selected }]"
-         :style="{ '--accent': data.colour }" :title="data.detail || data.help">
+         :style="{ '--accent': data.colour }" :title="data.detail || ''">
       <div class="mr-block-head">
         <span class="mr-status"></span>
         <span class="mr-block-title">{{ data.title }}</span>
@@ -47,25 +48,45 @@ const Block = {
                   :class="'mr-kind-' + p.kind" />
         </div>
       </div>
-      <svg v-if="data.thumb && data.thumb.kind === 'line'" class="mr-thumb"
-           viewBox="0 0 120 36" preserveAspectRatio="none">
-        <polyline :points="line(data.thumb.y)" />
-      </svg>
-      <svg v-else-if="data.thumb && data.thumb.kind === 'lines'" class="mr-thumb mr-lines"
-           viewBox="0 0 120 36" preserveAspectRatio="none">
-        <polyline v-for="(y, i) in data.thumb.ys" :key="i" :points="line(y)" />
-      </svg>
-      <svg v-else-if="data.thumb && data.thumb.kind === 'bars'" class="mr-thumb"
-           viewBox="0 0 120 36" preserveAspectRatio="none">
-        <rect v-for="(v, i) in data.thumb.y" :key="i" v-bind="bar(data.thumb.y, i)" />
-      </svg>
-      <div v-else-if="data.thumb" class="mr-thumb-text">{{ data.thumb.text }}</div>
+      <div v-if="data.thumb" class="mr-thumb-box" :class="'mr-kind-' + data.thumb.kind">
+        <svg v-if="data.thumb.kind === 'spectra'" class="mr-thumb"
+             viewBox="0 0 120 36" preserveAspectRatio="none">
+          <polyline v-for="(y, i) in data.thumb.faint" :key="i" class="mr-faint" :points="line(y)" />
+          <polyline v-if="data.thumb.line" :points="line(data.thumb.line)" />
+        </svg>
+        <svg v-else-if="data.thumb.kind === 'fit'" class="mr-thumb mr-fit"
+             viewBox="0 0 120 36" preserveAspectRatio="none">
+          <polyline class="mr-data" :points="line(data.thumb.data)" />
+          <polyline class="mr-baseline" :points="line(data.thumb.baseline)" />
+          <polyline :points="line(data.thumb.fit)" />
+          <polyline class="mr-residual" :points="line(data.thumb.residual)" />
+        </svg>
+        <svg v-else-if="data.thumb.kind === 'bars'" class="mr-thumb"
+             viewBox="0 0 120 36" preserveAspectRatio="none">
+          <rect v-for="(v, i) in data.thumb.y" :key="i" v-bind="bar(data.thumb.y, i)" />
+        </svg>
+        <img v-else-if="data.thumb.kind === 'image'" class="mr-thumb-image" :src="data.thumb.src" />
+        <div v-else class="mr-thumb-text">{{ data.thumb.text }}</div>
+        <div v-if="data.thumb.labels && data.thumb.labels.length" class="mr-thumb-names">
+          <span v-for="(l, i) in data.thumb.labels" :key="i">{{ l }}</span>
+        </div>
+        <div v-if="data.thumb.label" class="mr-thumb-label">{{ data.thumb.label }}</div>
+      </div>
+      <div v-if="data.about && data.about.length" class="mr-card nodrag">
+        <div class="mr-card-help">{{ data.help }}</div>
+        <div v-for="(row, i) in data.about" :key="i" class="mr-card-row">
+          <span class="mr-card-key">{{ row[0] }}</span><span class="mr-card-value">{{ row[1] }}</span>
+        </div>
+      </div>
       <div v-if="data.error" class="mr-error">{{ data.error }}</div>
       <div class="mr-actions nodrag">
         <button title="Run up to here" @click.stop="act(id, 'run')">
           <i class="material-icons">play_arrow</i></button>
         <button title="Preview what it made" @click.stop="act(id, 'preview')">
           <i class="material-icons">visibility</i></button>
+        <button title="Header and history: what it made, as NIfTI-MRS records it"
+                @click.stop="act(id, 'header')">
+          <i class="material-icons">receipt_long</i></button>
         <button title="Export what it made" @click.stop="act(id, 'export')">
           <i class="material-icons">download</i></button>
         <button title="Remove" @click.stop="act(id, 'remove')">
@@ -142,8 +163,8 @@ export default {
       const key = event.dataTransfer.getData("text/mrsuite-block");
       if (key) this.$emit("dropped", { key, ...this.at(event) });
     },
-    fit() {
-      this.flow.fitView({ padding: 0.25, maxZoom: 1.1, duration: 300 });
+    fit(padding = 0.25) {
+      this.flow.fitView({ padding, maxZoom: 1.1, duration: 300 });
     },
   },
   template: `

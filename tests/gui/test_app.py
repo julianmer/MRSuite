@@ -167,7 +167,7 @@ def test_the_graph_runs_from_the_page_and_is_written_out(tmp_path):
         await until(lambda: graph.nodes[apodize].made is not None and not app.busy)
         nodes, _ = drawn(user)
         assert [n["data"]["status"] for n in nodes] == ["done", "done"]
-        assert nodes[1]["data"]["thumb"]["kind"] == "line"
+        assert nodes[1]["data"]["thumb"]["kind"] == "spectra"
         await app.act(apodize, "preview")
         await asyncio.sleep(0.1)                       # the page redrawn
         assert user.find(ui.plotly).elements, "the spectrum is drawn"
@@ -534,6 +534,65 @@ def test_a_figure_made_is_shown_as_a_picture():
         with app.client:
             await app.act(radar, "preview")
         await user.should_see(marker="figure")
+        nodes, _ = drawn(user)
+        assert nodes[0]["data"]["thumb"]["kind"] == "image", "the figure itself on the block"
+        assert dict(nodes[0]["data"]["about"])["made"] == "figure"
+
+    simulate(graph, script)
+
+
+#************#
+#   header   #
+#************#
+def test_the_header_window_shows_the_fields_and_every_step():
+    graph = Graph()
+    data = graph.add("ismrm2016")
+    graph.set(data, "n", 1)
+    broaden = graph.add("apodization")
+    graph.set(broaden, "amount", [5.0])
+    graph.connect(data, "spectra", broaden, "data")
+
+    async def script(user, app):
+        await app.run()
+        async def click():                             # as the block's button does, on the page
+            with app.client:
+                await app.header(broaden)
+        task = asyncio.create_task(click())
+        await user.should_see(marker="header")
+        await user.should_see("Header extension")
+        await user.should_see("Processing history")
+        await user.should_see("SpectrometerFrequency")    # every header field, by name
+        await user.should_see("spectral width")
+        await user.should_see("4000")                     # read plainly, not as 4000.0
+        steps = [e.text for e in user.find(marker="step").elements]
+        programs = {e.text.split()[0] for e in user.find(marker="program").elements}
+        assert len(steps) == 2 and programs == {"MRSuite", "FSL-MRS"}, (steps, programs)
+        details = user.find(marker="details").elements
+        assert any(len(d.default_slot.children) > 1 for d in details), "JSON becomes a tree"
+        user.find(marker="header-close").click()
+        await task
+
+    simulate(graph, script)
+
+
+#**********#
+#   fold   #
+#**********#
+def test_the_preview_folds_away_and_the_eye_unfolds_it():
+    graph = Graph()
+    data = graph.add("ismrm2016")
+    graph.set(data, "n", 1)
+
+    async def script(user, app):
+        await app.run()
+        with app.client:
+            app.fold_preview()
+            assert app.split.value == 100 and app.peek.visible
+            await app.act(data, "preview")
+            assert app.split.value == 70 and not app.peek.visible
+        nodes, _ = drawn(user)
+        about = dict(nodes[0]["data"]["about"])
+        assert about["step"] == "2016 fitting challenge" and about["made"] == "1 spectrum"
 
     simulate(graph, script)
 
@@ -653,6 +712,10 @@ def test_a_spectrum_with_coils_offers_to_draw_them_apart_and_stacked(tmp_path):
         figure = app._figure(app.graph.output(data, "data").list()[0])
         assert [d["name"] for d in figure["data"]] == ["coil 0", "coil 1"]
         assert max(figure["data"][1]["y"]) > 2 * max(figure["data"][0]["y"]), "stacked above"
+        assert figure["layout"]["xaxis"]["autorange"] == "reversed"
+        app.ppm_range = (4.2, 0.5)                     # a window, as a figure asks for one
+        assert app._figure(app.graph.output(data, "data").list()[0])["layout"]["xaxis"]["range"] \
+            == [4.2, 0.5]
 
     simulate(graph, script)
 

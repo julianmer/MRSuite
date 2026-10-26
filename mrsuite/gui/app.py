@@ -16,12 +16,15 @@
 #*************#
 #   imports   #
 #*************#
+import ast
 import asyncio
 import base64
 import io
 import json
 import logging
+import numbers
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -120,11 +123,13 @@ class App:
         self.port: Optional[str] = None              # which of its outputs
         self.index, self.scaling = 0, None           # which spectrum, which concentrations
         self.spread, self.stack = None, 0.0           # which dimension drawn apart, how far
+        self.folded = 70                              # the canvas' share while the preview shows
+        self.ppm_range = None                         # the viewer's ppm window; None shows all
         self.running: Optional[str] = None           # the block under way
         self.runs: set = set()                       # the graphs runs are under way on
         self.theme = "system"
         self.folder = Path.home()                    # where files are looked for and written
-        self.thumbs: Dict[str, Tuple[int, Any]] = {}
+        self.thumbs: Dict[str, Tuple[int, Any, str]] = {}
         self.functions: Dict[str, Any] = {}          # every toolbox function by its tab, once listed
         self.zoo: Dict[str, List[str]] = {}          # the Hub's checkpoints by block, once listed
         self.count = 1                               # untitled tabs so far
@@ -159,12 +164,19 @@ class App:
                 with ui.splitter(value=320, limits=(220, 480)).props("unit=px reverse") \
                         .classes("w-full h-full") as right:
                     with right.before:
-                        with ui.splitter(horizontal=True, value=70, limits=(25, 95)) \
-                                .classes("w-full h-full") as split:
+                        self.split = ui.splitter(horizontal=True, value=self.folded,
+                                                 limits=(25, 100)).classes("w-full h-full")
+                        with self.split as split:
                             with split.before:
-                                with ui.column().classes("w-full h-full gap-0 no-wrap"):
+                                with ui.column().classes("w-full h-full gap-0 no-wrap relative"):
                                     self.tabbar()
                                     self.canvas = Canvas().classes("w-full grow")
+                                    # brings the preview back once folded away
+                                    self.peek = ui.button(icon="expand_less", color=None,
+                                                          on_click=self.unfold_preview) \
+                                        .props("flat round dense").classes("mr-peek") \
+                                        .tooltip("Show the preview").mark("show-preview")
+                                    self.peek.set_visibility(False)
                             with split.after:
                                 with ui.column().classes("mr-preview w-full h-full p-3 gap-2 "
                                                          "no-wrap overflow-auto"):
@@ -608,12 +620,34 @@ class App:
                 self.preview.refresh()
                 return
             self.previewed, self.port, self.index = id, None, 0
+            if self.split.value >= 100:
+                self.unfold_preview()
             if self.graph.nodes[id].made is None:
                 await self.run(id)
             self.select(id)
             self.preview.refresh()
         elif what == "export":
             await self.export(id)
+        elif what == "header":
+            await self.header(id)
+
+    #********************#
+    #   fold the preview   #
+    #********************#
+    def fold_preview(self) -> None:
+        """The preview panel away: the canvas takes its height; a chevron at the bottom,
+        or the eye on a block, brings it back where it was."""
+        if self.split.value < 100:
+            self.folded = self.split.value
+        self.split.value = 100
+        self.peek.set_visibility(True)
+
+    #**********************#
+    #   unfold the preview   #
+    #**********************#
+    def unfold_preview(self) -> None:
+        self.split.value = self.folded
+        self.peek.set_visibility(False)
 
     #*************#
     #   changed   #
@@ -1145,7 +1179,11 @@ class App:
     def preview(self) -> None:
         node = self.graph.nodes.get(self.previewed or "")
         if node is None:
-            ui.label("Press the eye on a block to see what it made.").classes("mr-muted text-sm")
+            with ui.row().classes("w-full items-center no-wrap"):
+                ui.label("Press the eye on a block to see what it made.") \
+                    .classes("mr-muted text-sm")
+                ui.space()
+                self._fold_button()
             return
         b = blocks.block(node.block)
         outs = self.graph.ports(node.id)[1]
@@ -1181,12 +1219,20 @@ class App:
                 scalings = sorted(value[self.index].concentrations)
                 self.scaling = self.scaling if self.scaling in scalings else \
                     ("raw" if "raw" in scalings else scalings[0] if scalings else None)
+            self._fold_button()
         if node.error:
             ui.label(node.error).classes("text-negative text-sm")
         if node.made is None:
             ui.label("Not run yet: press ▶ on the block.").classes("mr-muted text-sm")
             return
         self.shown(value, count)
+
+    #*****************#
+    #   fold button   #
+    #*****************#
+    def _fold_button(self) -> None:
+        ui.button(icon="expand_more", color=None, on_click=self.fold_preview) \
+            .props("flat round dense").tooltip("Hide the preview").mark("fold-preview")
 
     #***********#
     #   shown   #
@@ -1248,13 +1294,44 @@ class App:
                           "name": label, "line": {"width": 1.2, **({"color": "#5274f0"}
                                                                     if single else {})}}
                          for y, label in zip(ys, labels)],
-                "layout": {"xaxis": {"title": {"text": "ppm"}, "autorange": "reversed",
-                                     "gridcolor": grid, "zeroline": False},
+                "layout": {"xaxis": {"title": {"text": "ppm"}, "gridcolor": grid, "zeroline": False,
+                                     **({"range": list(self.ppm_range)} if self.ppm_range
+                                        else {"autorange": "reversed"})},
                            "yaxis": {"showticklabels": False, "gridcolor": grid,
                                      "zeroline": False},
                            "showlegend": not single, "font": {"color": ink},
                            "paper_bgcolor": "rgba(0,0,0,0)", "plot_bgcolor": "rgba(0,0,0,0)",
                            "margin": {"l": 10, "r": 10, "t": 10, "b": 40}}}
+
+    #************#
+    #   header   #
+    #************#
+    async def header(self, id: str) -> None:
+        """What a block made, as NIfTI-MRS states it, in a window of its own: the data's
+        shape and axes, every field of the header extension, and the processing history
+        step by step with every argument; a fit's method and provenance; a basis set's
+        source. Read off the live object, so it is always what an export would carry."""
+        if self.graph.nodes[id].made is None:
+            await self.run(id)
+            if id not in self.graph.nodes or self.graph.nodes[id].made is None:
+                return                                 # it failed, and said why
+        node = self.graph.nodes[id]
+        value = self.graph.output(id, self.port if id == self.previewed else None)
+        index = self.index if id == self.previewed else 0
+        with ui.dialog() as dialog, ui.card().classes("w-[84rem] max-w-full").mark("header"):
+            with ui.row().classes("w-full items-center gap-3 no-wrap"):
+                ui.label(blocks.block(node.block).title).classes("text-base font-semibold")
+                ui.label(node.name).classes("font-mono text-xs mr-muted")
+                ui.space()
+                ui.label("As NIfTI-MRS records it; every export carries it.") \
+                    .classes("mr-muted text-xs")
+            described(value, index)
+            with ui.row().classes("w-full"):
+                ui.space()
+                ui.button("Close", on_click=lambda: dialog.submit(None)).props("flat") \
+                    .mark("header-close")
+        await dialog
+        dialog.delete()
 
     #************#
     #   export   #
@@ -1553,6 +1630,169 @@ def _said(err: BaseException, logged: bool = False) -> None:
     if not logged:
         logger.error("%s", brief(err), exc_info=err)
     ui.notify(brief(err), type="negative", multi_line=True)
+
+
+#***************#
+#   described   #
+#***************#
+def described(value: Any, index: int = 0) -> None:
+    """A value's account of itself on the page: spectra by their NIfTI-MRS header and
+    history, fits by their method and provenance, a basis set by its source."""
+    def tree(value: Any, notes: Dict[str, str] = {}) -> None:
+        """A structure read as a record: keys in front of their values, plain lists on one
+        line, dicts and lists of structures as indented branches, JSON kept as text (a
+        step's Details, and what it quotes) parsed into branches too; a note after a value
+        where there is one (a unit, a field's description)."""
+        items = value.items() if isinstance(value, dict) else enumerate(value, 1)
+        for key, v in items:
+            v = _parsed(v)
+            if _branches(v):
+                with ui.element("div").classes("mr-branch"):
+                    ui.label(str(key)).classes("mr-key")
+                    tree(v)
+            else:
+                with ui.row().classes("mr-leaf no-wrap items-baseline"):
+                    ui.label(str(key)).classes("mr-key")
+                    ui.label(_plain(v)).classes("mr-value")
+                    if notes.get(key):
+                        ui.label(notes[key]).classes("mr-muted text-xs")
+
+    def record(title: str, items: List[Tuple[str, Any, str]]) -> None:
+        ui.label(title).classes("mr-section mt-2")
+        with ui.element("div").classes("mr-record"):
+            tree({k: v for k, v, _ in items}, {k: about for k, _, about in items if about})
+
+    def history(title: str, entries: List[Dict[str, Any]]) -> None:
+        """The steps in order, each with its method, program, version and time, and its
+        details underneath: as a branch where they are JSON, as a line where they are text."""
+        ui.label(f"{title} · {len(entries)} step{'s' * (len(entries) != 1)}") \
+            .classes("mr-section mt-2")
+        if not entries:
+            ui.label("none recorded").classes("mr-muted text-sm")
+        for k, entry in enumerate(entries, 1):
+            with ui.element("div").classes("mr-step"):
+                with ui.row().classes("w-full no-wrap items-baseline gap-2"):
+                    ui.label(str(k)).classes("mr-step-number")
+                    ui.label(str(entry.get("Method", ""))).classes("mr-step-method").mark("step")
+                    ui.label(f"{entry.get('Program', '')} {entry.get('Version', '')}") \
+                        .classes("mr-muted text-sm").mark("program")
+                    ui.space()
+                    ui.label(_when(entry.get("Time", ""))).classes("mr-muted text-xs")
+                details = _parsed(entry.get("Details", ""))
+                if isinstance(details, dict):            # nothing passed is nothing to read
+                    details = {k: v for k, v in details.items() if v not in ({}, [], "", None)}
+                with ui.element("div").classes("mr-step-body mr-record").mark("details"):
+                    if _branches(details):
+                        tree(details)
+                    elif details not in ("", None):
+                        ui.label(_plain(details)).classes("mr-value")
+
+    # what it is on the left, how it came about on the right
+    with ui.row().classes("w-full no-wrap gap-4 h-[78vh]"):
+        left = ui.scroll_area().classes("w-1/2 h-full")
+        right = ui.scroll_area().classes("w-1/2 h-full")
+    if isinstance(value, NIfTI_MRS_Plus):
+        if not len(value):
+            with left:
+                ui.label("no spectra").classes("mr-muted text-sm")
+            return
+        item = value.list()[min(index, len(value) - 1)]
+        fields = item.hdr_ext.to_dict()
+        tags = [t for t in list(item.dim_tags)[:item.ndim - 4]]
+        with left:
+            record("Data", [("spectra in the batch", len(value), ""),
+                            ("shape", list(item.shape), ""),
+                            ("dimensions", ", ".join(f"{t}: {n}"
+                                                     for t, n in zip(tags, item.shape[4:]))
+                             or "one spectrum", ""),
+                            ("points", item.shape[3], ""),
+                            ("dwell time", item.dwelltime, "s"),
+                            ("spectral width", 1.0 / item.dwelltime, "Hz"),
+                            ("spectrometer frequency", item.spectrometer_frequency[0], "MHz"),
+                            ("nucleus", item.nucleus[0], ""),
+                            ("centre", item.SpecFreqChemShift, "ppm")])
+            record("Header extension", [                  # user-defined fields come described
+                (k, v.get("Value", v) if isinstance(v, dict) and "Description" in v else v,
+                 v.get("Description", "") if isinstance(v, dict) else "")
+                for k, v in fields.items() if k != "ProcessingApplied"])
+        with right:
+            history("Processing history", fields.get("ProcessingApplied", []))
+    elif results(value):
+        item = value[min(index, len(value) - 1)]
+        with left:
+            record("Fit", [("fits in the batch", len(value), ""), ("method", item.method, ""),
+                           ("metabolites", ", ".join(item.metabolites), ""),
+                           ("concentrations", ", ".join(sorted(item.concentrations)), "scalings"),
+                           ("uncertainties", ", ".join(sorted(item.uncertainties)), ""),
+                           *[(k, v, "quality") for k, v in item.qc.items()]])
+        with right:
+            history("Provenance", item.provenance)
+    elif isinstance(value, Basis):
+        with left:
+            record("Basis set", [("functions", ", ".join(value.names), ""),
+                                 ("points", value.fids.shape[1], ""),
+                                 ("bandwidth", value.bandwidth, "Hz"),
+                                 ("frequency", value.frequency, "MHz"),
+                                 ("centre", value.centre, "ppm"), ("echo time", value.te, "ms"),
+                                 ("sequence", value.seq, "")])
+        with right:
+            record("Source", [(k, v, "") for k, v in value.source.items()])
+    else:
+        with left:
+            ui.code(repr(value)[:20000], language="text").classes("w-full text-xs")
+
+
+#************#
+#   parsed   #
+#************#
+def _parsed(value: Any) -> Any:
+    """A string holding JSON, or a Python literal (Augmentrum writes its details so), as the
+    structure it holds; anything else as it is."""
+    if isinstance(value, str) and value[:1] in "{[":
+        for read in (json.loads, ast.literal_eval):
+            try:
+                return read(value)
+            except (ValueError, SyntaxError):
+                pass
+    return value
+
+
+#**************#
+#   branches   #
+#**************#
+def _branches(value: Any) -> bool:
+    """Whether a value is drawn as a branch of the tree: a dict with something in it, or a
+    list holding structures rather than plain values."""
+    return (isinstance(value, dict) and bool(value)) or \
+        (isinstance(value, list) and any(isinstance(v, (dict, list)) for v in value))
+
+
+#***********#
+#   plain   #
+#***********#
+def _plain(value: Any) -> str:
+    """A value as a person reads it: words and numbers as they are, nothing quoted, a plain
+    list joined by commas, an empty value as a dash."""
+    if value is None or (isinstance(value, (str, dict, list, tuple)) and not value):
+        return "—"
+    if isinstance(value, bool):
+        return str(value).lower()
+    if isinstance(value, numbers.Real) and not isinstance(value, numbers.Integral):
+        return f"{value:.10g}"                       # numpy's floats too
+    if isinstance(value, (list, tuple)):
+        return ", ".join(_plain(v) for v in value)
+    return str(value)
+
+
+#**********#
+#   when   #
+#**********#
+def _when(time: Any) -> str:
+    """An ISO time as a person reads it; anything else as it came."""
+    try:
+        return datetime.fromisoformat(str(time)).strftime("%d %b %Y, %H:%M:%S")
+    except ValueError:
+        return str(time)
 
 
 #***********#

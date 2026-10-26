@@ -68,21 +68,20 @@ TRAIN = tuple(f'Sub{i}' for i in range(1, 20))
 VALIDATION = tuple(f'Sub{i}' for i in range(20, 25))
 
 
-# The release's metabolite array (xtMeta) is 180 degrees from its full one (xtAll) and from
-# the VtMeta basis: its lines point down where xtAll's and the basis's point up (NAA at 169
-# against -11 degrees at one voxel, from the .mat and the NIfTI alike). Augmentrum reads it
-# verbatim, so every signal built on it comes out upside down. MRSuite turns those to
-# xtAll's convention, so the spectra read like every other and fit without a half turn.
-UPRIGHT = ('all', 'nuisance')                 # the arrays already in xtAll's convention
+# The release stores its FIDs 180 degrees from the VtMeta basis it ships with: the
+# metabolite lines of xtMeta, and of xtAll, which is xtMeta plus the nuisance, point down
+# where the basis's point up (NAA at 169 degrees in xtMeta, from the .mat and the NIfTI
+# alike; the identity xtAll - xtNuisance = xtMeta + MM + baseline + noise holds as stored).
+# Augmentrum reads the arrays verbatim. MRSuite negates every one it reads, so the spectra
+# read like every other and fit the basis without a half turn; the identities still hold.
 
 
 #***********#
 #   array   #
 #***********#
 def _array(module: Any, subject: str, signal: str) -> np.ndarray:
-    """A subject's (x, y, z, t) array of ``signal``, in xtAll's convention (see UPRIGHT)."""
-    volume = np.asarray(module.load([subject], signal=signal)[0][0][:])
-    return volume if module.canonical_signal(signal) in UPRIGHT else -volume
+    """A subject's (x, y, z, t) array of ``signal``, turned to the basis's convention."""
+    return -np.asarray(module.load([subject], signal=signal)[0][0][:])
 
 
 #************#
@@ -336,9 +335,8 @@ class Release(Source):
 def _brain(module: Any, subject: str, signal: str, data_dir: Path) -> np.ndarray:
     """A subject's brain voxels of one signal as a (voxels, points) array, in the brain
     mask's own order (as ``load`` indexes them), written once and read memory-mapped."""
-    canonical = module.canonical_signal(signal)
-    turned = '' if canonical in UPRIGHT else '_upright'      # caches from before the turn stay unread
-    path = data_dir / '_mrsuite_cache' / f'{subject}_{canonical}{turned}.npy'
+    path = data_dir / '_mrsuite_cache' / \
+        f'{subject}_{module.canonical_signal(signal)}_upright.npy'   # caches from before the turn stay unread
     if not path.exists():
         path.parent.mkdir(exist_ok=True)
         mask = module.read_aux(subject, signal='meta')['brainMask'] > 0

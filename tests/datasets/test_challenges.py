@@ -548,17 +548,19 @@ def test_a_subject_loads_whole_as_one_spatial_nifti_with_its_truth_maps():
 #   upright   #
 #*************#
 @needs_mrsi
-def test_the_metabolite_signals_point_up_like_the_full_one():
-    """The release's xtMeta is 180 degrees from xtAll; MRSuite turns what is built on it."""
-    def phase(item, x, y):
+def test_the_release_is_turned_to_its_basis():
+    """The release's FIDs are 180 degrees from the VtMeta basis; MRSuite turns every array,
+    so the NAA line points up in the metabolite signals and in the full one alike."""
+    def line(item, x, y, centre=2.01):
         fid = np.asarray(item[:]).reshape(*item.shape[:3], -1)[x, y, 0]
-        spec = np.fft.fftshift(np.fft.fft(fid))
+        spec = np.fft.fftshift(np.fft.fft(fid)).real
         ppm = np.fft.fftshift(np.fft.fftfreq(len(fid), item.dwelltime)) / item.spectrometer_frequency[0] + 4.7
-        win = (ppm > 1.9) & (ppm < 2.1)
-        return np.degrees(np.angle(spec[win][np.abs(spec[win]).argmax()]))
-    for signal in ("all", "all-nuisance", "meta"):
+        at = lambda p: spec[np.abs(ppm - p).argmin()]
+        peak = max((at(p) for p in np.linspace(centre - 0.06, centre + 0.06, 9)), key=abs)
+        return peak - 0.5 * (at(centre - 0.18) + at(centre + 0.18))      # above its shoulders
+    for signal in ("meta", "all-nuisance"):       # in 'all' the water and lipid tails hide the line
         data, _, _ = mrsi_challenge.volume(MRSI_SUBJECT, signal, z=16)
-        assert abs(phase(data.list()[0], 48, 19)) < 45, signal
+        assert line(data.list()[0], 48, 19) > 0, signal
     one, _, index = mrsi_challenge.load(MRSI_SUBJECT, "meta", voxels=50)
-    k = int(np.argmax(np.abs(np.asarray([np.asarray(i[:]).ravel()[0] for i in one.list()]))))
-    assert abs(phase(one.list()[k], 0, 0)) < 60, "load() turns it too"
+    k = int(np.argmax([np.abs(np.asarray(i[:])).max() for i in one.list()]))
+    assert line(one.list()[k], 0, 0) > 0, "load() turns it too"

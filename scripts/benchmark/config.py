@@ -129,7 +129,15 @@ def mrsi(subject: str, voxels: Optional[int] = None) -> Dataset:
     if not MRSI_BASIS.exists():
         mrsi_challenge.basis(str(MRSI_BASIS))
     data, truth, index = mrsi_challenge.load(subject, voxels=voxels)
-    return Dataset(data, truth, ["-".join(map(str, voxel)) for voxel in index], str(MRSI_BASIS))
+    return Dataset(data, truth, _voxel_ids(index), str(MRSI_BASIS))
+
+
+#***************#
+#   voxel ids   #
+#***************#
+def _voxel_ids(index) -> List[str]:
+    """Spectrum IDs of MRSI voxels: their x-y-z index."""
+    return ["-".join(map(str, voxel)) for voxel in index]
 
 
 #***********#
@@ -333,6 +341,10 @@ REFERENCES = {"challenge2016": ("water", "tCr", "optimal"),
 SUBSETS = {"challenge2016": {"brain-like": [f"dataset{i}" for i in range(1, 25)],
                              **{name: [f"dataset{i}" for i in numbers]
                                 for name, numbers in challenge2016.SCENARIOS.items()}}}
+# and every MRSI subject on the models' evenly spread voxels (read when scored: the release
+# lives on altivolus), where the whole subject takes MRSValidate hours per metabolite
+SUBSETS.update({s: {str(MODEL_VOXELS): partial(lambda s: _voxel_ids(
+    mrsi_challenge.voxel_index(s, MODEL_VOXELS)), s)} for s in SUBJECTS})
 # a measure or two per aspect of MRSValidate, so the radar has a corner for each: errors,
 # agreement, regression, method comparison, and the errors' spread
 METRICS = {"mae": mae, "bias": bias, "rmse": errors.rmse, "lin_ccc": agreement.lin_ccc,

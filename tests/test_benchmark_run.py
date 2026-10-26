@@ -179,6 +179,19 @@ def test_a_named_group_of_spectra_is_scored_in_a_table_of_its_own(tmp_path):
 
 
 @needs_2016
+def test_a_group_may_be_given_lazily_and_the_tables_picked_by_glob(tmp_path):
+    """The MRSI groups read the release when scored, not when the config loads; a glob
+    keeps a crawling whole-subject table from being scored at all."""
+    _toy_run(tmp_path)
+    tables = score.score_run(tmp_path, {"challenge2016": ("optimal",)}, {"mae": mae},
+                             {"challenge2016": {"first": lambda: ["dataset1", "dataset2"]}},
+                             patterns=["*-first"])
+    assert sorted(tables) == ["challenge2016-first"]
+    assert tables["challenge2016-first"].query("metabolite == 'all'").iloc[0].n_used == 6
+    assert sorted(p.stem for p in (tmp_path / "scores").glob("*.csv")) == ["challenge2016-first"]
+
+
+@needs_2016
 def test_a_group_where_no_spectrum_was_fitted_is_left_out_and_the_others_scored(tmp_path):
     data, _, _ = challenge2016.load(3)
     BROKEN.update(float(abs(item[:].ravel()[0])) for item in data.list()[:2])

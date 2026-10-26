@@ -129,9 +129,7 @@ def load(subject: str, signal: str = 'all', voxels: Optional[int] = None,
     aux = module.read_aux(subject, signal='meta')                   # test truth lives apart
     acquisition = module.read_acquisition(subject)
 
-    index = np.argwhere(aux['brainMask'] > 0)
-    if voxels is not None:
-        index = index[np.linspace(0, len(index) - 1, voxels).astype(int)]
+    index = _spread(np.argwhere(aux['brainMask'] > 0), voxels)
 
     # anything beyond the composite comes from a test subject's separate truth file
     source = module.mat_path(subject, need_truth=module.canonical_signal(signal) != 'all')
@@ -151,6 +149,27 @@ def load(subject: str, signal: str = 'all', voxels: Optional[int] = None,
     data = NIfTI_MRS_Plus(spectra)
     truth = [dict(zip(NAMES.values(), map(float, aux['metaMap'][x, y, z]))) for x, y, z in index]
     return data, truth, index
+
+
+#*****************#
+#   voxel index   #
+#*****************#
+def voxel_index(subject: str, voxels: Optional[int] = None,
+                data_dir: Path = DATA_DIR) -> np.ndarray:
+    """(n, 3) indices of a subject's brain voxels on the NIfTI grid, all of them or an
+    evenly spread few: the voxels load() gives, without loading them."""
+    aux = _module(data_dir, subject).read_aux(subject, signal='meta')
+    return _spread(np.argwhere(aux['brainMask'] > 0), voxels)
+
+
+#************#
+#   spread   #
+#************#
+def _spread(index: np.ndarray, voxels: Optional[int]) -> np.ndarray:
+    """All of the index, or an evenly spread few."""
+    if voxels is None:
+        return index
+    return index[np.linspace(0, len(index) - 1, voxels).astype(int)]
 
 
 #**************************************************************************************************#

@@ -238,6 +238,17 @@ def test_mrsi_subjects_missing_are_fetched_first_and_said(tmp_path, monkeypatch)
     assert len(said) == 1, "nothing missing, nothing fetched"
 
 
+#*****************#
+#   voxel index   #
+#*****************#
+@needs_mrsi
+def test_the_voxel_index_is_the_loaders_without_loading():
+    index = mrsi_challenge.voxel_index(MRSI_SUBJECT, voxels=3)
+    _, _, loaded = mrsi_challenge.load(MRSI_SUBJECT, voxels=3)
+    assert index.shape == (3, 3) and (index == loaded).all()
+    assert len(mrsi_challenge.voxel_index(MRSI_SUBJECT)) > 1000
+
+
 #********************#
 #   mrsi truth map   #
 #********************#

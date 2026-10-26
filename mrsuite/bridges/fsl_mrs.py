@@ -31,6 +31,7 @@ import numpy as np
 
 try:
     from fsl_mrs.utils.preproc import nifti_mrs_proc
+    from fsl_mrs.utils.preproc import mrsi as mrsi_proc
 except ModuleNotFoundError as err:
     if (err.name or "").partition(".")[0] != "fsl_mrs":   # installed, but broken
         raise
@@ -70,7 +71,7 @@ class FSLMRSBridge(Bridge):
     #   resolve   #
     #*************#
     def _resolve(self, func: str) -> Callable:
-        target = getattr(nifti_mrs_proc, func, None)
+        target = _source(func)
         # functions only: dir() also returns what the module imports (the NIFTI_MRS
         # class, datetime) and its exception classes, none of which are processing
         # steps. Testing for a function sorts them out without a hand-kept denylist
@@ -81,6 +82,13 @@ class FSLMRSBridge(Bridge):
                 f"Available: {', '.join(self.available())}")
         given = _proc_defaults().get(func)
         return _defaulted(target, given) if given else target
+
+    #*************#
+    #   records   #
+    #*************#
+    def _records(self, func: str) -> bool:
+        """The MRSI functions write no entry of their own; nifti_mrs_proc's do."""
+        return func in MRSI
 
     #*****************#
     #   skip reason   #
@@ -136,9 +144,10 @@ class FSLMRSBridge(Bridge):
     #   available   #
     #***************#
     def available(self) -> List[str]:
-        return sorted(n for n in dir(nifti_mrs_proc)
-                      if not n.startswith("_")
-                      and inspect.isfunction(getattr(nifti_mrs_proc, n)))
+        """The single-voxel processing functions, and the MRSI ones (``MRSI``)."""
+        return sorted({n for n in dir(nifti_mrs_proc)
+                       if not n.startswith("_") and inspect.isfunction(getattr(nifti_mrs_proc, n))}
+                      | set(MRSI))
 
     #***********#
     #   steps   #
@@ -147,10 +156,23 @@ class FSLMRSBridge(Bridge):
         """The functions that take the spectra first, leaving out helpers such as
         first_index and update_processing_prov."""
         return [name for name in self.available() if next(iter(
-            inspect.signature(getattr(nifti_mrs_proc, name)).parameters), "").startswith("data")]
+            inspect.signature(_source(name)).parameters), "").startswith("data")]
 
 
 bridge = FSLMRSBridge()
+
+# the MRSI functions of fsl_mrs.utils.preproc.mrsi, which take a spatial NIfTI-MRS whole:
+# phase and frequency across the voxels, lipids out by L2 regularisation
+MRSI = ("lipid_removal_l2", "mrsi_freq_align", "mrsi_phase_corr")
+
+
+#************#
+#   source   #
+#************#
+def _source(func: str) -> Any:
+    """The FSL-MRS function behind a name: an MRSI one from its module, the rest from
+    nifti_mrs_proc; None where there is none."""
+    return getattr(mrsi_proc if func in MRSI else nifti_mrs_proc, func, None)
 
 
 #*******************#
@@ -413,6 +435,26 @@ def to_result(res: Any) -> FitResult:
                               ("percentage", "raw", "internal", "molarity", "molality")),
         qc=qc,
         raw=res)
+
+
+#************#
+#   curves   #
+#************#
+def curves(res: Any) -> Dict[str, np.ndarray]:
+    """What FSL-MRS fitted, as its result keeps it: the prediction, baseline and residual
+    are FIDs on the ``FitRes``, laid along the ppm axis FSL-MRS builds from the bandwidth
+    and centre frequency it kept, and cut to its fit range."""
+    from fsl_mrs.utils.misc import H2O_PPM_TO_TMS, FIDToSpec, calculateAxes
+
+    ppm = calculateAxes(res.bandwidth, res.hzperppm * 1e6, len(res.pred),
+                        H2O_PPM_TO_TMS)["ppmshift"]
+    keep = (ppm >= res.ppmlim[0]) & (ppm <= res.ppmlim[1])
+
+    def spectrum(fid):
+        return np.real(FIDToSpec(fid))[keep]
+
+    return {"ppm": ppm[keep], "data": spectrum(res.pred + res.residuals),
+            "fit": spectrum(res.pred), "baseline": spectrum(res.baseline)}
 
 
 #*************#

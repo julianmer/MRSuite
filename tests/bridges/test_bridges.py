@@ -72,6 +72,21 @@ def test_fsl_mrs_conjugate_actually_conjugates(spectrum):
 #*********************#
 #   fsl-mrs unknown   #
 #*********************#
+def test_fsl_mrs_mrsi_functions_are_steps_too():
+    from fsl_mrs.utils.preproc import mrsi as mrsi_proc
+    from nifti_mrs.create_nmrs import gen_nifti_mrs
+    assert set(fsl_mrs.MRSI) <= set(fsl_mrs.bridge.steps())
+    assert fsl_mrs.bridge._resolve("mrsi_phase_corr") is mrsi_proc.mrsi_phase_corr
+    t = np.arange(256) * 2.5e-4
+    fid = np.exp(2j * np.pi * (2.0 - 4.65) * 123.2 * t - t / 0.05) * np.exp(0.7j)
+    data = np.broadcast_to(fid, (3, 3, 1, 256)).copy()
+    phased = fsl_mrs.bridge.mrsi_phase_corr(NIfTI_MRS_Plus([gen_nifti_mrs(data, 2.5e-4, 123.2)]))
+    phased = phased[0] if isinstance(phased, tuple) else phased      # the data, and its phases
+    out = np.asarray(phased.list()[0][:])
+    assert out.shape == (3, 3, 1, 256) and abs(np.angle(out[1, 1, 0, 0])) < abs(0.7)
+    assert phased.list()[0].hdr_ext["ProcessingApplied"][-1]["Program"] == "FSL-MRS"
+
+
 def test_fsl_mrs_unknown_name_is_rejected_at_lookup():
     with pytest.raises(AttributeError, match="no processing function"):
         fsl_mrs.definitely_not_a_function
@@ -626,3 +641,18 @@ def test_the_help_is_the_files_first_comment_block():
     from mrsuite.bridges.fid_a import FIDABridge
 
     assert FIDABridge().about("op_HSVDfit")[1].startswith("op_HSVDfit.m")
+
+
+#************#
+#   curves   #
+#************#
+def test_an_fsl_mrs_fit_keeps_the_curves_it_drew(fsl_mrs_fit):
+    """FSL-MRS keeps its prediction, baseline and residual as FIDs on the result; the
+    curves lay them along its own ppm axis, over its fit range, the fit on the data."""
+    curves = fsl_mrs.to_result(fsl_mrs_fit).curves()
+
+    ppm, data, fit, baseline = (curves[k] for k in ("ppm", "data", "fit", "baseline"))
+    assert len(ppm) == len(data) == len(fit) == len(baseline) > 100
+    assert 0.15 < ppm[0] < 0.25 and 4.15 < ppm[-1] < 4.25         # the fixture's ppmlim
+    assert np.linalg.norm(data - fit) < 0.2 * np.linalg.norm(data)
+    assert np.abs(baseline).max() < 0.2 * np.abs(data).max()

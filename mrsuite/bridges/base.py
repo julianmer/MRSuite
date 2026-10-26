@@ -148,6 +148,11 @@ class Bridge(ABC):
     #*****************#
     #   skip reason   #
     #*****************#
+    def _records(self, func: str) -> bool:
+        """Whether MRSuite records a call of ``func``: ``records``, unless a bridge tells
+        the functions that record themselves from those that do not."""
+        return self.records
+
     def _skip_reason(self, func: str, args, kwargs) -> Optional[str]:
         """Why ``func`` would be a no-op on this input, or None to go ahead.
 
@@ -189,7 +194,7 @@ class Bridge(ABC):
             call.__signature__ = signature
         self._skipped = []
         return Function(call, self.program, self.version, self.runtime,
-                        batched=self.batched, records=self.records)
+                        batched=self.batched, records=self._records(func))
 
     #**********#
     #   step   #

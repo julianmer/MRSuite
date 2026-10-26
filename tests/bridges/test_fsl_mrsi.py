@@ -41,5 +41,9 @@ def test_fsl_mrsi_fits_a_grid_voxel_by_voxel():
     assert first.crlb()["NAA"] > 0 and np.isfinite(first.qc["snr"])
     assert first.provenance[-1]["Program"] == "FSL-MRS" and first.provenance[-1]["Method"] == "fsl_mrsi"
     assert '"internal_ref": ["Cr", "PCr"]' in first.provenance[-1]["Details"], "the reference the basis has"
+    drawn = first.curves()                                        # from the fit folder
+    assert set(drawn) == {'ppm', 'data', 'fit', 'baseline'} and len(drawn['fit']) == len(drawn['ppm']) > 50
+    assert 0.2 <= drawn['ppm'].min() and drawn['ppm'].max() <= 4.2
+    assert np.abs(drawn['fit']).max() > 0 and np.abs(drawn['data'] - drawn['fit']).max() < np.abs(drawn['data']).max()
     weaker = next(r for r, at in zip(results, index.tolist()) if at == [0, 0, 0])
     assert first.concentrations["raw"]["NAA"] > 2 * weaker.concentrations["raw"]["NAA"], "scaled thrice"

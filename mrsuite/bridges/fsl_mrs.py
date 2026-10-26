@@ -549,7 +549,8 @@ def fit_mrsi(data: Any, basis: Any, mask: Any = None, ppmlim: tuple = (0.2, 4.2)
             uncertainties={"percentage": {m: float(v[at]) for m, v in percentage.items()}},
             qc={"snr": float(np.mean([v[at] for v in snr.values()])) if snr else float("nan"),
                 "fwhm": float(np.mean([v[at] for v in fwhm.values()])) if fwhm else float("nan")},
-            provenance=history + [entry], raw={"folder": str(out), "voxel": list(map(int, at))}))
+            provenance=history + [entry],
+            raw={"folder": str(out), "voxel": list(map(int, at)), "ppmlim": list(ppmlim)}))
     return results, index
 
 
@@ -559,9 +560,24 @@ def fit_mrsi(data: Any, basis: Any, mask: Any = None, ppmlim: tuple = (0.2, 4.2)
 def curves(res: Any) -> Dict[str, np.ndarray]:
     """What FSL-MRS fitted, as its result keeps it: the prediction, baseline and residual
     are FIDs on the ``FitRes``, laid along the ppm axis FSL-MRS builds from the bandwidth
-    and centre frequency it kept, and cut to its fit range."""
+    and centre frequency it kept, and cut to its fit range. An ``fsl_mrsi`` voxel's come
+    from the fit, residual and baseline volumes in its fit folder, while that is there."""
     from fsl_mrs.utils.misc import H2O_PPM_TO_TMS, FIDToSpec, calculateAxes
 
+    if isinstance(res, dict) and "folder" in res:       # an fsl_mrsi voxel: its fit folder's
+        from fsl_mrs.core.nifti_mrs import NIFTI_MRS     # fit, residual and baseline volumes
+        folder, at = Path(res["folder"]) / "fit", tuple(res["voxel"])
+        volumes = {name: NIFTI_MRS(str(folder / f"{name}.nii.gz"))
+                   for name in ("fit", "residual", "baseline")}
+        fids = {name: np.asarray(v[:])[at] for name, v in volumes.items()}
+        ppm = calculateAxes(1.0 / volumes["fit"].dwelltime,
+                            volumes["fit"].spectrometer_frequency[0] * 1e6, len(fids["fit"]),
+                            H2O_PPM_TO_TMS)["ppmshift"]
+        keep = (ppm >= res["ppmlim"][0]) & (ppm <= res["ppmlim"][1])
+        return {"ppm": ppm[keep],
+                "data": np.real(FIDToSpec(fids["fit"] + fids["residual"]))[keep],
+                "fit": np.real(FIDToSpec(fids["fit"]))[keep],
+                "baseline": np.real(FIDToSpec(fids["baseline"]))[keep]}
     ppm = calculateAxes(res.bandwidth, res.hzperppm * 1e6, len(res.pred),
                         H2O_PPM_TO_TMS)["ppmshift"]
     keep = (ppm >= res.ppmlim[0]) & (ppm <= res.ppmlim[1])

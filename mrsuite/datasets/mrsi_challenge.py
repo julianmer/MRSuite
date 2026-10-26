@@ -151,6 +151,47 @@ def load(subject: str, signal: str = 'all', voxels: Optional[int] = None,
     return data, truth, index
 
 
+#************#
+#   volume   #
+#************#
+def volume(subject: str, signal: str = 'all', z: Optional[int] = None,
+           data_dir: Path = DATA_DIR) -> Tuple[NIfTI_MRS_Plus, Dict[str, np.ndarray], np.ndarray]:
+    """
+    Load one subject as it is: one spatial NIfTI-MRS of the whole volume, or of one axial
+    slice, for the MRSI steps; with the truth as maps and the brain mask.
+
+    Args:
+        subject (str): As ``load`` takes it.
+        signal (str): As ``load`` takes it; 'all-nuisance' leaves the water and lipids out.
+        z (Optional[int]): One slice (0 to 31) rather than the whole volume.
+        data_dir (Path): Where the release lives.
+
+    Returns:
+        data (NIfTI_MRS_Plus): The volume or slice, x by y by z voxels of one spectrum each.
+        truth (Dict[str, np.ndarray]): The ground-truth amplitude map per basis name, on
+            the same grid, on the scale of the VtMeta basis.
+        mask (np.ndarray): The brain mask on the same grid.
+    """
+    module = _module(data_dir, subject)
+    import augmentrum
+
+    whole = module.load([subject], signal=signal)[0][0]
+    aux = module.read_aux(subject, signal='meta')
+    acquisition = module.read_acquisition(subject)
+    sl = slice(None) if z is None else slice(z, z + 1)
+    item = module.to_nifti(np.asarray(whole[:])[:, :, sl], acquisition) if z is not None \
+        else whole
+    item.add_hdr_field('SpecFreqChemShift', acquisition['ppm_offset'])
+    source = module.mat_path(subject, need_truth=module.canonical_signal(signal) != 'all')
+    provenance.append(item, provenance.entry(
+        'MRSuite', provenance.mrsuite_version(), 'mrsuite.datasets.mrsi_challenge.volume',
+        {'subject': subject, 'signal': signal, 'z': z, 'file': source,
+         'reader': f'Augmentrum {augmentrum.__version__} (git '
+                   f'{provenance.git_version(augmentrum.__path__[0])})'}))
+    truth = {name: aux['metaMap'][:, :, sl, k] for k, name in enumerate(NAMES.values())}
+    return NIfTI_MRS_Plus([item]), truth, aux['brainMask'][:, :, sl] > 0
+
+
 #*****************#
 #   voxel index   #
 #*****************#

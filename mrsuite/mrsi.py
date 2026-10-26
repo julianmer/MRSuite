@@ -16,7 +16,7 @@
 #*************#
 #   imports   #
 #*************#
-from typing import Any, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 from nifti_mrs.create_nmrs import gen_nifti_mrs
@@ -53,7 +53,8 @@ def signal(item: Any, window: Tuple[float, float] = WINDOW) -> np.ndarray:
 #************#
 #   voxels   #
 #************#
-def voxels(spectra: Any, threshold: float = 0.0) -> Tuple[NIfTI_MRS_Plus, np.ndarray]:
+def voxels(spectra: Any, mask: Optional[np.ndarray] = None,
+           threshold: float = 0.0) -> Tuple[NIfTI_MRS_Plus, np.ndarray]:
     """
     A spatial NIfTI-MRS as single-voxel spectra, one per voxel with signal, which every
     step and fitter takes; and the voxels' indices, to put results back on the grid.
@@ -61,6 +62,8 @@ def voxels(spectra: Any, threshold: float = 0.0) -> Tuple[NIfTI_MRS_Plus, np.nda
     Args:
         spectra: NIfTI-MRS+ holding the slice or volume (x, y, z voxels of one spectrum
             each, higher dimensions kept), or the NIfTI-MRS itself.
+        mask (Optional[np.ndarray]): The voxels to take, on the grid (a brain mask); else
+            by the threshold.
         threshold (float): Voxels whose metabolite signal (``signal``) lies below this
             fraction of the strongest voxel's are left out; 0 leaves out only empty voxels.
 
@@ -71,9 +74,12 @@ def voxels(spectra: Any, threshold: float = 0.0) -> Tuple[NIfTI_MRS_Plus, np.nda
     """
     item = spectra.list()[0] if isinstance(spectra, NIfTI_MRS_Plus) else spectra
     data = np.asarray(item[:])                                  # (x, y, z, points, ...)
-    strength = signal(item)
-    index = np.argwhere(strength > threshold * strength.max()) if strength.max() > 0 \
-        else np.argwhere(np.ones(data.shape[:3], bool))
+    if mask is not None:
+        index = np.argwhere(np.asarray(mask).reshape(data.shape[:3]))
+    else:
+        strength = signal(item)
+        index = np.argwhere(strength > threshold * strength.max()) if strength.max() > 0 \
+            else np.argwhere(np.ones(data.shape[:3], bool))
     affine, out = np.asarray(item.voxToWorldMat), []
     for x, y, z in index:
         placed = affine.copy()
@@ -92,18 +98,21 @@ def voxels(spectra: Any, threshold: float = 0.0) -> Tuple[NIfTI_MRS_Plus, np.nda
 #**********#
 #   maps   #
 #**********#
-def maps(results: Sequence[Any], index: np.ndarray, metabolites: Optional[List[str]] = None,
-         scaling: Optional[str] = None, shape: Optional[Sequence[int]] = None,
-         columns: int = 4) -> Any:
+def maps(results: Sequence[Any], index: np.ndarray, truth: Optional[Dict[str, np.ndarray]] = None,
+         metabolites: Optional[List[str]] = None, scaling: Optional[str] = None,
+         shape: Optional[Sequence[int]] = None, columns: int = 4) -> Any:
     """
     Metabolite maps from fits of the voxels ``voxels`` gave: each voxel's concentration on
-    the grid, one panel per metabolite, as a matplotlib Figure.
+    the grid, one panel per metabolite, as a matplotlib Figure; with ``truth``, the true
+    map under each, on the fitted voxels alone.
 
     Args:
         results (Sequence[FitResult]): One fit per row of ``index``.
         index (np.ndarray): The (n, 3) voxel indices ``voxels`` gave.
+        truth (Optional[Dict[str, np.ndarray]]): True maps by name on the same grid, as
+            the MRSI challenge gives them; the names the fits use.
         metabolites (Optional[List[str]]): The maps to draw; the eight largest by mean
-            concentration when None.
+            concentration when None (the four, with ``truth``).
         scaling (Optional[str]): A scaling the fits carry; else raw, else molarity, else
             the first they have.
         shape (Optional[Sequence[int]]): The grid; what the index reaches when None.
@@ -117,32 +126,39 @@ def maps(results: Sequence[Any], index: np.ndarray, metabolites: Optional[List[s
     from matplotlib.figure import Figure
 
     index = np.asarray(index)
-    shape = tuple(shape) if shape is not None else tuple(index.max(axis=0) + 1)
+    shape = tuple(shape) if shape is not None else \
+        (tuple(next(iter(truth.values())).shape) if truth else tuple(index.max(axis=0) + 1))
     first = results[0].concentrations
     scaling = scaling or next((s for s in ("raw", "molarity") if s in first), next(iter(first)))
     if metabolites is None:
         means = {}
         for r in results:
             for m, c in r.concentrations.get(scaling, {}).items():
-                if c is not None and np.isfinite(c):
+                if c is not None and np.isfinite(c) and (truth is None or m in truth):
                     means.setdefault(m, []).append(float(c))
-        metabolites = sorted(means, key=lambda m: -abs(np.mean(means[m])))[:8]
+        metabolites = sorted(means, key=lambda m: -abs(np.mean(means[m])))[:4 if truth else 8]
     grid = {m: np.full(shape, np.nan) for m in metabolites}
     for (x, y, z), r in zip(index, results):
         for m in metabolites:
             c = r.concentrations.get(scaling, {}).get(m)
             grid[m][x, y, z] = np.nan if c is None else float(c)
     z = int(np.bincount(index[:, 2]).argmax())                 # the slice with most voxels
-    rows = -(-len(metabolites) // columns)
+    panels = [(f"{m} ({scaling})", grid[m]) for m in metabolites]
+    if truth:
+        fitted = np.zeros(shape, bool)
+        fitted[tuple(index.T)] = True
+        panels += [(f"{m} (truth)", np.where(fitted, truth[m], np.nan)) for m in metabolites]
+        columns = len(metabolites)
+    rows = -(-len(panels) // columns)
     figure = Figure(figsize=(2.6 * columns, 2.6 * rows))
-    for k, m in enumerate(metabolites):
+    for k, (title, values) in enumerate(panels):
         ax = figure.add_subplot(rows, columns, k + 1)
-        values = grid[m][:, :, z]
+        values = values[:, :, z]
         low, high = (np.nanpercentile(values, [2, 98]) if np.isfinite(values).any()
                      else (None, None))
         shown = ax.imshow(values.T, origin="lower", cmap="viridis", interpolation="nearest",
                           vmin=low, vmax=high)
-        ax.set_title(f"{m} ({scaling})", fontsize=9)
+        ax.set_title(title, fontsize=9)
         ax.set_xticks([]), ax.set_yticks([])
         figure.colorbar(shown, ax=ax, fraction=0.046, pad=0.03).ax.tick_params(labelsize=7)
     figure.tight_layout()

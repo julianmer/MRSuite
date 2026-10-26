@@ -527,3 +527,18 @@ def test_the_challenges_water_scaling_gets_its_creatine_phantom_right(fitter, ex
 def test_every_fitter_covers_the_mrsi_ground_truth(fitter, mrsi):
     data, truth, path = mrsi
     _assert_covers_truth(_fit(fitter, data, path), truth, path)
+
+
+#************#
+#   volume   #
+#************#
+@needs_mrsi
+def test_a_subject_loads_whole_as_one_spatial_nifti_with_its_truth_maps():
+    data, truth, mask = mrsi_challenge.volume(MRSI_SUBJECT, "all", z=16)
+    item = data.list()[0]
+    assert len(data) == 1 and item.shape[:3] == (64, 64, 1) and item.SpecFreqChemShift == 4.7
+    assert set(truth) == set(mrsi_challenge.NAMES.values()) and truth["NAA"].shape == (64, 64, 1)
+    assert mask.shape == (64, 64, 1) and 500 < mask.sum() < 3000
+    assert (truth["NAA"][mask] > 0).mean() > 0.9, "the truth lives in the brain"
+    step = item.hdr_ext["ProcessingApplied"][-1]
+    assert step["Method"].endswith("mrsi_challenge.volume") and '"z": 16' in step["Details"]

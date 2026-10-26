@@ -421,6 +421,14 @@ BLOCKS: Dict[str, Block] = {b.key: b for b in [
           fields=(_value("subject", "", positional=True), _value("voxels", "None")),
           outputs=(Port("spectra", SPECTRA), Port("truth", TRUTH), Port("voxels")),
           help="One subject of the 2024 MRSI challenge, a spectrum per brain voxel."),
+    Block("mrsi2024-volume", "data", "MRSI challenge volume", folder="Simulated datasets",
+          call="mrsi_challenge.volume",
+          imports=("from mrsuite.datasets import mrsi_challenge",),
+          fields=(_value("subject", "", positional=True),
+                  _choice("signal", ["all", "all-nuisance", "meta"], "'all'"), _value("z", "None")),
+          outputs=(Port("spectra", SPECTRA), Port("truth"), Port("mask")),
+          help="One subject of the 2024 MRSI challenge as it is, a whole volume or one slice "
+               "of x by y voxels, for the MRSI steps; its truth as maps, and its brain mask."),
     Block("openneuro-ds005371", "data", "HERMES and HERCULES (ds005371)",
           folder="In vivo datasets", call="openneuro.load",
           imports=("from mrsuite.datasets import openneuro",),
@@ -787,12 +795,25 @@ BLOCKS: Dict[str, Block] = {b.key: b for b in [
           outputs=(Port("spectra", SPECTRA), Port("index")),
           help="The grid's voxels as single-voxel spectra, one per voxel with signal, which "
                "every step and fitter takes; and their indices, for the maps."),
+    Block("voxels-mask", "mrsi", "Voxels in a mask", call="mrsi.voxels",
+          imports=("from mrsuite import mrsi",),
+          inputs=(Port("spectra", SPECTRA), Port("mask")),
+          outputs=(Port("spectra", SPECTRA), Port("index")),
+          help="The grid's voxels inside a mask (the brain's) as single-voxel spectra, and "
+               "their indices, for the maps."),
     Block("maps", "mrsi", "Metabolite maps", call="mrsi.maps",
           imports=("from mrsuite import mrsi",),
           inputs=(Port("results", RESULTS), Port("index")),
           fields=(_value("metabolites", "None"), _value("scaling", "None")),
           outputs=(Port("figure"),),
           help="Fits of the voxels back on the grid, one map per metabolite."),
+    Block("maps-truth", "mrsi", "Maps against the truth", call="mrsi.maps",
+          imports=("from mrsuite import mrsi",),
+          inputs=(Port("results", RESULTS), Port("index"), Port("truth")),
+          fields=(_value("metabolites", "None"), _value("scaling", "None")),
+          outputs=(Port("figure"),),
+          help="Fits of the voxels back on the grid, each map over its true map (the MRSI "
+               "challenge's), on the fitted voxels."),
 ]}
 
 

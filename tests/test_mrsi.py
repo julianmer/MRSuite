@@ -44,6 +44,10 @@ def test_the_voxels_come_apart_placed_and_noted():
     assert step["Method"] == "mrsuite.mrsi.voxels" and str(index[-1].tolist()) in step["Details"]
     few, _ = mrsi.voxels(_slice(), threshold=0.5)
     assert len(few) == 3, "the three strongest voxels"
+    mask = np.zeros((3, 2, 1), bool)
+    mask[0, 0, 0] = mask[2, 1, 0] = True
+    masked, where = mrsi.voxels(_slice(), mask=mask)
+    assert len(masked) == 2 and where.tolist() == [[0, 0, 0], [2, 1, 0]], "the mask, as it is"
 
 
 def test_the_fits_go_back_on_the_grid_as_maps():
@@ -55,3 +59,15 @@ def test_the_fits_go_back_on_the_grid_as_maps():
     image = np.ma.filled(figure.axes[0].images[0].get_array(), np.nan)
     assert image.shape == (2, 3) and np.isnan(image[1, 2]), "y by x, the empty voxel blank"
     assert mrsi.maps(results, index, metabolites=["Cr"]).axes[0].get_title() == "Cr (raw)"
+
+
+def test_the_truth_goes_under_each_map():
+    spectra, index = mrsi.voxels(_slice())
+    results = [FitResult("test", ["NAA", "Cr"], {"raw": {"NAA": float(k), "Cr": 1.0}})
+               for k in range(len(spectra))]
+    truth = {"NAA": np.arange(6, dtype=float).reshape(3, 2, 1), "Cr": np.ones((3, 2, 1))}
+    figure = mrsi.maps(results, index, truth=truth)
+    titles = [ax.get_title() for ax in figure.axes if ax.get_title()]
+    assert titles == ["NAA (raw)", "Cr (raw)", "NAA (truth)", "Cr (truth)"], titles
+    shown = np.ma.filled(figure.axes[2].images[0].get_array(), np.nan)
+    assert np.isnan(shown[1, 2]), "the truth only where a voxel was fitted"

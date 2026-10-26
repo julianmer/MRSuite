@@ -26,14 +26,14 @@ import nifti_mrs_plus
 
 from mrsuite.core.method import Method, method
 
-__version__ = "0.1.0"
+__version__ = "0.0.1"
 
 # Same pattern as Augmentrum: stamp the shared wrapper's provenance metadata so
 # processed data records which toolbox touched it.
 nifti_mrs_plus.set_provenance("MRSuite", __version__)
 
-_BRIDGES = {"fid_a", "fsl_mrs", "lcmodel", "mrspeclab", "osprey", "pyamares", "spant",
-            "tarquin", "vespa"}
+_BRIDGES = {"augmentrum", "fid_a", "fsl_mrs", "lcmodel", "mrspeclab", "nifti_mrs", "osprey",
+            "pyamares", "spant", "suspect", "tarquin", "vespa"}
 
 __all__ = ["__version__", "Method", "method", *sorted(_BRIDGES)]
 

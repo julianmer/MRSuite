@@ -34,14 +34,18 @@ dependencies = [
     "huggingface_hub",   # the model zoo: from_pretrained and push_to_hub
     "safetensors",    # the Hub's format for PyTorch weights
     "ssqueezepy>=0.6.6",   # WAND's wavelet transform; 0.6.4 calls a SciPy function now removed
-    # not here: FSL-MRS (conda only), Augmentrum (which needs it) and MRSValidate (not on PyPI);
-    # like pyAMARES and Vespa, their parts of MRSuite say how to install them when first used
+    "keras>=3.0",     # Model.learn: one Keras loop for PyTorch, TensorFlow and JAX models
+    "nicegui[native,plotly]>=3.17,<4",   # mrsuite-gui; 4.0 changes its process pool and run
+    "suspect",        # its readers and processing as steps (bridges/suspect.py)
+    "pyAMARES",       # the pyAMARES fit
+    "pypulseq",       # Pulseq sequences read and written (simulators/mrsandbox.py)
+    # one `pip install mrsuite` brings everything pip can. Not here, and said when first used:
+    # FSL-MRS and fsl-denmatsim (conda only), Augmentrum (imports FSL-MRS), MRSValidate (not
+    # on PyPI), MRSandbox (public soon), Vespa (needs wxPython, a GUI toolkit, for one fitter)
 ]
 
 [project.optional-dependencies]
 dev = ["pytest"]
-train = ["keras>=3.0"]   # Model.learn: one Keras loop for PyTorch, TensorFlow and JAX models
-gui = ["nicegui[native,plotly]>=3.17,<4"]   # mrsuite-gui; 4.0 changes its process pool and run
 
 [project.scripts]
 mrsuite-gui = "mrsuite.gui.__main__:main"

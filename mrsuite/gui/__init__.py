@@ -8,6 +8,6 @@
 #                                                                                                  #
 # Purpose: MRSuite's GUI: read data in, build a pipeline from every function of every bridge,      #
 #          tune each step and see what it made, and write it all out, the pipeline as code.        #
-#          Started with `mrsuite-gui`; needs the gui extra, `pip install mrsuite[gui]`.            #
+#          Started with `mrsuite-gui`; nicegui comes with MRSuite (`pip install mrsuite`).         #
 #                                                                                                  #
 ####################################################################################################

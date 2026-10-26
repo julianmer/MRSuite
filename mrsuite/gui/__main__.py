@@ -6,7 +6,7 @@
 #                                                                                                  #
 # Created: 2026-10-07                                                                              #
 #                                                                                                  #
-# Purpose: Starts the GUI: `mrsuite-gui`, or `uvx --from "mrsuite[gui] @ git+<repo>" mrsuite-gui`. #
+# Purpose: Starts the GUI: `mrsuite-gui`, or `uvx --from "mrsuite @ git+<repo>" mrsuite-gui`.       #
 #          A window of its own where one can open, else the browser; `--check` says what this      #
 #          machine has for MRSuite's toolboxes, and starts nothing.                                #
 #                                                                                                  #
@@ -85,7 +85,7 @@ def main(argv: Optional[List[str]] = None) -> None:
     try:
         from nicegui import app, ui
     except ModuleNotFoundError:
-        sys.exit("The GUI needs the gui extra: pip install 'mrsuite[gui]'")
+        sys.exit("The GUI needs nicegui, which comes with MRSuite: pip install mrsuite")
     from mrsuite.gui.app import drop, page
 
     window = native() and not args.browser

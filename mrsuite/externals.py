@@ -38,6 +38,8 @@ REGISTRY = {
               "e53037b3f0f59eaa812c02ae365e156b3d16e9ab"),
     "fid-a": ("https://github.com/CIC-methods/FID-A.git",
               "1eaa2075625745beb7632f608dc2947b73295309"),
+    "mrs-digital-phantom": ("https://github.com/dennisvds/MRS-Digital-Phantom.git",
+                            "acf2dcb2015a2d27560295157774fdde8ef7d9a2"),
     "mrs-sim": ("https://github.com/JohnLaMaster/MRS-Sim.git",
                 "dffb5ed7dd8ada1070cb931a63e3fa8b6c1de875"),
     "mrspeclab": ("https://github.com/MRSEPFL/MRSpecLAB.git",

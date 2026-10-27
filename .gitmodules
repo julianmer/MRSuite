@@ -34,3 +34,6 @@
 [submodule "externals/agnostic"]
 	path = externals/agnostic
 	url = https://github.com/agudmundson/agnostic.git
+[submodule "externals/mrs-digital-phantom"]
+	path = externals/mrs-digital-phantom
+	url = https://github.com/dennisvds/MRS-Digital-Phantom.git

@@ -571,6 +571,15 @@ BLOCKS: Dict[str, Block] = {b.key: b for b in [
           outputs=(Port("spectra", SPECTRA), Port("truth", TRUTH)),
           help="Brain-like spectra simulated by spant (sim_brain_1h) through one of its ideal "
                "sequences, its amplitudes as truth; timings under further arguments."),
+    Block("digital-phantom", "simulate", "Digital phantom spectrum", folder="Spectrum simulation",
+          call="digital_phantom.scan", imports=("from mrsuite.simulators import digital_phantom",),
+          fields=(_choice("sequence", ["PRESS", "sLASER"], "'PRESS'"), _value("te", "35"),
+                  _value("size", "20.0"), _value("seed", "0")),
+          outputs=(Port("spectra", SPECTRA), Port("truth", TRUTH)),
+          help="A voxel of MRS-Digital-Phantom's digital brain (its MRiLab skeleton) as a "
+               "spectrum: metabolites from its tissue tables, macromolecules, lipids, water and "
+               "noise, on the Philips basis set of that sequence and TE (PRESS 30, 35, 68, 120; "
+               "sLASER 10, 30, 35, 120 ms); its tissue-weighted concentrations as truth."),
     Block("mrsandbox-scan", "simulate", "MRSandbox scan", folder="Spectrum simulation",
           call="mrsandbox.scan", imports=("from mrsuite.simulators import mrsandbox",),
           fields=(_choice("sequence", list(SEQUENCES), "'press'"),

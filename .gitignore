@@ -102,6 +102,9 @@ data/*
 # the machine or container it was compiled on, not source.
 .octave-mex/
 
+# PyGAMMA built per system and Python from its pinned source: a build artefact, not source.
+.pygamma/
+
 # oct2py scratch. It lives inside the repo so the containerised Octave sees it at the
 # same absolute path as the host, under the one repo bind-mount.
 .octave-tmp/

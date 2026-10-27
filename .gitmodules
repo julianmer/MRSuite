@@ -37,3 +37,6 @@
 [submodule "externals/mrs-digital-phantom"]
 	path = externals/mrs-digital-phantom
 	url = https://github.com/dennisvds/MRS-Digital-Phantom.git
+[submodule "externals/pygamma"]
+	path = externals/pygamma
+	url = https://github.com/pygamma-mrs/gamma.git

@@ -46,3 +46,6 @@
 [submodule "externals/spm12"]
 	path = externals/spm12
 	url = https://github.com/spm/spm12.git
+[submodule "externals/spinach"]
+	path = externals/spinach
+	url = https://github.com/IlyaKuprov/Spinach.git

@@ -54,6 +54,8 @@ REGISTRY = {
                 "4707348a9b26c9bcf99aa22d04c2e8ccbe5bf05c"),
     "simntg": ("https://github.com/mrshub/SimnTG.git",
                "98444f6db495a3e17d3d179e8f36ee1fe0c7b345"),
+    "spinach": ("https://github.com/IlyaKuprov/Spinach.git",
+                "4138eb5fc2414a6b0f510d1e34103189599d1a58"),
     "spm12": ("https://github.com/spm/spm12.git",
               "03ac9473cad402407b6472228377c0167fdc54b8"),
     "wand-for-mrs": ("https://github.com/julianmer/WAND-for-MRS.git",

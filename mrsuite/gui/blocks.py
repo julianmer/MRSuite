@@ -78,7 +78,8 @@ GROUPS = {g.key: g for g in [
           "Convert basis set writes its files itself."),
     Group("simulate", "Simulate", "#8ea4ff",
           "Basis sets and spectra with known contents, by every simulator: FID-A's, spant's, "
-          "FSL-MRS's and Vespa's density-matrix simulations, FSL-MRS's and spant's synthetic "
+          "FSL-MRS's and Vespa's density-matrix simulations, Spinach's in the Liouville space, "
+          "FSL-MRS's and spant's synthetic "
           "spectra, MRS-Sim, and MRSandbox's virtual scanner on its virtual brain; the pulse "
           "sequences they play, from MRSandbox's library or any Pulseq file, and the toolboxes' "
           "RF pulse tools under All functions."),
@@ -534,6 +535,19 @@ BLOCKS: Dict[str, Block] = {b.key: b for b in [
                "with make, g++ and SWIG): its bundled ideal sequences on its metabolites' spin "
                "systems, unbroadened; timings in ms, one per loop (PRESS: TE1, TE2; STEAM: TE, "
                "TM; Spin-Echo: TE), None for Vespa's default of 0 ms; frequency in MHz."),
+    Block("spinach-basis", "simulate", "Spinach spin systems", folder="Basis set simulation",
+          call="spinach.simulate", imports=("from mrsuite.simulators import spinach",),
+          fields=(_value("systems", positional=True), _value("sequence", "'acquire'"),
+                  _value("field", "3.0"), _value("points", "2048"),
+                  _value("bandwidth", "2000.0"), _value("linewidth", "2.0"),
+                  _value("centre", "4.65"), _choice("approximation", ["none"], "'none'"),
+                  _value("parameters", "None")),
+          outputs=(Port("basis", BASIS),),
+          help="1H spin systems of your own simulated by Spinach in the full Liouville space: "
+               "{'name': {'shifts': [ppm, ...], 'couplings': {(0, 1): J in Hz}}}, through one "
+               "of its pulse sequences (pulse-acquire from the excited state, as its own 1D "
+               "examples), one function each. Under Octave only the full basis runs; "
+               "Spinach's restricted ones need MATLAB."),
     Block("mrsandbox-basis", "simulate", "MRSandbox basis set", folder="Basis set simulation",
           call="mrsandbox.basis", imports=("from mrsuite.simulators import mrsandbox",),
           fields=(_choice("sequence", list(SEQUENCES), "'press'"),

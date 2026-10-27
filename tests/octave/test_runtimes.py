@@ -135,3 +135,34 @@ def test_the_two_runtimes_agree(bridges, spectrum):
     assert local.shape == container.shape
     worst = np.max(np.abs(local - container))
     assert worst < 1e-10, f"runtimes disagree by {worst:.3e}"
+
+
+#*****************#
+#   spm12 build   #
+#*****************#
+def test_spm12_is_built_again_for_a_runtime_it_was_not_built_for(tmp_path, monkeypatch):
+    """SPM's MEX lie in its checkout, one build at a time: what it was built for is kept,
+    and another runtime cleans it with SPM's own target first."""
+    import mrsuite.octave as octave
+
+    (tmp_path / "src").mkdir()
+    builds = []
+
+    def make(cmd, **kwargs):
+        builds.append(cmd[-1])
+        (tmp_path / "spm_bsplinc.mex").write_text("built")
+        return type("Done", (), {"returncode": 0, "stderr": ""})()
+
+    tag = {"value": "linux-x86_64-octave9"}
+    monkeypatch.setattr(octave, "resolve_runtime", lambda runtime=None: "local")
+    monkeypatch.setattr(octave, "platform_tag", lambda which: tag["value"])
+    monkeypatch.setattr(octave.subprocess, "run", make)
+
+    octave.build_spm12(str(tmp_path))
+    octave.build_spm12(str(tmp_path))                     # built for this one already
+    tag["value"] = "linux-x86_64-octave10"
+    octave.build_spm12(str(tmp_path))
+
+    assert len(builds) == 2
+    assert all(b.startswith("make PLATFORM=octave distclean && ") for b in builds)
+    assert (tmp_path / "src" / ".mrsuite-platform").read_text() == "linux-x86_64-octave10\n"

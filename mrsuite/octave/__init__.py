@@ -298,6 +298,10 @@ def build_spm12(spm_root: str, runtime: Optional[str] = None) -> str:
     SPM12's C is older than C23, which GCC 15 compiles by default and which makes ``bool``
     a keyword, so it is compiled as GNU C17, on top of the flags mkoctfile would use.
 
+    One checkout holds one build, so what it was built for (``platform_tag``) is written
+    beside SPM's own build output, in src/; a runtime it was not built for (the container's
+    after the host's, Octave 10 after 9) cleans it with SPM's own target and builds again.
+
     Args:
         spm_root (str): An SPM12 checkout.
         runtime (Optional[str]): 'local', 'docker' or 'auto'; where it is compiled.
@@ -308,11 +312,16 @@ def build_spm12(spm_root: str, runtime: Optional[str] = None) -> str:
     Raises:
         RuntimeError: If the build fails.
     """
-    if os.path.exists(os.path.join(spm_root, "spm_bsplinc.mex")):
-        return spm_root
     which = resolve_runtime(runtime)
     src = os.path.join(spm_root, "src")
-    build = ("CFLAGS=\"$(mkoctfile -p CFLAGS) -std=gnu17\" make PLATFORM=octave install")
+    marker, tag = os.path.join(src, ".mrsuite-platform"), platform_tag(which)
+    built = os.path.exists(os.path.join(spm_root, "spm_bsplinc.mex"))
+    if built and os.path.exists(marker):
+        with open(marker) as fh:
+            if fh.read().strip() == tag:
+                return spm_root
+    build = ("make PLATFORM=octave distclean && "
+             "CFLAGS=\"$(mkoctfile -p CFLAGS) -std=gnu17\" make PLATFORM=octave install")
     cmd = ["docker", "exec", "-w", src, docker.CONTAINER, "sh", "-c", build] \
         if which == "docker" else ["sh", "-c", build]
     if which == "docker":
@@ -321,4 +330,6 @@ def build_spm12(spm_root: str, runtime: Optional[str] = None) -> str:
                           cwd=None if which == "docker" else src, timeout=3600)
     if proc.returncode != 0 or not os.path.exists(os.path.join(spm_root, "spm_bsplinc.mex")):
         raise RuntimeError(f"SPM12's MEX build failed ({which}):\n{proc.stderr[-2000:]}")
+    with open(marker, "w") as fh:
+        fh.write(tag + "\n")
     return spm_root

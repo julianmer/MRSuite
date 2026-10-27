@@ -736,6 +736,17 @@ BLOCKS: Dict[str, Block] = {b.key: b for b in [
           help="Model the spectrum as a combination of basis spectra."),
     Block("peak-fit", "fit", "Peak fit (AMARES)", out=RESULTS, options=(("pyamares", "fit"),),
           help="Model the spectrum as peaks with prior knowledge."),
+    Block("gannet", "fit", "Gannet (edited MRS)", call="gannet.fit",
+          imports=("from mrsuite.bridges import gannet",),
+          fields=(_value("metabolite", positional=True), _value("water", "None"),
+                  _value("t1", "None"), _value("settings", "None"), _value("output", "None")),
+          outputs=(Port("out", RESULTS),),
+          help="An edited acquisition's files (MEGA-PRESS, HERMES; any format Gannet reads) "
+               "through Gannet's load and fit, and with a T1 its co-registration, SPM12 "
+               "segmentation and tissue-corrected quantification; GABA+ and Glx by default "
+               "(GannetPreInitialise.m), settings such as {'HERMES': 1, 'target': "
+               "['GABAGlx', 'GSH']} over them. A T1 needs the water reference; PRIAM and "
+               "joined files are not run."),
     Block("ratios", "fit", "Ratios to creatine", call="scoring.ratios", imports=(_SCORE,),
           inputs=(Port("results", RESULTS),),
           fields=(_choice("to", ["tCr"], "'tCr'"), _value("scaling", "None")),

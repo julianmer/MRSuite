@@ -283,3 +283,42 @@ def build_lbfgsb(osprey_root: str, runtime: Optional[str] = None,
             raise RuntimeError(f"L-BFGS-B-C build failed ({which}, "
                                f"{os.path.basename(built)}):\n{proc.stderr[-2000:]}")
     return out
+
+
+#*****************#
+#   build spm12   #
+#*****************#
+def build_spm12(spm_root: str, runtime: Optional[str] = None) -> str:
+    """
+    SPM12's MEX files built for Octave, as SPM documents it: its own Makefile, ``make
+    PLATFORM=octave install`` in src/, which compiles them with mkoctfile and puts each
+    beside the code that calls it, in the checkout (a class's private folder among them,
+    so they cannot live elsewhere). Nothing of SPM's is changed; what is built is new files.
+
+    SPM12's C is older than C23, which GCC 15 compiles by default and which makes ``bool``
+    a keyword, so it is compiled as GNU C17, on top of the flags mkoctfile would use.
+
+    Args:
+        spm_root (str): An SPM12 checkout.
+        runtime (Optional[str]): 'local', 'docker' or 'auto'; where it is compiled.
+
+    Returns:
+        The checkout, built.
+
+    Raises:
+        RuntimeError: If the build fails.
+    """
+    if os.path.exists(os.path.join(spm_root, "spm_bsplinc.mex")):
+        return spm_root
+    which = resolve_runtime(runtime)
+    src = os.path.join(spm_root, "src")
+    build = ("CFLAGS=\"$(mkoctfile -p CFLAGS) -std=gnu17\" make PLATFORM=octave install")
+    cmd = ["docker", "exec", "-w", src, docker.CONTAINER, "sh", "-c", build] \
+        if which == "docker" else ["sh", "-c", build]
+    if which == "docker":
+        docker.start()
+    proc = subprocess.run(cmd, capture_output=True, text=True,
+                          cwd=None if which == "docker" else src, timeout=3600)
+    if proc.returncode != 0 or not os.path.exists(os.path.join(spm_root, "spm_bsplinc.mex")):
+        raise RuntimeError(f"SPM12's MEX build failed ({which}):\n{proc.stderr[-2000:]}")
+    return spm_root

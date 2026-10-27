@@ -38,6 +38,8 @@ REGISTRY = {
               "e53037b3f0f59eaa812c02ae365e156b3d16e9ab"),
     "fid-a": ("https://github.com/CIC-methods/FID-A.git",
               "1eaa2075625745beb7632f608dc2947b73295309"),
+    "gannet": ("https://github.com/markmikkelsen/Gannet.git",
+               "f437bb77224d6fd5a02489670dee461a54e30e34"),
     "mrs-digital-phantom": ("https://github.com/dennisvds/MRS-Digital-Phantom.git",
                             "acf2dcb2015a2d27560295157774fdde8ef7d9a2"),
     "mrs-sim": ("https://github.com/JohnLaMaster/MRS-Sim.git",
@@ -52,6 +54,8 @@ REGISTRY = {
                 "4707348a9b26c9bcf99aa22d04c2e8ccbe5bf05c"),
     "simntg": ("https://github.com/mrshub/SimnTG.git",
                "98444f6db495a3e17d3d179e8f36ee1fe0c7b345"),
+    "spm12": ("https://github.com/spm/spm12.git",
+              "03ac9473cad402407b6472228377c0167fdc54b8"),
     "wand-for-mrs": ("https://github.com/julianmer/WAND-for-MRS.git",
                      "2642659ccf8f5ca6376b44a351dd9420a846b1f0"),
 }

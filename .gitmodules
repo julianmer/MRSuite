@@ -40,3 +40,9 @@
 [submodule "externals/pygamma"]
 	path = externals/pygamma
 	url = https://github.com/pygamma-mrs/gamma.git
+[submodule "externals/gannet"]
+	path = externals/gannet
+	url = https://github.com/markmikkelsen/Gannet.git
+[submodule "externals/spm12"]
+	path = externals/spm12
+	url = https://github.com/spm/spm12.git

@@ -77,11 +77,11 @@ GROUPS = {g.key: g for g in [
           "challenges; and basis sets, in any format. Every block exports what it made; "
           "Convert basis set writes its files itself."),
     Group("simulate", "Simulate", "#8ea4ff",
-          "Basis sets and spectra with known contents, by every simulator: FID-A's, spant's and "
-          "FSL-MRS's density-matrix simulations, FSL-MRS's and spant's synthetic spectra, "
-          "MRS-Sim, and MRSandbox's virtual scanner on its virtual brain; the pulse sequences "
-          "they play, from MRSandbox's library or any Pulseq file, and the toolboxes' RF pulse "
-          "tools under All functions."),
+          "Basis sets and spectra with known contents, by every simulator: FID-A's, spant's, "
+          "FSL-MRS's and Vespa's density-matrix simulations, FSL-MRS's and spant's synthetic "
+          "spectra, MRS-Sim, and MRSandbox's virtual scanner on its virtual brain; the pulse "
+          "sequences they play, from MRSandbox's library or any Pulseq file, and the toolboxes' "
+          "RF pulse tools under All functions."),
     Group("augment", "Augment", "#7a8ff6",
           "Vary the spectra, physically consistently, with Augmentrum: the signal (noise, line "
           "broadening, baselines, phase and frequency, amplitude), artifacts (residual water, "
@@ -519,6 +519,21 @@ BLOCKS: Dict[str, Block] = {b.key: b for b in [
           help="A basis set simulated by FSL-MRS's fsl_mrs_sim from a sequence described in "
                "its JSON (RF pulses, gradients, delays, coherence filter); needs FSL-MRS "
                "with fsl-denmatsim."),
+    # Vespa's own defaults: B0, points and sweep width of vespa/common/constants.py
+    # (DEFAULT_B0, DEFAULT_SPECTRAL_POINTS, DEFAULT_SWEEP_WIDTH), the timings its
+    # mrs_experiment.DEFAULT_LOOP, the metabolites its bundled 'Example - Spin-Echo sequence'
+    Block("vespa-basis", "simulate", "Vespa basis set", folder="Basis set simulation",
+          call="bases.vespa", imports=("from mrsuite.simulators import bases",),
+          fields=(_value("metabolites", repr(list(bases.VESPA_METABOLITES))),
+                  _choice("sequence", ["PRESS Ideal", "STEAM Ideal", "Spin-Echo"],
+                          "'PRESS Ideal'"),
+                  _value("timings", "None"), _value("frequency", "64.0"),
+                  _value("points", "2048"), _value("bandwidth", "2000.0")),
+          outputs=(Port("basis", BASIS),),
+          help="A basis set simulated by Vespa's Simulation on PyGAMMA (built on first use, "
+               "with make, g++ and SWIG): its bundled ideal sequences on its metabolites' spin "
+               "systems, unbroadened; timings in ms, one per loop (PRESS: TE1, TE2; STEAM: TE, "
+               "TM; Spin-Echo: TE), None for Vespa's default of 0 ms; frequency in MHz."),
     Block("mrsandbox-basis", "simulate", "MRSandbox basis set", folder="Basis set simulation",
           call="mrsandbox.basis", imports=("from mrsuite.simulators import mrsandbox",),
           fields=(_choice("sequence", list(SEQUENCES), "'press'"),

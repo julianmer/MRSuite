@@ -6,9 +6,10 @@
 #                                                                                                  #
 # Created: 26/10/26                                                                                #
 #                                                                                                  #
-# Purpose: Basis sets simulated by the toolboxes - FID-A's density-matrix simulation of ideal     #
-#          sequences, spant's, FSL-MRS's fsl_mrs_sim from its sequence description - as one Basis  #
-#          every fit takes, with how it was simulated in its source.                               #
+# Purpose: Basis sets simulated by the toolboxes - FID-A's density-matrix simulation of ideal      #
+#          sequences, spant's, FSL-MRS's fsl_mrs_sim from its sequence description, Vespa's        #
+#          Simulation on PyGAMMA - as one Basis every fit takes, with how it was simulated in its  #
+#          source.                                                                                 #
 #                                                                                                  #
 ####################################################################################################
 
@@ -20,7 +21,9 @@ import os
 import shutil
 import subprocess
 import sys
-from typing import Any, Dict, Sequence
+import tempfile
+from pathlib import Path
+from typing import Any, Dict, Optional, Sequence
 
 import numpy as np
 
@@ -30,6 +33,11 @@ from mrsuite.core.basis import CENTRE, Basis
 # spells them
 METABOLITES = ("Ala", "Asc", "Asp", "Cr", "GABA", "Glc", "Gln", "Glu", "GPC", "GSH", "Gly", "Ins",
                "Lac", "NAA", "NAAG", "PCh", "PCr", "PE", "Scyllo", "Tau")
+
+# the metabolites of Vespa's bundled experiment 'Example - Spin-Echo sequence', as its
+# metabolite database spells them
+VESPA_METABOLITES = ("acetate", "aspartate", "choline-truncated", "creatine", "gaba", "glutamate",
+                     "glutamine", "lactate", "myo-inositol", "n-acetylaspartate", "taurine")
 
 
 #***********#
@@ -249,3 +257,154 @@ def fsl_mrs(sequence_json: str, metabolites: Sequence[str] = METABOLITES, te: fl
                                  "arguments": {"sequence_json": sequence_json, "te": te,
                                                "autophase": autophase}}
     return basis
+
+
+#***********#
+#   vespa   #
+#***********#
+def vespa(metabolites: Sequence[str] = VESPA_METABOLITES, sequence: str = "PRESS Ideal",
+          timings: Optional[Sequence[float]] = None, frequency: float = 64.0, points: int = 2048,
+          bandwidth: float = 2000.0) -> Basis:
+    """
+    A basis set simulated by Vespa's Simulation on PyGAMMA: one of its bundled pulse
+    sequences run on its bundled metabolites' spin systems (``run_experiment``), their
+    lines summed into FIDs (``build_basis_functions``) about 4.7 ppm, as Vespa centres 1H,
+    and left unbroadened, as Vespa sums them. The defaults are Vespa's own
+    (vespa/common/constants.py: DEFAULT_B0, DEFAULT_SPECTRAL_POINTS, DEFAULT_SWEEP_WIDTH;
+    mrs_experiment.DEFAULT_LOOP).
+
+    Vespa runs as published: its database built once from its bundled XML into MRSuite's
+    folder, by a process of its own whose home is that folder, which so takes the logs it
+    writes; and ``inspect.getargspec``, removed in Python 3.11 and still called by its
+    experiment runner, given back as the first four of ``getfullargspec``. PyGAMMA is
+    built on first use (``pygamma_build``).
+
+    Args:
+        metabolites (Sequence[str]): As Vespa's metabolite database spells them, e.g.
+            'n-acetylaspartate'.
+        sequence (str): A pulse sequence bundled with Vespa: 'PRESS Ideal', 'STEAM Ideal',
+            'Spin-Echo', ...
+        timings (Optional[Sequence[float]]): One per loop of the sequence in ms, in its
+            order (PRESS Ideal: TE1, TE2; STEAM Ideal: TE, TM; Spin-Echo: TE); None for
+            Vespa's default loop, 0 ms each.
+        frequency (float): Spectrometer frequency, Vespa's B0, in MHz.
+        points (int): Points of the FID.
+        bandwidth (float): Spectral width in Hz.
+
+    Returns:
+        Basis: The metabolites in the order asked; TE the sum of the timings named TE.
+
+    Raises:
+        ImportError: If Vespa is not installed, or configobj, which it needs.
+        ValueError: If the sequence or a metabolite is not in Vespa's database, or the
+            timings are not one per loop.
+        RuntimeError: If PyGAMMA cannot be built, or the simulation fails, with Vespa's
+            message.
+    """
+    import inspect
+
+    from mrsuite import externals
+    from mrsuite.simulators import pygamma_build
+
+    if not hasattr(inspect, "getargspec"):
+        inspect.getargspec = lambda func: tuple(inspect.getfullargspec(func)[:4])
+    try:
+        import vespa.common.constants as constants
+        import vespa.common.mrs_experiment as mrs_experiment
+        import vespa.common.mrs_simulation as mrs_simulation
+        import vespa.common.util.misc as util_misc
+        import vespa.simulation.util_db as util_db
+    except ImportError as err:
+        raise ImportError(f"Vespa cannot be imported ({err}): pip install it from "
+                          "https://github.com/vespa-mrs/vespa (the PyPI wheel lags) with "
+                          "configobj") from err
+
+    version = util_misc.get_vespa_version()
+    db = util_db.Database(str(_vespa_database(version)))
+    found = db.fetch_pulse_sequences_by_name(sequence)
+    if not found:
+        raise ValueError(f"no pulse sequence {sequence!r} in Vespa's database; it holds "
+                         f"{sorted(s.name for s in db.fetch_pulse_sequences())}")
+    seq = db.fetch_pulse_sequence(found[0].id)
+    labels = list(seq.loop_labels)
+    timings = [float(t) for t in timings] if timings is not None \
+        else [mrs_experiment.DEFAULT_LOOP[0]] * len(labels)
+    if len(timings) != len(labels):
+        raise ValueError(f"{sequence} takes a timing per loop, {labels}, not {len(timings)}")
+    known = {m.name: m for m in db.fetch_metabolites()}
+    unknown = [m for m in metabolites if m not in known]
+    if unknown:
+        raise ValueError(f"not in Vespa's metabolite database: {unknown}; it holds "
+                         f"{sorted(known)}")
+
+    pygamma_build.ensure()               # the experiment runner and its sequences import pygamma
+    import pygamma
+    import vespa.simulation.build_basis_functions as build_basis_functions
+    import vespa.simulation.run_experiment_controller as run_experiment_controller
+
+    experiment = mrs_experiment.Experiment()
+    experiment.name = "MRSuite"
+    experiment.b0 = float(frequency)
+    experiment.isotope = "1H"
+    experiment.pulse_sequence = seq
+    experiment.metabolites = [known[m] for m in metabolites]
+    experiment.dims = [[t] for t in timings] + [mrs_experiment.DEFAULT_LOOP] * (3 - len(timings))
+    results, failed = run_experiment_controller.run_experiment(experiment, local_cpu=1)
+    if failed:
+        raise RuntimeError("Vespa's simulation failed:\n"
+                           + run_experiment_controller.exception_to_message(failed[0]))
+    by_name = {result["metabolite"]: result for result in results}
+    experiment.simulations = [mrs_simulation.Simulation({**by_name[m.name], "metabolite": m})
+                              for m in experiment.metabolites]
+    centre = constants.DEFAULT_PROTON_CENTER_PPM
+    lines = build_basis_functions.build_basis_functions(experiment, int(points), float(bandwidth),
+                                                        centre, local_cpu=1)
+    # Vespa puts a line at sw / 2 - (ppm - centre) * B0 Hz (its ppm2pts): conjugated and moved
+    # by half the bandwidth, a peak at f Hz sits at centre + f / frequency, as Basis holds it
+    fids = np.conj(lines.reshape(len(metabolites), int(points))) * (-1.0) ** np.arange(points)
+    return Basis(list(metabolites), fids.astype(complex), float(bandwidth), float(frequency),
+                 centre=centre, seq=sequence,
+                 te=sum(t for label, t in zip(labels, timings) if label.startswith("TE")),
+                 source={"simulated": {"program": "Vespa Simulation", "version": version,
+                                       "engine": {"program": "PyGAMMA",
+                                                  "version": pygamma.__version__,
+                                                  "commit": externals.REGISTRY["pygamma"][1]},
+                                       "function": "run_experiment, build_basis_functions",
+                                       "pulse_sequence": {"name": seq.name, "id": seq.id},
+                                       "arguments": {"metabolites": list(metabolites),
+                                                     "sequence": sequence,
+                                                     "timings": dict(zip(labels, timings)),
+                                                     "frequency": frequency, "points": points,
+                                                     "bandwidth": bandwidth}}})
+
+
+#********************#
+#   vespa database   #
+#********************#
+def _vespa_database(version: str) -> Path:
+    """Vespa's database, built once per Vespa version by its own create_database from its
+    bundled XML, into MRSuite's folder; by a process whose home is that folder, so the logs
+    Vespa writes into its data folder land there; built beside its place and moved in whole."""
+    from mrsuite import externals
+
+    folder = externals.local(".vespa")
+    path = folder / f"vespa-{version}.sqlite"
+    if path.is_file():
+        return path
+    folder.mkdir(parents=True, exist_ok=True)
+    part = Path(tempfile.mkdtemp(prefix=".part", dir=folder))
+    code = ("import logging, os, sys; import vespa.common.util.misc as misc; "
+            "os.makedirs(os.path.join(misc.get_data_dir(), 'logs'), exist_ok=True); "
+            "from vespa.common.create_database import create_database; "
+            "create_database(sys.argv[1], logging.getLogger('vespa'))")
+    # without XDG_DATA_HOME, Vespa's data folder on Linux is ~/.Vespa, as on its first run
+    env = {k: v for k, v in os.environ.items() if k != "XDG_DATA_HOME"} | {"HOME": str(folder)}
+    try:
+        run = subprocess.run([sys.executable, "-c", code, str(part / path.name)], env=env,
+                             capture_output=True, text=True)
+        if run.returncode != 0:
+            raise RuntimeError(f"Vespa could not build its database:\n{run.stderr[-2000:]}")
+        os.replace(part / path.name, path)
+    finally:
+        shutil.rmtree(part, ignore_errors=True)
+    return path

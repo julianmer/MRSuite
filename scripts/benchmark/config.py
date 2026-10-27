@@ -314,7 +314,7 @@ STAGES = {
                              "mlp-selfsupervised-mrsi2024-release-track2",
                              "wand-mrsi2024-full-track2-lcmodel",
                              "wand-mrsi2024-full-track2-fsl_mrs")],
-    # every method on the simulated suite but Vespa and pyAMARES (held, Julian 2026-10-16)
+    # every method on the simulated suite but Vespa and pyAMARES (held back for now)
     "suite": [Job(dataset, name) for dataset in SUITE for name in
               (*(f"{wand}{fit}" for fit in ("lcmodel", "fsl_mrs", "spant", "tarquin", "osprey")
                  for wand in ("", "wand-")),

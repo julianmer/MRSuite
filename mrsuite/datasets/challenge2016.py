@@ -382,7 +382,7 @@ def pyamares_prior(folder: Path = DATA / 'basis_sets') -> str:
 #***********#
 #   suite   #
 #***********#
-# The benchmark suite on simulated spectra (paper/ismrm2027/SUITE.md): mrs_sim_config's
+# The benchmark suite on simulated spectra: mrs_sim_config's
 # spectra, the 2016 training distribution, then one effect at a time moved out of it, by
 # level. MRS-Sim draws each range uniformly per spectrum, and a switched-on effect takes
 # MRS-Sim's own wide default unless given one, as the base config sets none. A Lorentzian

@@ -111,3 +111,8 @@ legacy/
 
 # Abstract and paper drafts, planned and built locally
 paper/
+
+# Local working notes and assistant settings
+CLAUDE.md
+info/
+.claude/

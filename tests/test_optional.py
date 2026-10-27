@@ -8,7 +8,7 @@
 #                                                                                                  #
 # Purpose: MRSuite without what pip cannot install: FSL-MRS, Augmentrum (which needs it) and       #
 #          MRSValidate; and without nicegui. Everything else imports, and their parts say         #
-#          how to install them.                                                                    #
+#          how to install them. Importing it starts no Octave.                                     #
 #                                                                                                  #
 ####################################################################################################
 
@@ -75,3 +75,24 @@ def test_a_broken_fsl_mrs_says_what_is_missing_not_that_fsl_mrs_is(tmp_path):
 
     assert "No module named 'a_dependency_it_lacks'" in run.stderr
     assert "FSL-MRS is not installed" not in run.stderr
+
+
+#********************#
+#   without octave   #
+#********************#
+def test_importing_mrsuite_leaves_octave_alone(tmp_path):
+    # importing oct2py starts an Octave, or prints that there is none: only a session may
+    script = """
+import importlib, pkgutil, sys
+for name in ("oct2py", "octave_kernel"):
+    sys.modules[name] = None
+import mrsuite
+skipped = ("mrsuite.models.reference", "_driver", "gui.app", "gui.canvas", "gui.files")
+for module in pkgutil.walk_packages(mrsuite.__path__, "mrsuite."):
+    if module.name != "mrsuite.octave.sessions" and not module.name.endswith(skipped):
+        importlib.import_module(module.name)
+"""
+    run = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True,
+                         cwd=tmp_path)
+
+    assert run.returncode == 0, run.stderr

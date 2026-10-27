@@ -21,18 +21,20 @@ import keyword
 import os
 import re
 from functools import lru_cache
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
 from nifti_mrs.create_nmrs import gen_nifti_mrs
 from nifti_mrs.nifti_mrs import NIFTI_MRS
-from oct2py import Oct2Py
 
 from mrsuite import externals
 from mrsuite.bridges.base import Bridge, defaults
 from mrsuite.core.provenance import git_version
 from mrsuite.octave import resolve_runtime, session
+
+if TYPE_CHECKING:                   # oct2py starts an Octave when imported, so only a session does
+    from oct2py import Oct2Py
 
 # Absolute, so the bridge works from any working directory.
 FIDA_ROOT = externals.path("fid-a")
@@ -445,7 +447,7 @@ class FIDABridge(Bridge):
         self._fida_root = fida_root
         self._verbose = verbose
         self._runtime = runtime
-        self._octave: Optional[Oct2Py] = None
+        self._octave: Optional["Oct2Py"] = None
         self._octave_version: Optional[str] = None
         self._codec = None
         self.nout = 1
@@ -480,7 +482,7 @@ class FIDABridge(Bridge):
     #   octave   #
     #************#
     @property
-    def octave(self) -> Oct2Py:
+    def octave(self) -> "Oct2Py":
         """Octave session, started on first use.
 
         Deferred so that importing MRSuite does not start Octave; only code that

@@ -1,50 +1,52 @@
 function y = fftshift(x, dim)
-% FFTSHIFT  Octave's fftshift without its per-call bookkeeping.
+% FFTSHIFT  The zero frequency moved to the centre: each dimension's halves swapped.
 %
-%   y = fftshift(x)
-%   y = fftshift(x, dim)
+%   y = fftshift(x)          along a vector, or along every dimension of an array
+%   y = fftshift(x, dim)     along dimension dim
 %
-% The same indexing as Octave's own, which only moves data and does no arithmetic, so
-% the result is the same bit for bit. Octave's builds its index through a cell and
-% repmat on every call; Osprey's model evaluation calls fftshift on every basis function
-% and every spectrum, some fifty thousand times per fit, where that bookkeeping was a
-% tenth of the fit (measured on 2016 dataset 1: fftshift 6.6 s and its repmat 4.6 s of
-% 115 s).
+% Only an index permutation, no arithmetic, so the result is Octave's own bit for bit
+% (tests/octave/test_shims.py holds it to that). Written for speed: Octave's builds its
+% index through a cell and repmat on every call, and Osprey's model evaluation calls
+% fftshift on every basis function and every spectrum, some fifty thousand times per
+% fit, where that bookkeeping was a tenth of the fit (measured on 2016 dataset 1:
+% fftshift 6.6 s and its repmat 4.6 s of 115 s). The common forms, a vector and a
+% matrix along one of its two dimensions, index directly.
 %
 % Part of MRSuite's Octave compatibility shims.
 
-    % Octave's own checks, so what it refuses is still refused
     if ~(isnumeric(x) || islogical(x) || ischar(x))
-        error('fftshift: X must be a vector or matrix');
+        error('MRSuite:fftshift', 'fftshift: takes a numeric, logical or char array');
     end
-    if nargin == 2
-        if ~(isscalar(dim) && dim > 0 && dim == fix(dim))
-            error('fftshift: dimension DIM must be a positive integer');
-        end
-        sz = size(x);
-        n = sz(dim);
-        h = ceil(n / 2);
-        k = [h+1:n, 1:h];
-        if ndims(x) == 2 && dim == 1
-            y = x(k, :);
-        elseif ndims(x) == 2 && dim == 2
-            y = x(:, k);
+    if nargin < 2
+        if isvector(x)
+            y = x(halves(numel(x)));
         else
-            idx = repmat({':'}, ndims(x), 1);
-            idx{dim} = k;
-            y = x(idx{:});
+            index = cell(1, ndims(x));
+            for d = 1:ndims(x)
+                index{d} = halves(size(x, d));
+            end
+            y = x(index{:});
         end
-    elseif isvector(x)
-        n = length(x);
-        h = ceil(n / 2);
-        y = x([h+1:n, 1:h]);
-    else
-        sz = size(x);
-        idx = cell(1, numel(sz));
-        for i = 1:numel(sz)
-            h = ceil(sz(i) / 2);
-            idx{i} = [h+1:sz(i), 1:h];
-        end
-        y = x(idx{:});
+        return
     end
+    if ~(isscalar(dim) && dim == fix(dim) && dim >= 1 && dim <= ndims(x))
+        error('MRSuite:fftshift', 'fftshift: dim must be one of the array''s dimensions');
+    end
+    if ismatrix(x) && dim == 1
+        y = x(halves(size(x, 1)), :);
+    elseif ismatrix(x)
+        y = x(:, halves(size(x, 2)));
+    else
+        index = cell(1, ndims(x));
+        index(:) = {':'};
+        index{dim} = halves(size(x, dim));
+        y = x(index{:});
+    end
+end
+
+
+function k = halves(n)
+% The second half of 1:n, then the first, whose length is the larger for odd n.
+    h = ceil(n / 2);
+    k = [h + 1:n, 1:h];
 end

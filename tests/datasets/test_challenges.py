@@ -545,22 +545,34 @@ def test_a_subject_loads_whole_as_one_spatial_nifti_with_its_truth_maps():
 
 
 #*************#
-#   upright   #
+#   as stored   #
 #*************#
 @needs_mrsi
-def test_the_release_is_turned_to_its_basis():
-    """The release's FIDs are 180 degrees from the VtMeta basis; MRSuite turns every array,
-    so the NAA line points up in the metabolite signals and in the full one alike."""
-    def line(item, x, y, centre=2.01):
-        fid = np.asarray(item[:]).reshape(*item.shape[:3], -1)[x, y, 0]
-        spec = np.fft.fftshift(np.fft.fft(fid)).real
-        ppm = np.fft.fftshift(np.fft.fftfreq(len(fid), item.dwelltime)) / item.spectrometer_frequency[0] + 4.7
-        at = lambda p: spec[np.abs(ppm - p).argmin()]
-        peak = max((at(p) for p in np.linspace(centre - 0.06, centre + 0.06, 9)), key=abs)
-        return peak - 0.5 * (at(centre - 0.18) + at(centre + 0.18))      # above its shoulders
-    for signal in ("meta", "all-nuisance"):       # in 'all' the water and lipid tails hide the line
-        data, _, _ = mrsi_challenge.volume(MRSI_SUBJECT, signal, z=16)
-        assert line(data.list()[0], 48, 19) > 0, signal
-    one, _, index = mrsi_challenge.load(MRSI_SUBJECT, "meta", voxels=50)
-    k = int(np.argmax([np.abs(np.asarray(i[:])).max() for i in one.list()]))
-    assert line(one.list()[k], 0, 0) > 0, "load() turns it too"
+def test_the_release_is_its_own_model_on_its_basis():
+    """The release's signal model (its descriptor's Eq. 2-4: each metabolite's tissue
+    concentrations with their T2 decay, the voxel's B0 shift, one lineshape) on MRSuite's
+    basis rebuilds the metabolite signal ``load`` gives: the same sign and orientation, so
+    the spectra fit the basis as they are."""
+    import h5py
+    names = [mrsi_challenge.NAMES[m] for m in mrsi_challenge.METABOLITES]
+    fids = mrsi_challenge.basis_fids(MRSI_SUBJECT)
+    basis = np.stack([fids[n] for n in names], 1)
+    table = np.array([mrsi_challenge.TISSUE[m] for m in mrsi_challenge.METABOLITES])
+    concentrations, t2 = table[:, :2], table[:, 2:] / 1e3
+    module = mrsi_challenge._module(mrsi_challenge.DATA_DIR, MRSI_SUBJECT)
+    b0 = module.read_aux(MRSI_SUBJECT, signal="meta")["B0map"]
+    with h5py.File(module.mat_path(MRSI_SUBJECT, need_truth=False), "r") as f:
+        t = np.asarray(f["t"][()]).ravel()
+    data, truth, index = mrsi_challenge.load(MRSI_SUBJECT, "meta", voxels=5)
+    for item, amounts, (x, y, z) in zip(data.list(), truth, index):
+        fid = np.asarray(item[:]).ravel()
+        tissue, *_ = np.linalg.lstsq(concentrations, [amounts[n] for n in names], rcond=None)
+        decay = ((tissue * concentrations)[:, None, :] *
+                 np.exp(-t[None, :, None] / t2[:, None, :])).sum(-1).T
+        model = (basis * decay).sum(1) * np.exp(2j * np.pi * b0[x, y, z] * t)
+        early = slice(0, t.size // 3)                 # the lineshape, from the magnitude alone
+        (r1, r2), *_ = np.linalg.lstsq(np.stack([t[early], t[early] ** 2], 1),
+                                       -np.log(np.abs(fid[early] / model[early])), rcond=None)
+        model = model * np.exp(-r1 * t - r2 * t ** 2)
+        rho = np.vdot(model, fid) / (np.linalg.norm(model) * np.linalg.norm(fid))
+        assert rho.real > 0.999, (x, y, z, rho)

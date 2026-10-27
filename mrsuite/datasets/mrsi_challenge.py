@@ -68,20 +68,19 @@ TRAIN = tuple(f'Sub{i}' for i in range(1, 20))
 VALIDATION = tuple(f'Sub{i}' for i in range(20, 25))
 
 
-# The release stores its FIDs 180 degrees from the VtMeta basis it ships with: the
-# metabolite lines of xtMeta, and of xtAll, which is xtMeta plus the nuisance, point down
-# where the basis's point up (NAA at 169 degrees in xtMeta, from the .mat and the NIfTI
-# alike; the identity xtAll - xtNuisance = xtMeta + MM + baseline + noise holds as stored).
-# Augmentrum reads the arrays verbatim. MRSuite negates every one it reads, so the spectra
-# read like every other and fit the basis without a half turn; the identities still hold.
+# The release's FIDs are its own signal model on its VtMeta basis as stored: rebuilt from
+# the ground truth (the descriptor's Eq. 2-4), xtMeta matches with correlation +1 to machine
+# precision, no sign and no conjugate between them. Its lines look turned in a plain
+# spectrum because the FIDs start at TE = 1.66 ms: NAA carries some -198 degrees of
+# first-order phase from that delay, in the basis and the data alike.
 
 
 #***********#
 #   array   #
 #***********#
 def _array(module: Any, subject: str, signal: str) -> np.ndarray:
-    """A subject's (x, y, z, t) array of ``signal``, turned to the basis's convention."""
-    return -np.asarray(module.load([subject], signal=signal)[0][0][:])
+    """A subject's (x, y, z, t) array of ``signal``, as the release stores it."""
+    return np.asarray(module.load([subject], signal=signal)[0][0][:])
 
 
 #************#
@@ -335,8 +334,7 @@ class Release(Source):
 def _brain(module: Any, subject: str, signal: str, data_dir: Path) -> np.ndarray:
     """A subject's brain voxels of one signal as a (voxels, points) array, in the brain
     mask's own order (as ``load`` indexes them), written once and read memory-mapped."""
-    path = data_dir / '_mrsuite_cache' / \
-        f'{subject}_{module.canonical_signal(signal)}_upright.npy'   # caches from before the turn stay unread
+    path = data_dir / '_mrsuite_cache' / f'{subject}_{module.canonical_signal(signal)}.npy'
     if not path.exists():
         path.parent.mkdir(exist_ok=True)
         mask = module.read_aux(subject, signal='meta')['brainMask'] > 0

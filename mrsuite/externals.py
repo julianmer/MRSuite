@@ -44,6 +44,8 @@ REGISTRY = {
                             "acf2dcb2015a2d27560295157774fdde8ef7d9a2"),
     "mrs-sim": ("https://github.com/JohnLaMaster/MRS-Sim.git",
                 "dffb5ed7dd8ada1070cb931a63e3fa8b6c1de875"),
+    "mrs4brain": ("https://github.com/MRS4Brain/MRS4Brain-toolbox.git",
+                  "364e12e39b79b0a93bc22f89929d717ab24352d3"),
     "mrspeclab": ("https://github.com/MRSEPFL/MRSpecLAB.git",
                   "6e7166496bdea9e42f3a00aa360cdd71f0a18b58"),
     "ood-robust-mrs": ("https://github.com/julianmer/OoD-Robust-MRS-Quantification.git",

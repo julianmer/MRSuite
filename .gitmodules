@@ -49,3 +49,6 @@
 [submodule "externals/spinach"]
 	path = externals/spinach
 	url = https://github.com/IlyaKuprov/Spinach.git
+[submodule "externals/mrs4brain"]
+	path = externals/mrs4brain
+	url = https://github.com/MRS4Brain/MRS4Brain-toolbox.git

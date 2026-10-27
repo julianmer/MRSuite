@@ -761,6 +761,17 @@ BLOCKS: Dict[str, Block] = {b.key: b for b in [
                "(GannetPreInitialise.m), settings such as {'HERMES': 1, 'target': "
                "['GABAGlx', 'GSH']} over them. A T1 needs the water reference; PRIAM and "
                "joined files are not run."),
+    Block("mrs4brain", "fit", "MRS4Brain (Bruker SVS)", call="mrs4brain.quantify",
+          imports=("from mrsuite.bridges import mrs4brain",),
+          fields=(_value("study", positional=True), _value("metabolite", positional=True),
+                  _value("water", positional=True), _value("basis", positional=True),
+                  _value("config", "None"), _value("output", "None")),
+          outputs=(Port("out", RESULTS),),
+          help="A Bruker single-voxel study folder, its metabolite and water experiments' "
+               "numbers, through MRS4Brain's FID-A preprocessing and LCModel quantification "
+               "with MRSuite's LCModel, as its GUI's SVS buttons; its parameters from its "
+               "own configuration (Others/SVS_parameters.mat, or a shipped one by name such "
+               "as 'Demo_SVS_14p1T_SPECIAL'). Its MRSI does not run under Octave."),
     Block("ratios", "fit", "Ratios to creatine", call="scoring.ratios", imports=(_SCORE,),
           inputs=(Port("results", RESULTS),),
           fields=(_choice("to", ["tCr"], "'tCr'"), _value("scaling", "None")),

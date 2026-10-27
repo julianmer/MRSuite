@@ -53,6 +53,8 @@ class Toolbox:
         drivers (Optional[str]): Its folder of MRSuite's MATLAB code, if it has one.
         front (Sequence[str]): Externals to put in front of it, their top folder only.
         behind (Sequence[str]): Externals to put behind it, recursively.
+        within (str): The folder of its repository that is the toolbox, where the
+            repository holds more (MRS4Brain's holds its demo data beside it).
         runtime (Optional[str]): 'local', 'docker', 'matlab' or 'auto'.
         verbose (bool): Leave the interpreter's warnings on.
     """
@@ -62,9 +64,9 @@ class Toolbox:
     #**********#
     def __init__(self, external: str, program: str, shims: Optional[str] = None,
                  drivers: Optional[str] = None, front: Sequence[str] = (),
-                 behind: Sequence[str] = (), runtime: Optional[str] = None,
+                 behind: Sequence[str] = (), within: str = "", runtime: Optional[str] = None,
                  verbose: bool = False):
-        self.external, self.program = external, program
+        self.external, self.program, self.within = external, program, within
         self.shims, self.drivers = shims, drivers
         self.front, self.behind = tuple(front), tuple(behind)
         self._runtime, self._verbose = runtime, verbose
@@ -77,7 +79,7 @@ class Toolbox:
     @property
     def root(self) -> str:
         """The toolbox's folder, fetched on first use when MRSuite is installed."""
-        return str(externals.ensure(self.external))
+        return str(externals.ensure(self.external) / self.within)
 
     #*************#
     #   octave   #

@@ -1056,6 +1056,9 @@ def thumb(value: Any, points: int = 120, limit: int = 32) -> Dict[str, Any]:
     if hasattr(value, "keys") and "waveform" in value and "tbw" in value:     # FID-A's RF pulse
         return {"kind": "image", "src": _image(_pulse(value), width=300),
                 "label": f"RF pulse · {value.get('type', '')} · tbw {float(value['tbw']):.1f}"}
+    if hasattr(value, "keys") and "magnetization" in value and "frequency" in value:  # a profile
+        return {"kind": "image", "src": _image(_profile(value), width=300),
+                "label": f"profile · {np.ptp(value['frequency']) / 1e3:.3g} kHz"}
     if isinstance(value, np.ndarray) and value.size <= 4 or isinstance(value, (int, float)):
         return {"kind": "text", "text": np.array2string(np.asarray(value), precision=4)}
     if hasattr(value, "shape"):
@@ -1102,6 +1105,22 @@ def _pulse(rf: Any) -> Any:
         ax.plot(time, (phase - phase.min()) / np.ptp(phase) * waveform[:, 1].max(),
                 color="#8a94a3", linewidth=0.8, alpha=0.6)
     ax.plot(time, waveform[:, 1], color="#5274f0", linewidth=1.2)
+    ax.set_axis_off()
+    return figure
+
+
+#*************#
+#   profile   #
+#*************#
+def _profile(profile: Dict[str, np.ndarray]) -> Any:
+    """A pulse's frequency profile: |Mxy| drawn, Mz faint behind it."""
+    from matplotlib.figure import Figure
+    frequency, m = profile["frequency"], profile["magnetization"]
+    figure = Figure(figsize=(2.4, 1.2))
+    ax = figure.add_axes([0, 0, 1, 1])
+    ax.plot(frequency, m[:, 2], color="#8a94a3", linewidth=0.8, alpha=0.6)
+    ax.plot(frequency, np.hypot(m[:, 0], m[:, 1]), color="#5274f0", linewidth=1.2)
+    ax.set_ylim(-1.05, 1.05)
     ax.set_axis_off()
     return figure
 

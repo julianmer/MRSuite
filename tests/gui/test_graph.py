@@ -1243,6 +1243,22 @@ def test_an_rf_pulse_block_runs_and_previews_its_waveform():
     assert picture["kind"] == "image" and picture["label"].startswith("RF pulse · exc")
 
 
+@needs_octave
+def test_a_pulse_profile_block_simulates_the_pulse_wired_in():
+    graph = Graph()
+    pulse = graph.add("rf-sinc")
+    profile = graph.add("rf-profile")
+    graph.connect(pulse, "pulse", profile, "pulse")
+    graph.run()
+    out = graph.output(profile)
+    mz = out["magnetization"][:, 2]
+    assert mz[np.argmin(np.abs(out["frequency"]))] == pytest.approx(0, abs=0.02), \
+        "the sinc's 90 degrees lay the resonance flat"
+    assert mz[0] == pytest.approx(1, abs=0.02), "5 kHz off, the magnetization stays along z"
+    picture = thumb(out)
+    assert picture["kind"] == "image" and picture["label"] == "profile · 10 kHz"
+
+
 def test_an_augment_block_runs_and_is_credited_to_augmentrum():
     pytest.importorskip("augmentrum")
     graph = Graph()

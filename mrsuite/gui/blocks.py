@@ -604,8 +604,16 @@ BLOCKS: Dict[str, Block] = {b.key: b for b in [
                   _choice("kind", ["exc", "ref", "inv"], "'exc'"), _value("offset", "0.0")),
           outputs=(Port("pulse"),),
           help="A Gaussian RF pulse by FID-A: duration (ms), bandwidth (Hz), points, kind and "
-               "frequency offset; FID-A's other pulses (hyperbolic secant, GOIA, dual-band) and "
-               "its Bloch simulation are under All functions."),
+               "frequency offset; FID-A's other pulses (hyperbolic secant, GOIA, dual-band) are "
+               "under All functions."),
+    Block("rf-profile", "simulate", "Pulse profile", folder="RF pulses", call="pulses.profile",
+          imports=("from mrsuite.simulators import pulses",),
+          inputs=(Port("pulse"),),
+          fields=(_value("duration", "5.0"), _value("span", "10.0"), _value("centre", "0.0")),
+          outputs=(Port("profile"),),
+          help="An RF pulse's frequency profile by FID-A's Bloch simulation: the pulse's "
+               "duration (ms; FID-A has no default), the span and its centre (kHz, FID-A's "
+               "10 and 0); |Mxy| and Mz across it, at the pulse's nominal peak B1."),
     # simulate: pulse sequences
     *[Block(f"seq-{kind}", "simulate", title, folder="Pulse sequences", call="mrsandbox.sequence",
             imports=("from mrsuite.simulators import mrsandbox",), fixed={"kind": repr(kind)},

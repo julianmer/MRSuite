@@ -566,7 +566,7 @@ def test_the_header_window_shows_the_fields_and_every_step():
         await user.should_see("4000")                     # read plainly, not as 4000.0
         steps = [e.text for e in user.find(marker="step").elements]
         programs = {e.text.split()[0] for e in user.find(marker="program").elements}
-        assert len(steps) == 2 and programs == {"MRSuite", "FSL-MRS"}, (steps, programs)
+        assert len(steps) == 3 and programs == {"spec2nii", "MRSuite", "FSL-MRS"}, (steps, programs)
         details = user.find(marker="details").elements
         assert any(len(d.default_slot.children) > 1 for d in details), "JSON becomes a tree"
         user.find(marker="header-close").click()

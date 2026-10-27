@@ -52,3 +52,6 @@
 [submodule "externals/mrs4brain"]
 	path = externals/mrs4brain
 	url = https://github.com/MRS4Brain/MRS4Brain-toolbox.git
+[submodule "externals/oryx-mrsi"]
+	path = externals/oryx-mrsi
+	url = https://github.com/Computational-Imaging-LAB/Oryx-MRSI.git

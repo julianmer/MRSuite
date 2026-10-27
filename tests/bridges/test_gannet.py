@@ -61,8 +61,9 @@ def test_a_t1_without_water_is_refused_at_once():
 @pytest.mark.skipif(not MEGA.is_dir(), reason="osprey submodule not checked out")
 def test_mega_press_from_load_to_tissue_corrected_quantification(tmp_path):
     """The values Gannet 3.5.4 gives on this example under Octave, from its own drivers."""
-    result = gannet.fit(str(MEGA / "mrs" / "sub-01_ses-01_megapress" / "sub-01_megapress_act.sdat"),
-                        str(MEGA / "mrs" / "sub-01_ses-01_megapress-ref" / "sub-01_megapress_ref.sdat"),
+    mrs = MEGA / "mrs"
+    result = gannet.fit(str(mrs / "sub-01_ses-01_megapress" / "sub-01_megapress_act.sdat"),
+                        str(mrs / "sub-01_ses-01_megapress-ref" / "sub-01_megapress_ref.sdat"),
                         t1=str(MEGA / "anat" / "sub-01" / "sub-01_ses-01_T1w.nii.gz"),
                         output=str(tmp_path))
 

@@ -50,6 +50,8 @@ REGISTRY = {
                   "6e7166496bdea9e42f3a00aa360cdd71f0a18b58"),
     "ood-robust-mrs": ("https://github.com/julianmer/OoD-Robust-MRS-Quantification.git",
                        "451cf711d3ae4a1f94d531f3a2fbb4d7ceabeabb"),
+    "oryx-mrsi": ("https://github.com/Computational-Imaging-LAB/Oryx-MRSI.git",
+                  "0b6ae5e56cdb457cf29bc00f3930998ab24f8056"),
     "osprey": ("https://github.com/schorschinho/osprey.git",
                "98b2e354f633211e5ff79ab6d263edde674a2e58"),
     "pygamma": ("https://github.com/pygamma-mrs/gamma.git",

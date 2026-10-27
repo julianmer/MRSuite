@@ -886,6 +886,17 @@ BLOCKS: Dict[str, Block] = {b.key: b for b in [
           outputs=(Port("results", RESULTS), Port("index")),
           help="FSL-MRS's fsl_mrsi on the whole grid: every voxel in the mask fitted inside "
                "FSL-MRS, in parallel; the fits and their indices, for the maps."),
+    Block("oryx-maps", "mrsi", "Oryx-MRSI maps", call="oryx.maps",
+          imports=("from mrsuite.bridges import oryx",),
+          fields=(_value("patient", positional=True), _value("output", positional=True),
+                  _value("fcsf", "0.3"), _value("snr", "8.0"), _value("fwhm", "0.1"),
+                  _value("crlb", "30.0")),
+          outputs=(Port("maps"),),
+          help="A patient folder in Oryx's layout, its MRSI fitted by LCModel and its T1 "
+               "segmented by FSL (as Oryx's Dataset/K_01), through Oryx's co-registration, "
+               "segmentation, quality maps, exclusion criteria (its GUI's thresholds) and "
+               "concentration and ratio maps, written into a copy in output (some 4 GB, "
+               "about an hour for K_01)."),
     Block("maps", "mrsi", "Metabolite maps", call="mrsi.maps",
           imports=("from mrsuite import mrsi",),
           inputs=(Port("results", RESULTS), Port("index")),

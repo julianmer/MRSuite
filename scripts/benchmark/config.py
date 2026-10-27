@@ -342,7 +342,7 @@ SUBSETS = {"challenge2016": {"brain-like": [f"dataset{i}" for i in range(1, 25)]
                              **{name: [f"dataset{i}" for i in numbers]
                                 for name, numbers in challenge2016.SCENARIOS.items()}}}
 # and every MRSI subject on the models' evenly spread voxels (read when scored: the release
-# lives on altivolus), where the whole subject takes MRSValidate hours per metabolite
+# is fetched on first use), where the whole subject takes MRSValidate hours per metabolite
 SUBSETS.update({s: {str(MODEL_VOXELS): partial(lambda s: _voxel_ids(
     mrsi_challenge.voxel_index(s, MODEL_VOXELS)), s)} for s in SUBJECTS})
 # a measure or two per aspect of MRSValidate, so the radar has a corner for each: errors,

@@ -195,7 +195,7 @@ def load(n: Optional[int] = None, root: Path = ROOT,
             out.append(spectrum)
         return NIfTI_MRS_Plus(out)
 
-    concs = [_truth(Path(truth) / f) for f in _listing(truth)[:n]]
+    concs = [_truth(Path(truth) / f) for f in _listing(truth, '.xlsx')[:n]]
     return read('_WS.txt'), read('_nWS.txt'), concs
 
 
@@ -270,7 +270,7 @@ def mrs_sim_config(folder: Path = DATA / 'basis_sets') -> Dict:
                               pulse_sequence='PRESS', points=2048)
     names = [str(name) for name in read_basis(str(BASIS)).names]
 
-    truths = [_truth(Path(TRUTH) / f) for f in _listing(TRUTH)][:24]     # the brain-like ones
+    truths = [_truth(Path(TRUTH) / f) for f in _listing(TRUTH, '.xlsx')][:24]     # the brain-like ones
     creatine = [t['Cr'] + t['PCr'] for t in truths]
     split = sum(t['Cr'] / c for t, c in zip(truths, creatine)) / len(truths)
     ranges = {m.lower(): [round(min(t[m] / c for t, c in zip(truths, creatine)), 4),

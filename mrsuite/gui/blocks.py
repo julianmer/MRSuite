@@ -409,6 +409,14 @@ BLOCKS: Dict[str, Block] = {b.key: b for b in [
           outputs=(Port("spectra", SPECTRA),),
           help="A brain spectrum simulated in INSPECTOR by the MR SCIENCE Lab (Siemens 3 T), "
                "perfect or with its macromolecules changed, at 3, 8 or 20 Hz² of broadening."),
+    Block("agnostic", "data", "AGNOSTIC", folder="Simulated datasets", call="agnostic.load",
+          imports=("from mrsuite.datasets import agnostic",),
+          fields=(_value("shard", "21"), _value("n", "10"),
+                  _value("components", "('Metab', 'MM', 'water', 'noise')")),
+          outputs=(Port("spectra", SPECTRA), Port("truth", TRUTH)),
+          help="AGNOSTIC's synthetic PRESS spectra (Gudmundson et al.; 1.4 to 3.1 T, TE 10 to "
+               "80 ms), the chosen signals summed, every metabolite's amplitude as truth; a "
+               "shard downloaded from Dryad into MRSuite's data folder."),
     Block("ismrm2016", "data", "2016 fitting challenge", folder="Simulated datasets",
           call="challenge2016.load",
           imports=("from mrsuite.datasets import challenge2016",),

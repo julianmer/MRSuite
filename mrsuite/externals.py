@@ -32,6 +32,8 @@ from typing import Iterator, List, Optional
 
 # name -> (git url, commit), as the checkout's submodules pin them (a test holds them equal)
 REGISTRY = {
+    "agnostic": ("https://github.com/agudmundson/agnostic.git",
+                 "40294d7c0cd25a16186795a1636ff2a1e4f94ed1"),
     "basic": ("https://github.com/julianmer/BasiC.git",
               "e53037b3f0f59eaa812c02ae365e156b3d16e9ab"),
     "fid-a": ("https://github.com/CIC-methods/FID-A.git",

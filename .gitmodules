@@ -31,3 +31,6 @@
 [submodule "externals/simntg"]
 	path = externals/simntg
 	url = https://github.com/mrshub/SimnTG.git
+[submodule "externals/agnostic"]
+	path = externals/agnostic
+	url = https://github.com/agudmundson/agnostic.git

@@ -34,7 +34,7 @@ pip install mrsuite
 
 The toolboxes MRSuite drives come in as you use them: what pip cannot install (Octave or
 MATLAB, R, FSL-MRS) is named when a step first needs it, and everything else is fetched on
-first use.
+first use, each under its own licence (FSL-MRS, for one, is for non-commercial use only).
 
 
 ## Python
@@ -119,28 +119,3 @@ A set of standards for generating reproducible reports, including:
   [CONTRIBUTING.md](https://github.com/julianmer/MRSuite/blob/main/CONTRIBUTING.md) says how to
   add a method, check it, and share a trained model.
 
-
-## Licence
-MRSuite is MIT licensed: see [LICENSE](https://github.com/julianmer/MRSuite/blob/main/LICENSE).
-
-
-## External Tools and Their Licences
-MRSuite does not ship the external tools it drives: each is fetched separately and keeps its
-own licence. A checkout has them as submodules; an installed MRSuite clones each the first time
-it is used, at the commit MRSuite pins, into `~/.mrsuite` (or `$MRSUITE_HOME`). Using a tool
-through MRSuite is using it under its own terms:
-
-| Tool | Licence |
-|:---|:---|
-| FSL-MRS | FSL licence, non-commercial use only |
-| LCModel, FID-A, SimnTG, spec2nii, nifti-mrs | BSD 3-Clause |
-| pyAMARES, Vespa | BSD |
-| Osprey, BasiC, suspect, pypulseq, MRSandbox, AGNOSTIC | MIT |
-| MRSpecLAB, Augmentrum, PyLCModel, PyTARQUIN | Apache 2.0 |
-| spant, TARQUIN | GPL 3 |
-| MRS-Sim | AGPL 3 |
-| MRSValidate | not stated yet |
-
-spant, TARQUIN and MRS-Sim are copyleft: read their terms before distributing work built on
-them. The datasets MRSuite fetches keep their own licences too; the one piece in this
-repository, the 2016 fitting challenge's ground truth, is CC0 (see its folder's README).

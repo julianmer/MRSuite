@@ -89,9 +89,8 @@ def simntg(chain_length: int = 18, double_bonds: Sequence[int] = (6, 9), seq: st
     spin system (the olefinic, diallylic, chain, methyl and glycerol protons) and their
     sum, the whole triglyceride, named by chain length and unsaturation (``TG18:2``).
 
-    SimnTG's own run builds the systems and then a TE series with MATLAB-only syntax
-    (``round(x, 1)``), so it runs with the MATLAB runtime (``MRSUITE_OCTAVE_RUNTIME=
-    matlab``) until that is fixed upstream (info/drafts holds the patch).
+    SimnTG's own run builds the systems and then a TE series with MATLAB's ``round(x, 1)``,
+    which Octave lacks: under Octave a shim gives it, on the path for that call alone.
 
     Args:
         chain_length (int): Carbons per fatty-acid chain.
@@ -109,6 +108,7 @@ def simntg(chain_length: int = 18, double_bonds: Sequence[int] = (6, 9), seq: st
     """
     from mrsuite import externals
     from mrsuite.bridges.fid_a import bridge
+    from mrsuite.octave import shim_path
 
     sims = {"se": "sim_spinecho(n, sw, B, lw, s, te1)", "press": "sim_press(n, sw, B, lw, s, te1, te2)",
             "steam": "sim_steam(n, sw, B, lw, s, te1, te2)", "laser": "sim_laser(n, sw, B, lw, s, te1)"}
@@ -116,14 +116,21 @@ def simntg(chain_length: int = 18, double_bonds: Sequence[int] = (6, 9), seq: st
         raise ValueError(f"seq must be one of {sorted(sims)}, not {seq!r}")
     octave = bridge.octave
     octave.eval(f"addpath('{externals.ensure('simntg')}'); set(0, 'defaultfigurevisible', 'off');")
-    octave.eval(f"[~, simntg_sys] = Sim_UFATG_PRESS({int(chain_length)}, "
-                f"[{' '.join(str(int(d)) for d in double_bonds)}]);")
+    shims = os.path.join(shim_path(), "simntg") if bridge.runtime()["runtime"] != "matlab" else None
+    if shims:                                                # Octave's round, with MATLAB's digits
+        octave.eval(f"addpath('{shims}');")
+    try:
+        octave.eval(f"[~, simntg_sys] = Sim_UFATG_PRESS({int(chain_length)}, "
+                    f"[{' '.join(str(int(d)) for d in double_bonds)}]);")
+    finally:
+        if shims:
+            octave.eval(f"rmpath('{shims}');")
     octave.eval(f"n = {int(points)}; sw = {float(bandwidth)}; B = {float(field)}; lw = {float(linewidth)}; "
                 f"te1 = {float(te1)}; te2 = {float(te2)}; simntg_names = {{simntg_sys.name}}; "
                 f"simntg_fids = []; for k = 1:numel(simntg_sys); s = simntg_sys(k); "
                 f"o = {sims[seq]}; simntg_fids(:, k) = o.fids(:); end; "
                 f"s = simntg_sys; o = {sims[seq]}; simntg_fids(:, end + 1) = o.fids(:);")
-    names = [str(n) for n in octave.pull("simntg_names")]
+    names = [str(n) for n in np.ravel(octave.pull("simntg_names"))]   # Octave's cell is a row
     seen, labels = {}, []
     for name in names:                                       # two chain blocks: FAchain, FAchain2
         seen[name] = seen.get(name, 0) + 1

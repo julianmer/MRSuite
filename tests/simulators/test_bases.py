@@ -14,6 +14,7 @@ import numpy as np
 import pytest
 
 from mrsuite import r
+from mrsuite.bridges import fid_a
 from mrsuite.simulators import bases
 from tests.conftest import needs_octave
 
@@ -53,12 +54,10 @@ def test_spant_simulates_its_brain_basis_through_an_ideal_sequence():
 
 
 def test_simntg_gives_the_triglyceride_and_its_systems():
-    try:
-        basis = bases.simntg(18, (6, 9), points=512, bandwidth=2000.0)
-    except Exception as err:                           # noqa: BLE001 - Octave's round(x, 1)
-        if "round" in str(err):
-            pytest.skip("SimnTG needs the MATLAB runtime until its round(x, 1) is fixed upstream")
-        raise
+    basis = bases.simntg(18, (6, 9), points=512, bandwidth=2000.0)
+
     assert basis.names[-1] == "TG18:2" and basis.names[:2] == ["FAdb", "FAdiallylic"]
     assert basis.fids.shape == (len(basis.names), 512)
     assert np.allclose(basis.fids[:-1].sum(axis=0), basis.fids[-1], rtol=1e-3, atol=1e-6 * np.abs(basis.fids).max()), "the sum is the whole"
+    assert "simntg" not in str(fid_a.bridge.octave.eval("which('round')", nout=1)), \
+        "the round shim is SimnTG's alone: off the path once it ran"

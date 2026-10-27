@@ -55,8 +55,8 @@ scores = scoring.score(fits, truth, references=["optimal"], metrics={"mosae": sc
 A step is any toolbox's function: `fid_a.step.op_alignAverages(0.2, 'n')`,
 `spant.step.hsvd_filt()`, `osprey.step.op_eccKlose(water)`. Swap one for another and the
 rest of the chain stands. Scoring runs on
-[MRSValidate](https://github.com/JohnLaMaster/MRSValidate), which pip installs from there
-until it is on PyPI.
+[MRSValidate](https://github.com/JohnLaMaster/MRSValidate), which is not on PyPI yet:
+`pip install git+https://github.com/JohnLaMaster/MRSValidate.git`.
 
 
 ## Key Components
@@ -120,7 +120,27 @@ A set of standards for generating reproducible reports, including:
   add a method, check it, and share a trained model.
 
 
+## Licence
+MRSuite is MIT licensed: see [LICENSE](https://github.com/julianmer/MRSuite/blob/main/LICENSE).
+
+
 ## External Tools and Their Licences
 MRSuite does not ship the external tools it drives: each is fetched separately and keeps its
 own licence. A checkout has them as submodules; an installed MRSuite clones each the first time
-it is used, at the commit MRSuite pins, into `~/.mrsuite` (or `$MRSUITE_HOME`).
+it is used, at the commit MRSuite pins, into `~/.mrsuite` (or `$MRSUITE_HOME`). Using a tool
+through MRSuite is using it under its own terms:
+
+| Tool | Licence |
+|:---|:---|
+| FSL-MRS | FSL licence, non-commercial use only |
+| LCModel, FID-A, SimnTG, spec2nii, nifti-mrs | BSD 3-Clause |
+| pyAMARES, Vespa | BSD |
+| Osprey, BasiC, suspect, pypulseq, MRSandbox, AGNOSTIC | MIT |
+| MRSpecLAB, Augmentrum, PyLCModel, PyTARQUIN | Apache 2.0 |
+| spant, TARQUIN | GPL 3 |
+| MRS-Sim | AGPL 3 |
+| MRSValidate | not stated yet |
+
+spant, TARQUIN and MRS-Sim are copyleft: read their terms before distributing work built on
+them. The datasets MRSuite fetches keep their own licences too; the one piece in this
+repository, the 2016 fitting challenge's ground truth, is CC0 (see its folder's README).

@@ -63,8 +63,8 @@ include = ["mrsuite*"]
 
 # what runs outside Python: the Octave shims and solver source, the R driver, the dockerfiles
 [tool.setuptools.package-data]
-mrsuite = ["octave/dockerfile", "octave/shims/*.m", "octave/src/*.c", "r/dockerfile", "r/*.R",
-           "gui/canvas.js", "gui/static/*", "gui/vendor/*/*"]
+mrsuite = ["octave/dockerfile", "octave/shims/**/*", "octave/drivers/**/*.m", "octave/src/*.c",
+           "r/dockerfile", "r/*.R", "gui/canvas.js", "gui/static/*", "gui/vendor/*/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

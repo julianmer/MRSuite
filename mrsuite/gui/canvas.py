@@ -91,7 +91,8 @@ def view(graph: Graph, running: Optional[str], thumbs: Dict[str, Tuple[int, Any,
         if node.made is not None and outs:
             value = graph.output(node.id)
             if thumbs.get(node.id, (None,))[0] != id(value):
-                thumbs[node.id] = (id(value), thumb(value), applied(value))
+                thumbs[node.id] = (id(value), thumb(value, mask=graph.mask(node.id)),
+                                   applied(value))
             _, picture, how = thumbs[node.id]
         status = "running" if node.id == running else "error" if node.error else \
             "done" if node.made is not None else "idle"

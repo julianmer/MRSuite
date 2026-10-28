@@ -1234,6 +1234,30 @@ def test_a_slice_previews_as_a_map_and_comes_apart_in_the_graph():
     assert thumb(graph.output(apart, "spectra"))["kind"] == "spectra"
 
 
+def test_a_slice_previews_blank_outside_its_mask_as_the_fitted_maps_are():
+    import base64
+    import io
+
+    from matplotlib.image import imread
+    from nifti_mrs.create_nmrs import gen_nifti_mrs
+    from nifti_mrs_plus import NIfTI_MRS_Plus
+
+    t, sf = np.arange(256) * 2.5e-4, 123.2
+    fid = np.exp(2j * np.pi * (2.0 - 4.65) * sf * t - t / 0.05)
+    grid = gen_nifti_mrs(np.tile(fid, (4, 4, 1, 1)), 2.5e-4, sf)
+    mask = np.zeros((4, 4, 1), bool)
+    mask[1:3, 1:3] = True
+
+    def alpha(picture):
+        png = base64.b64decode(picture["src"].removeprefix("data:image/png;base64,"))
+        return imread(io.BytesIO(png))[..., 3]
+
+    masked, whole = alpha(thumb(NIfTI_MRS_Plus([grid]), mask=mask)), alpha(thumb(NIfTI_MRS_Plus([grid])))
+    n = len(masked)
+    assert masked[n // 8, n // 8] == 0 and masked[n // 2, n // 2] == 1    # a corner voxel, the middle
+    assert whole[n // 8, n // 8] == 1
+
+
 @needs_octave
 def test_an_rf_pulse_block_runs_and_previews_its_waveform():
     graph = Graph()

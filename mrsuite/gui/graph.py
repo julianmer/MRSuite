@@ -666,6 +666,23 @@ class Graph:
         return node.made[self.ref(id, port)] if port else None
 
     #**********#
+    #   mask   #
+    #**********#
+    def mask(self, id: str) -> Any:
+        """The mask nearest before a block, its own first: what the closest block with a
+        'mask' output made there; None where none has."""
+        seen, todo = {id}, [id]
+        while todo:
+            k = todo.pop(0)
+            if self.nodes[k].made is not None and any(p.name == "mask" for p in self.ports(k)[1]):
+                return self.output(k, "mask")
+            for p in self.parents(k):
+                if p not in seen:
+                    seen.add(p)
+                    todo.append(p)
+        return None
+
+    #**********#
     #   save   #
     #**********#
     def to_dict(self) -> Dict[str, Any]:
@@ -932,7 +949,7 @@ DIMS = {"DIM_COIL": "coils", "DIM_DYN": "transients", "DIM_EDIT": "sub-spectra",
         "DIM_MEAS": "measurements", "DIM_ISIS": "ISIS", "DIM_INDIRECT_0": "indirect"}
 
 
-def thumb(value: Any, points: int = 120, limit: int = 32) -> Dict[str, Any]:
+def thumb(value: Any, points: int = 120, limit: int = 32, mask: Any = None) -> Dict[str, Any]:
     """
     A small picture of a value, for its block, with a line saying what it is.
 
@@ -952,6 +969,7 @@ def thumb(value: Any, points: int = 120, limit: int = 32) -> Dict[str, Any]:
         value: What a block made.
         points (int): Points per trace.
         limit (int): Traces at most.
+        mask: A spatial spectrum's mask on its grid (``Graph.mask``): its map blank outside.
 
     Returns:
         Dict[str, Any]: 'kind' ('spectra', 'fit', 'bars', 'image' or 'text') with what
@@ -998,7 +1016,7 @@ def thumb(value: Any, points: int = 120, limit: int = 32) -> Dict[str, Any]:
                            + [f"{n} {names[t]}" for t, n in sizes.items()])
         if any(n > 1 for n in first.shape[:3]):      # spectroscopic imaging: the slice as a map
             grid = "×".join(str(n) for n in first.shape[:3] if n > 1)
-            return {"kind": "image", "src": _image(_map(first), width=300),
+            return {"kind": "image", "src": _image(_map(first, mask), width=300),
                     "label": " · ".join([f"{grid} voxels"] + label.split(" · ")[1:])}
         spread = next((t for t in ["DIM_COIL", "DIM_DYN", *sizes] if t in sizes), None)
         if spread == "DIM_COIL":
@@ -1128,12 +1146,15 @@ def _profile(profile: Dict[str, np.ndarray]) -> Any:
 #*********#
 #   map   #
 #*********#
-def _map(spectrum: Any) -> Any:
-    """A slice's metabolite signal as a map (``mrsi.signal``), on the slice holding most."""
+def _map(spectrum: Any, mask: Any = None) -> Any:
+    """A slice's metabolite signal as a map (``mrsi.signal``), on the slice holding most;
+    blank outside a mask on the grid, as the fitted maps are."""
     from matplotlib.figure import Figure
     from mrsuite.mrsi import signal as strength
     signal = strength(spectrum)                                          # (x, y, z)
-    z = int(signal.sum(axis=(0, 1)).argmax())
+    if mask is not None and np.size(mask) == signal.size:               # not a cropped grid's
+        signal = np.where(np.asarray(mask, bool).reshape(signal.shape), signal, np.nan)
+    z = int(np.nansum(signal, axis=(0, 1)).argmax())
     figure = Figure(figsize=(2, 2))
     ax = figure.add_axes([0, 0, 1, 1])
     ax.imshow(signal[:, :, z].T, origin="lower", cmap="viridis", interpolation="nearest")

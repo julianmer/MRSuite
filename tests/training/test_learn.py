@@ -34,6 +34,7 @@ from mrsuite.models.base import spectra
 from mrsuite.training import Source, Truth
 from mrsuite.training import loop
 from mrsuite.training.loop import OPTIMIZER, last_checkpoint
+from tests.conftest import needs_fsl_mrs
 
 from tests.models.test_models import (MLP_ACQUISITION, MLP_METABOLITES, WAND_ACQUISITION,
                                       WAND_METABOLITES)
@@ -265,6 +266,7 @@ def test_wand_weighs_each_components_error_as_told():
         WAND(["metabolites"], 0, 64, WAND_ACQUISITION, weights={"water": 1.0})
 
 
+@needs_fsl_mrs
 def test_the_mlp_learns_from_spectra_alone():
     """The 'spectra' objective fits the source's basis through the original signal
     model: no concentrations are read, and the loss falls all the same."""

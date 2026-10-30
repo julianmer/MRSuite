@@ -63,6 +63,7 @@ def test_spant_simulates_its_brain_basis_through_an_ideal_sequence():
     assert basis.source["simulated"]["arguments"]["TE3"] == 0.009
 
 
+@needs_octave
 def test_simntg_gives_the_triglyceride_and_its_systems():
     basis = bases.simntg(18, (6, 9), points=512, bandwidth=2000.0)
 

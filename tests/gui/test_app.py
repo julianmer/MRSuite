@@ -32,7 +32,7 @@ from mrsuite import collect, externals                                  # noqa: 
 from mrsuite.datasets import challenge2016                              # noqa: E402
 from mrsuite.gui import blocks, catalog                                 # noqa: E402
 from mrsuite.gui.app import App, _found                                 # noqa: E402
-from tests.conftest import needs_mrsvalidate                            # noqa: E402
+from tests.conftest import needs_fsl_mrs, needs_mrsvalidate             # noqa: E402
 from mrsuite.gui.canvas import Canvas                                   # noqa: E402
 from mrsuite.gui.graph import Graph                                     # noqa: E402
 
@@ -121,6 +121,7 @@ def test_a_search_finds_blocks_by_toolbox():
 #**********#
 #   form   #
 #**********#
+@needs_fsl_mrs
 def test_a_setting_typed_reaches_the_graph():
     graph = Graph()
     data, apodize = graph.add("ismrm2016"), graph.add("apodization")
@@ -156,6 +157,7 @@ def test_another_toolbox_is_chosen_from_the_inspector():
 #   run   #
 #*********#
 @needs_challenge
+@needs_fsl_mrs
 def test_the_graph_runs_from_the_page_and_is_written_out(tmp_path):
     graph = Graph()
     data, apodize = graph.add("ismrm2016"), graph.add("apodization")
@@ -183,6 +185,7 @@ def test_the_graph_runs_from_the_page_and_is_written_out(tmp_path):
 
 
 @needs_challenge
+@needs_fsl_mrs
 def test_a_failure_shows_on_its_block():
     graph = Graph()
     data, fit = graph.add("ismrm2016"), graph.add("lcm-fit")
@@ -546,6 +549,7 @@ def test_a_figure_made_is_shown_as_a_picture():
 #************#
 #   header   #
 #************#
+@needs_fsl_mrs
 def test_the_header_window_shows_the_fields_and_every_step():
     graph = Graph()
     data = graph.add("ismrm2016")
@@ -959,6 +963,7 @@ def test_a_block_whose_files_are_chosen_is_not_wired_in_after_the_one_selected()
     simulate(graph, script)
 
 
+@needs_fsl_mrs
 def test_a_basis_set_is_wired_into_the_fit_added_after_it_by_its_basis():
     graph = Graph()
     basis, fit = graph.add("basis"), graph.add("lcm-fit")
@@ -1206,6 +1211,7 @@ def test_a_file_argument_has_a_button_to_choose_it_and_a_run_waits_its_turn(monk
     simulate(graph, script)
 
 
+@needs_fsl_mrs
 def test_an_argument_with_a_default_goes_on_the_block_by_its_button():
     graph = Graph()
     fit = graph.add("lcm-fit")

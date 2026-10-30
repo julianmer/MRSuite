@@ -23,6 +23,7 @@ from pathlib import Path
 import numpy as np
 
 from mrsuite.core import provenance
+from tests.conftest import needs_fsl_mrs
 
 
 #*************#
@@ -192,6 +193,7 @@ def test_versions_come_from_the_checkout(tmp_path):
 #***************#
 #   fit steps   #
 #***************#
+@needs_fsl_mrs
 def test_every_fitter_is_a_step_under_the_same_name():
     """Swapping the fitter in a pipeline is swapping one name."""
     from mrsuite.bridges import fsl_mrs, lcmodel, osprey

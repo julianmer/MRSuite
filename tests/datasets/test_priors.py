@@ -21,6 +21,7 @@ import pytest
 
 from mrsuite.bridges import pyamares
 from mrsuite.datasets import challenge2016, mrsi_challenge
+from tests.conftest import needs_fsl_mrs
 from tests.datasets.test_challenges import MRSI_SUBJECT, needs_2016, needs_mrsi
 
 
@@ -28,6 +29,7 @@ from tests.datasets.test_challenges import MRSI_SUBJECT, needs_2016, needs_mrsi
 #   2016 fids   #
 #***************#
 @needs_2016
+@needs_fsl_mrs
 def test_the_2016_fids_are_the_basis_less_one_reference_peak():
     """The .BASIS holds the same functions at 1/64, each with the reference peak at 0 ppm
     the data lack: what the FIDs leave out is one and the same signal for all of them."""

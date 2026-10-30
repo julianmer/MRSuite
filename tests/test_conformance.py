@@ -29,7 +29,7 @@ from tests.bridges.test_mrspeclab import needs_mrspeclab
 from tests.bridges.test_pyamares import SINGLETS as AMARES_SINGLETS, needs_pyamares
 from tests.bridges.test_tarquin import needs_tarquin
 from tests.bridges.test_vespa import SINGLETS as VESPA_SINGLETS, needs_vespa
-from tests.conftest import needs_octave
+from tests.conftest import needs_fsl_mrs, needs_octave
 from tests.models.test_models import (MLP_ACQUISITION, MLP_METABOLITES, WAND_ACQUISITION,
                                       WAND_METABOLITES, _spectra)
 
@@ -53,6 +53,7 @@ def challenge():
 #****************#
 #   processing   #
 #****************#
+@needs_fsl_mrs
 def test_fsl_mrs_processing(challenge):
     from mrsuite import fsl_mrs
     check(fsl_mrs.apodize, challenge[0], amount=[5.0])
@@ -61,6 +62,7 @@ def test_fsl_mrs_processing(challenge):
 #***************#
 #   reference   #
 #***************#
+@needs_fsl_mrs
 def test_fsl_mrs_processing_with_a_reference(challenge):
     from mrsuite import fsl_mrs
     check(fsl_mrs.ecc, *challenge)
@@ -106,7 +108,7 @@ def test_mrspeclab_processing(challenge):
 #   fits   #
 #**********#
 @pytest.mark.parametrize("name", [
-    pytest.param("fsl_mrs", id="fsl_mrs"),
+    pytest.param("fsl_mrs", id="fsl_mrs", marks=needs_fsl_mrs),
     pytest.param("lcmodel", id="lcmodel", marks=needs_lcmodel),
     pytest.param("osprey", id="osprey", marks=needs_octave),
     pytest.param("spant", id="spant", marks=needs_r),
@@ -141,6 +143,7 @@ def test_vespa_fit(challenge):
 #***********#
 #   water   #
 #***********#
+@needs_fsl_mrs
 def test_a_water_scaled_fit(challenge):
     from mrsuite import fsl_mrs
     data, water = challenge

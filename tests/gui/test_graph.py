@@ -26,7 +26,7 @@ from mrsuite import externals
 from mrsuite.datasets import challenge2016
 from mrsuite.gui import blocks, catalog
 from mrsuite.gui.graph import Graph, applied, brief, export, exports, thumb, traces
-from tests.conftest import needs_mrsvalidate, needs_octave
+from tests.conftest import needs_fsl_mrs, needs_mrsvalidate, needs_octave
 
 needs_challenge = pytest.mark.skipif(not challenge2016.BASIS.exists(),
                                      reason="challenge submodule not checked out")
@@ -351,6 +351,7 @@ def test_a_converted_basis_set_is_the_one_wired_in(tmp_path, monkeypatch):
 #***********#
 #   kinds   #
 #***********#
+@needs_fsl_mrs
 def test_a_basis_set_and_converted_files_go_only_where_they_fit():
     """A basis is no spectra, and files written for another tool are no basis either."""
     graph = Graph()
@@ -613,6 +614,7 @@ def test_scores_of_fits_draw_on_a_radar_as_the_script_draws_them(graph):
     assert thumb(drawn)["kind"] == "image" and thumb(drawn)["src"].startswith("data:image/png;base64,")
 
 
+@needs_fsl_mrs
 def test_another_toolbox_starts_its_form_and_keeps_the_wires_it_takes():
     graph = Graph()
     data, fit = graph.add("ismrm2016"), graph.add("lcm-fit")
@@ -641,6 +643,7 @@ def test_a_step_starts_as_its_toolboxs_own_pipeline_runs_it():
         {"ppmmin": 2.9, "ppmmax": 3.1, "ppmrefval": 3.027}
 
 
+@needs_fsl_mrs
 def test_an_argument_is_on_the_block_when_needed_or_put_there():
     graph = Graph()
     data, fit = graph.add("ismrm2016"), graph.add("lcm-fit")
@@ -690,6 +693,7 @@ def test_a_block_is_named_as_python_allows():
 #**********#
 #   save   #
 #**********#
+@needs_fsl_mrs
 def test_a_saved_graph_comes_back_the_same(tmp_path):
     graph = Graph()
     data, step = graph.add("ismrm2016", (10, 20)), graph.add("zero-filling")
@@ -751,6 +755,7 @@ def test_a_value_python_text_cannot_give_back_is_refused(value):
         graph.set(graph.add("zero-filling"), "npoints", value)
 
 
+@needs_fsl_mrs
 def test_a_further_argument_named_as_a_python_keyword_is_spelt_out():
     graph = Graph()
     data, step = graph.add("ismrm2016"), graph.add("fsl_mrs:average")
@@ -965,8 +970,9 @@ def test_a_thumbnail_of_raw_coils_is_their_magnitude():
 #   call lines   #
 #****************#
 @pytest.mark.parametrize("key", [
-    pytest.param(k, marks=needs_mrsvalidate if any("mrsuite.benchmark" in i for i in b.imports)
-                 else ())
+    pytest.param(k, marks=[mark for mark, module in ((needs_mrsvalidate, "mrsuite.benchmark"),
+                                                     (needs_fsl_mrs, "fsl_mrs"))
+                           if any(module in i for i in b.imports)])
     for k, b in blocks.BLOCKS.items() if b.call and k != "load"])
 def test_a_call_blocks_line_fits_its_function(key):
     """Every field and input given, the line binds to the function it calls."""
@@ -1115,6 +1121,7 @@ def test_drawing_never_waits_on_a_toolbox_and_one_that_fails_is_asked_once(monke
 #***************#
 #   on blocks   #
 #***************#
+@needs_fsl_mrs
 def test_a_block_shows_each_argument_left_unwired_and_no_more_than_once():
     pytest.importorskip("nicegui")
     from mrsuite.gui.canvas import view
@@ -1196,6 +1203,7 @@ def test_a_radar_with_nothing_wired_in_draws_empty_and_fills_as_scores_come():
 #****************#
 #   categories   #
 #****************#
+@needs_fsl_mrs
 def test_every_toolbox_function_lands_in_a_tab_by_where_its_toolbox_keeps_it(monkeypatch):
     """Curated blocks keep their group; FID-A's and Osprey's folders, spant's prefixes and a
     bridge's steps tell the rest; a fit is a fit; what nothing says is other."""

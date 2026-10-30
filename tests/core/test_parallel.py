@@ -23,6 +23,7 @@ from mrsuite.core.method import method
 from mrsuite.core.parallel import PartlyFailed
 from mrsuite.core.result import FitResult
 from mrsuite.datasets import challenge2016
+from tests.conftest import needs_fsl_mrs
 
 
 #*****************#
@@ -42,6 +43,7 @@ def first_point(spectrum):
 #   workers   #
 #*************#
 @pytest.mark.skipif(not challenge2016.BASIS.exists(), reason="challenge submodule not checked out")
+@needs_fsl_mrs
 def test_workers_change_nothing_but_the_time():
     from mrsuite.bridges import fsl_mrs
 
@@ -58,6 +60,7 @@ def test_workers_change_nothing_but_the_time():
 #   water   #
 #***********#
 @pytest.mark.skipif(not challenge2016.BASIS.exists(), reason="challenge submodule not checked out")
+@needs_fsl_mrs
 def test_each_worker_gets_the_references_of_its_own_spectra():
     """Spectra cannot be pickled, so references travel as files, cut like the data."""
     from mrsuite.bridges import fsl_mrs

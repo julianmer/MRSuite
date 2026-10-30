@@ -31,7 +31,7 @@ from mrsuite.simulators import mrs_sim
 
 from tests.bridges.test_lcmodel import needs_lcmodel
 from tests.bridges.test_tarquin import needs_tarquin
-from tests.conftest import needs_octave
+from tests.conftest import needs_fsl_mrs, needs_octave
 
 MRSI_SUBJECT = "Sub1"
 
@@ -79,7 +79,7 @@ def _fit(fitter, data, path):
 
 needs_r = pytest.mark.skipif(not r.available(), reason="Rscript not on PATH")
 
-FITTERS = [pytest.param("fsl_mrs", id="fsl_mrs"),
+FITTERS = [pytest.param("fsl_mrs", id="fsl_mrs", marks=needs_fsl_mrs),
            pytest.param("lcmodel", id="lcmodel", marks=needs_lcmodel),
            pytest.param("osprey", id="osprey", marks=needs_octave),
            pytest.param("spant", id="spant", marks=needs_r),
@@ -487,6 +487,7 @@ def test_the_mrsi_config_simulates_on_the_challenge_grid(tmp_path):
 #**************#
 @needs_2016
 @pytest.mark.parametrize("fitter", FITTERS)
+@needs_fsl_mrs
 def test_every_fitter_covers_the_2016_ground_truth(fitter, ismrm2016):
     data, truth, path = ismrm2016
     _assert_covers_truth(_fit(fitter, data, path), truth, path)
@@ -503,6 +504,7 @@ def test_every_fitter_covers_the_2016_ground_truth(fitter, ismrm2016):
     # its Lorentzian bias put the challenge's 10.83 mM at 10 (Marjanska et al., 2022)
     pytest.param("lcmodel", {"params": {"shifmn(2)": -0.05, "shifmx(2)": 0.05}}, 0.10,
                  id="lcmodel", marks=needs_lcmodel)])
+@needs_fsl_mrs
 def test_the_challenges_water_scaling_gets_its_creatine_phantom_right(fitter, extra, tolerance):
     """The challenge's 10 mM creatine test, really 10.83 mM (Marjanska et al., MRM 2022),
     through each fitter's own water scaling on the challenge's settings."""

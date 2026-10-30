@@ -48,9 +48,13 @@ HAVE_MATLAB = MATLAB is not None
 
 needs_octave = pytest.mark.skipif(not HAVE_OCTAVE, reason="octave-cli not on PATH")
 needs_matlab = pytest.mark.skipif(not HAVE_MATLAB, reason="matlab not found")
-# not on PyPI yet, so not a dependency: a git install, where it is (see mrsuite/benchmark/scoring.py)
+# not on PyPI yet, so not a dependency: a git install, where it is
+# (see mrsuite/benchmark/scoring.py)
 needs_mrsvalidate = pytest.mark.skipif(importlib.util.find_spec("mrsvalidate") is None,
                                        reason="MRSValidate not installed")
+# conda-only, so not a dependency pip brings (see mrsuite/bridges/fsl_mrs.py)
+needs_fsl_mrs = pytest.mark.skipif(importlib.util.find_spec("fsl_mrs") is None,
+                                   reason="FSL-MRS not installed")
 
 
 #**************#

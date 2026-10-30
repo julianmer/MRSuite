@@ -29,7 +29,7 @@ from nifti_mrs.create_nmrs import gen_nifti_mrs
 from nifti_mrs.nifti_mrs import NIFTI_MRS
 
 from mrsuite import externals
-from mrsuite.bridges.base import Bridge, defaults
+from mrsuite.bridges.base import Bridge, defaults, dispatch
 from mrsuite.core.provenance import git_version
 from mrsuite.octave import resolve_runtime, session
 
@@ -851,7 +851,7 @@ def _comments(lines: List[str]) -> List[str]:
 #*************#
 def __getattr__(name: str) -> Any:
     """Module-level dispatch, so `from mrsuite.bridges.fid_a import op_averaging` works."""
-    return getattr(bridge, name)
+    return dispatch(bridge, name)
 
 
 #*********#

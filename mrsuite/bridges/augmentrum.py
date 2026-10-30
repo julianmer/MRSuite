@@ -32,7 +32,7 @@ except ModuleNotFoundError as err:
         raise
     raise ImportError("Augmentrum is not installed: pip install augmentrum") from err
 
-from mrsuite.bridges.base import Bridge
+from mrsuite.bridges.base import Bridge, dispatch
 
 
 #**************************************************************************************************#
@@ -155,7 +155,7 @@ bridge = AugmentrumBridge()
 #*************#
 def __getattr__(name: str) -> Any:
     """Module-level dispatch, so `from mrsuite.bridges.augmentrum import noise` works."""
-    return getattr(bridge, name)
+    return dispatch(bridge, name)
 
 
 #*********#

@@ -22,7 +22,7 @@ from typing import Any, Callable, List
 import nifti_mrs
 from nifti_mrs import tools
 
-from mrsuite.bridges.base import Bridge
+from mrsuite.bridges.base import Bridge, dispatch
 
 
 #**************************************************************************************************#
@@ -89,7 +89,7 @@ bridge = NIfTIMRSBridge()
 #*************#
 def __getattr__(name: str) -> Any:
     """Module-level dispatch, so `from mrsuite.bridges.nifti_mrs import split` works."""
-    return getattr(bridge, name)
+    return dispatch(bridge, name)
 
 
 #*********#

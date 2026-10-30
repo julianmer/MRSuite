@@ -34,7 +34,7 @@ except ModuleNotFoundError as err:
         raise
     raise ImportError("suspect is not installed: pip install suspect") from err
 
-from mrsuite.bridges.base import Bridge
+from mrsuite.bridges.base import Bridge, dispatch
 from mrsuite.core import provenance
 from mrsuite.core.method import method
 
@@ -321,7 +321,7 @@ def apodization(data: Any, line_broadening: float = 5.0) -> Any:
 #*************#
 def __getattr__(name: str) -> Any:
     """Module-level dispatch, so `from mrsuite.bridges.suspect import combine_channels` works."""
-    return getattr(bridge, name)
+    return dispatch(bridge, name)
 
 
 #*********#

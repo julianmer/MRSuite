@@ -21,6 +21,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 CHECKOUT = Path(__file__).resolve().parents[1]
 
 
@@ -143,3 +145,27 @@ for module in pkgutil.walk_packages(mrsuite.__path__, "mrsuite."):
 
     assert run.returncode == 0, run.stderr
 
+
+#****************#
+#   not set up   #
+#****************#
+def test_a_toolbox_not_set_up_leaves_hasattr_and_pickle_alone(monkeypatch):
+    """pickle looks a function that names no module up in every module loaded, as torch's
+    compiler does for its cache key; a bridge's module whose toolbox is not there says so
+    as Python asks of a module, and the reason goes with it."""
+    import pickle
+    from mrsuite.bridges import mrspeclab
+
+    def unbuilt():
+        raise RuntimeError("install uv")
+    monkeypatch.setattr(mrspeclab, "info", unbuilt)
+
+    def nowhere():
+        pass
+    nowhere.__module__, nowhere.__qualname__ = None, "nowhere_at_all"
+
+    assert not hasattr(mrspeclab, "Average")
+    with pytest.raises(AttributeError, match="MRSpecLAB cannot give 'Average': install uv"):
+        mrspeclab.Average
+    with pytest.raises(pickle.PicklingError):
+        pickle.dumps(nowhere)

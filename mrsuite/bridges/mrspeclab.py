@@ -34,7 +34,7 @@ from nifti_mrs.nifti_mrs import NIFTI_MRS
 
 from nifti_mrs_plus import NIfTI_MRS_Plus
 from mrsuite import externals
-from mrsuite.bridges.base import Bridge
+from mrsuite.bridges.base import Bridge, dispatch
 from mrsuite.core.method import keep_header
 from mrsuite.octave import scratch
 
@@ -375,7 +375,7 @@ def _about(node: Dict[str, Any]) -> Tuple[inspect.Signature, str]:
 #*************#
 def __getattr__(name: str) -> Any:
     """Module-level dispatch, so `from mrsuite.bridges.mrspeclab import Average` works."""
-    return getattr(bridge, name)
+    return dispatch(bridge, name)
 
 
 #*********#

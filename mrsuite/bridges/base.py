@@ -325,6 +325,21 @@ def describe(bridge: Bridge, limit: int = 20) -> str:
 
 
 #**************#
+#   dispatch   #
+#**************#
+def dispatch(bridge: Bridge, name: str) -> Any:
+    """A bridge's function, for its module's ``__getattr__``. What the bridge cannot give is an
+    AttributeError, its reason kept, as Python asks of a module: hasattr() and pickle look names
+    up in every module loaded, and a toolbox not set up must not break them."""
+    try:
+        return getattr(bridge, name)
+    except AttributeError:
+        raise
+    except Exception as err:                    # noqa: BLE001 - said, in the one type allowed
+        raise AttributeError(f"{bridge.program} cannot give '{name}': {err}") from err
+
+
+#**************#
 #   defaults   #
 #**************#
 def defaults(signature: inspect.Signature, known: Dict[str, Any]) -> inspect.Signature:

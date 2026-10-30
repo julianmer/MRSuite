@@ -28,6 +28,7 @@ from mrs_tools.constants import PPM_SHIFT
 from nifti_mrs.nifti_mrs import NIFTI_MRS
 
 from mrsuite import __version__, externals
+from mrsuite.bridges.base import dispatch
 from mrsuite.bridges.fid_a import FIDABridge, FIDACodec
 from mrsuite.core.basis import as_file
 from mrsuite.core.method import method
@@ -548,7 +549,7 @@ def fit(data: Any, basis: Any, fit_opts: Optional[dict] = None,
 #*************#
 def __getattr__(name: str) -> Any:
     """Module-level dispatch, so `from mrsuite.bridges.osprey import fit_runFit` works."""
-    return getattr(bridge, name)
+    return dispatch(bridge, name)
 
 
 #*********#

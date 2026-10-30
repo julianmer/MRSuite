@@ -40,7 +40,7 @@ except ModuleNotFoundError as err:
     raise ImportError("FSL-MRS is not installed: conda install -c conda-forge -c "
                       "https://fsl.fmrib.ox.ac.uk/fsldownloads/fslconda/public/ fsl_mrs") from err
 
-from mrsuite.bridges.base import Bridge, defaults
+from mrsuite.bridges.base import Bridge, defaults, dispatch
 from mrsuite.core.basis import Basis, as_file
 from mrsuite.core.method import method
 from mrsuite.core.result import FitResult
@@ -594,7 +594,7 @@ def curves(res: Any) -> Dict[str, np.ndarray]:
 #*************#
 def __getattr__(name: str) -> Any:
     """Module-level dispatch, so `from mrsuite.bridges.fsl_mrs import average` works."""
-    return getattr(bridge, name)
+    return dispatch(bridge, name)
 
 
 #*********#

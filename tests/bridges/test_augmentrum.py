@@ -52,7 +52,9 @@ def test_the_registry_is_the_catalogue():
     assert "broadening" not in names and "water" not in names, "plain aliases folded"
     assert augmentrum.bridge.steps() == names
     signature, help_ = augmentrum.bridge.about("line_broadening")
-    assert list(signature.parameters) == ["data", "lb_hz", "gb_hz", "mode", "water"]
+    assert list(signature.parameters) == ["data", "lb_hz", "gb_hz", "mode", "narrow_cap_s", "kernel",
+                                          "kernel_components", "kernel_spread_hz",
+                                          "kernel_width_hz", "kernel_step_hz", "seed", "water"]
     assert "mode" not in augmentrum.bridge.about("baseline_bspline")[0].parameters, "fixed"
     assert "broadening" in help_.lower()
     with pytest.raises(AttributeError, match="no module"):

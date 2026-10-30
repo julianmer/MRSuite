@@ -8,7 +8,8 @@
 #                                                                                                  #
 # Purpose: Starts the GUI: `mrsuite-gui`, or `uvx --from "mrsuite @ git+<repo>" mrsuite-gui`.       #
 #          A window of its own where one can open, else the browser; `--check` says what this      #
-#          machine has for MRSuite's toolboxes, and starts nothing.                                #
+#          machine has for MRSuite's toolboxes, and starts nothing; `--install` makes it an app    #
+#          with MRSuite's icon (see launcher.py), `--uninstall` takes that away.                   #
 #                                                                                                  #
 ####################################################################################################
 
@@ -76,10 +77,19 @@ def main(argv: Optional[List[str]] = None) -> None:
     parser.add_argument("--port", type=int, default=None, help="the port (default: a free one)")
     parser.add_argument("--check", action="store_true",
                         help="say what this machine has, and start nothing")
+    parser.add_argument("--install", action="store_true",
+                        help="make the GUI an app with MRSuite's icon, for this Python")
+    parser.add_argument("--uninstall", action="store_true", help="take that app away")
     args = parser.parse_args(argv)
     if args.check:
         for name, value in check().items():
             print(f"{name:12} {value}")
+        return
+    if args.install or args.uninstall:
+        from mrsuite.gui import launcher
+        done = launcher.install() if args.install else launcher.uninstall()
+        print("\n".join(f"{'Made' if args.install else 'Removed'} {path}" for path in done)
+              or "Nothing to remove")
         return
 
     try:

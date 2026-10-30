@@ -1117,6 +1117,14 @@ def test_drawing_never_waits_on_a_toolbox_and_one_that_fails_is_asked_once(monke
     graph.ports(step)
     assert asked == ["fsl_mrs"], "asked once, its failure kept"
 
+    import traceback
+    depths = []
+    for _ in range(3):                         # each drawing asks again
+        with pytest.raises(RuntimeError) as err:
+            catalog.about(*next(iter(catalog._ABOUT)))
+        depths.append(len(traceback.extract_tb(err.value.__traceback__)))
+    assert depths[0] == depths[-1], "a kept failure's traceback does not grow with each ask"
+
 
 #***************#
 #   on blocks   #

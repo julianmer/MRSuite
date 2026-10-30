@@ -98,7 +98,7 @@ def about(bridge: str, func: str) -> Tuple[Optional[inspect.Signature], str]:
         except Exception as err:                       # noqa: BLE001 - kept, raised again
             _ABOUT[key] = err
     if isinstance(_ABOUT[key], Exception):
-        raise _ABOUT[key]
+        raise _ABOUT[key].with_traceback(None)         # else each raise adds to its traceback
     return _ABOUT[key]
 
 

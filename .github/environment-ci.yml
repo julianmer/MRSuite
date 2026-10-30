@@ -1,0 +1,36 @@
+####################################################################################################
+# The toolboxes job's environment (.github/workflows/tests.yml): FSL-MRS, which pip cannot install,
+# Octave and R. Octave is 9, as mrsuite/octave/dockerfile pins it; spant's own dependencies come
+# prebuilt from conda-forge, and spant itself, which conda-forge does not package, from CRAN at the
+# version mrsuite/r/dockerfile pins. MRSuite and the rest come by pip, as in the core job.
+####################################################################################################
+name: mrsuite-ci
+channels:
+  - https://fsl.fmrib.ox.ac.uk/fsldownloads/fslconda/public/
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - fsl_mrs
+  - octave=9.4
+  - compilers           # mkoctfile builds Osprey's L-BFGS-B solver; R builds spant
+  - make
+  - r-base
+  - r-remotes
+  - r-abind             # spant 4.4.0's imports
+  - r-expm
+  - r-fields
+  - r-irlba
+  - r-jsonlite
+  - r-minpack.lm
+  - r-mmand
+  - r-nloptr
+  - r-numderiv
+  - r-pbapply
+  - r-plyr
+  - r-pracma
+  - r-ptw
+  - r-rnifti
+  - r-rniftyreg
+  - r-signal
+  - r-stringr

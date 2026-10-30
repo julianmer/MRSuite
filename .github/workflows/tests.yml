@@ -1,0 +1,118 @@
+####################################################################################################
+# Tests MRSuite on every push to main and every pull request, on GitHub's own runners. core: what
+# `pip install mrsuite` brings and nothing else. toolboxes: FSL-MRS, Octave and R from conda besides
+# (.github/environment-ci.yml), and the LCModel and TARQUIN binaries. What needs MATLAB, Docker,
+# MRSValidate or data fetched by hand skips here and runs where they are.
+####################################################################################################
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:                    # a newer push to the same branch or pull request replaces the run
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # the runners have a Docker daemon, in which MRSuite would build its Octave and R images
+  DOCKER_HOST: unix:///nonexistent/docker.sock
+
+jobs:
+  core:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check out the challenge data the tests read
+        run: git submodule update --init --depth 1 data/2016_fitting_challenge
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Install MRSuite, with PyTorch's CPU build
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -e .[dev]
+
+      - uses: actions/cache@v6     # the externals, kept until mrsuite/externals.py changes
+        with:
+          path: externals
+          key: externals-core-${{ hashFiles('mrsuite/externals.py') }}
+
+      - name: Fetch the externals the tests read
+        run: python -c "from mrsuite import externals; [externals.ensure(name) for name in
+          ('fid-a', 'ood-robust-mrs', 'wand-for-mrs')]"
+
+      - name: Test
+        run: python -m pytest -q -rs -p no:cacheprovider tests
+
+  toolboxes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash -el {0}     # a login shell, so the environment is active in every step
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check out the challenge data the tests read
+        run: git submodule update --init --depth 1 data/2016_fitting_challenge
+
+      - uses: mamba-org/setup-micromamba@v3
+        with:
+          environment-file: .github/environment-ci.yml
+          cache-environment: true
+
+      - name: Install spant, as mrsuite/r/dockerfile does
+        run: Rscript -e "remotes::install_version('spant', version = '4.4.0', upgrade = 'never',
+          repos = 'https://cloud.r-project.org')"
+
+      - name: Install MRSuite, with PyTorch's CPU build
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -e .[dev]
+
+      - uses: actions/cache@v6     # the externals, kept until mrsuite/externals.py changes
+        with:
+          path: externals
+          key: externals-toolboxes-${{ hashFiles('mrsuite/externals.py') }}
+
+      - name: Fetch the externals the tests read
+        run: python -c "from mrsuite import externals; [externals.ensure(name) for name in
+          ('fid-a', 'osprey', 'ood-robust-mrs', 'wand-for-mrs')]"
+
+      - name: Fetch the LCModel and TARQUIN binaries
+        run: |
+          python -c "from lcmodel_wrapper import binaries; print(binaries.resolve_executable())"
+          python -c "from tarquin_wrapper import binaries; print(binaries.resolve_executable(allow_docker=False))"
+
+      - name: Run Octave with MKL's GNU layer
+        # conda-forge's Octave 9.4 links MKL's Intel layer, which hands complex BLAS results back
+        # as Intel's compilers do, not as Octave expects: a'*b of complex vectors comes back 0 and
+        # dot() crashes. MKL's runtime with its GNU layer, loaded first, answers right.
+        run: |
+          cat > "$RUNNER_TEMP/octave-cli" <<EOF
+          #!/bin/sh
+          export MKL_INTERFACE_LAYER=LP64,GNU MKL_THREADING_LAYER=SEQUENTIAL
+          export LD_PRELOAD="$CONDA_PREFIX/lib/libmkl_rt.so.2\${LD_PRELOAD:+ \$LD_PRELOAD}"
+          exec "$CONDA_PREFIX/bin/octave-cli" "\$@"
+          EOF
+          chmod +x "$RUNNER_TEMP/octave-cli"
+          "$RUNNER_TEMP/octave-cli" --eval "a = [1+2i; 3-1i]; assert(a' * a, 15); assert(dot(a, a), 15)"
+          echo "OCTAVE_EXECUTABLE=$RUNNER_TEMP/octave-cli" >> "$GITHUB_ENV"
+
+      - name: Build MEX files with the environment's own compilers
+        # conda-forge's mkoctfile remembers the compilers of the machine Octave was built on
+        run: |
+          B="$CONDA_PREFIX/bin/x86_64-conda-linux-gnu"
+          printf '%s\n' "CC=$B-cc" "CXX=$B-c++" "F77=$B-gfortran" "FC=$B-gfortran" >> "$GITHUB_ENV"
+
+      - name: Test
+        run: python -m pytest -q -rs -p no:cacheprovider tests

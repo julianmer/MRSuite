@@ -18,6 +18,7 @@
 #   imports   #
 #*************#
 import argparse
+import gc
 import importlib.util
 import os
 import shutil
@@ -97,6 +98,10 @@ def main(argv: Optional[List[str]] = None) -> None:
     except ModuleNotFoundError:
         sys.exit("The GUI needs nicegui, which comes with MRSuite: pip install mrsuite")
     from mrsuite.gui.app import drop, page
+    # what is loaded by now lives as long as the GUI: kept out of the collector's full sweeps,
+    # which over the whole of it stall the page for a third of a second each
+    gc.collect()
+    gc.freeze()
 
     window = native() and not args.browser
     if window:
@@ -108,8 +113,10 @@ def main(argv: Optional[List[str]] = None) -> None:
     port = args.port or (None if window else find_open_port())
     # reload=False: a console script cannot be re-run by NiceGUI's reloader
     # dark from the first frame, as the page starts; it turns light if the system is
+    # reconnect_timeout: the page and the GUI's process share one machine, so a process busy
+    # for a few seconds is no lost connection (NiceGUI's 3 s, which also sets its heartbeat)
     ui.run(page, title="MRSuite", native=window, reload=False, show=True, dark=True,
-           host=None if window else "127.0.0.1", port=port,
+           host=None if window else "127.0.0.1", port=port, reconnect_timeout=30,
            window_size=(1400, 900) if window else None)
 
 

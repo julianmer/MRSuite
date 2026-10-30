@@ -38,7 +38,7 @@ challenge_models = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(challenge_models)
 
 pytestmark = pytest.mark.skipif(not (mrs_sim.ROOT / "src").exists(),
-                                reason="MRS-Sim submodule not checked out")
+                                reason="MRS-Sim not fetched")
 HAVE_MRSI = all((mrsi_challenge.DATA_DIR / s).exists() for s in ("Sub1", "Sub2"))
 
 

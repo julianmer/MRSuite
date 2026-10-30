@@ -493,8 +493,8 @@ class FIDABridge(Bridge):
     #   version   #
     #*************#
     def version(self) -> Optional[str]:
-        """The toolbox checkout's exact state, e.g. 'V1.2-357-g1eaa207'."""
-        return git_version(self._root)
+        """The toolbox's exact state: e.g. '1eaa207', or a given checkout's 'V1.2-357-g1eaa207'."""
+        return git_version(self._fida_root) if self._fida_root else externals.version(self.external)
 
     #*************#
     #   runtime   #

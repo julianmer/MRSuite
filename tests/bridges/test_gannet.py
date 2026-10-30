@@ -58,7 +58,7 @@ def test_a_t1_without_water_is_refused_at_once():
 #   mega   #
 #**********#
 @needs_octave
-@pytest.mark.skipif(not MEGA.is_dir(), reason="osprey submodule not checked out")
+@pytest.mark.skipif(not MEGA.is_dir(), reason="osprey not fetched")
 def test_mega_press_from_load_to_tissue_corrected_quantification(tmp_path):
     """The values Gannet 3.5.4 gives on this example under Octave, from its own drivers."""
     mrs = MEGA / "mrs"

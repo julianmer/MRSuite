@@ -1,57 +1,9 @@
 [submodule "data/openneuro_ds005371"]
 	path = data/openneuro_ds005371
 	url = https://github.com/OpenNeuroDatasets/ds005371.git
-[submodule "externals/fid-a"]
-	path = externals/fid-a
-	url = https://github.com/CIC-methods/FID-A.git
 [submodule "data/2016_fitting_challenge"]
 	path = data/2016_fitting_challenge
 	url = https://github.com/wtclarke/mrs_fitting_challenge
-[submodule "externals/osprey"]
-	path = externals/osprey
-	url = https://github.com/schorschinho/osprey.git
-[submodule "externals/wand-for-mrs"]
-	path = externals/wand-for-mrs
-	url = https://github.com/julianmer/WAND-for-MRS.git
-[submodule "externals/ood-robust-mrs"]
-	path = externals/ood-robust-mrs
-	url = https://github.com/julianmer/OoD-Robust-MRS-Quantification.git
-[submodule "externals/mrs-sim"]
-	path = externals/mrs-sim
-	url = https://github.com/JohnLaMaster/MRS-Sim.git
-[submodule "externals/mrspeclab"]
-	path = externals/mrspeclab
-	url = https://github.com/MRSEPFL/MRSpecLAB.git
-[submodule "externals/basic"]
-	path = externals/basic
-	url = https://github.com/julianmer/BasiC.git
 [submodule "data/openneuro_ds006812"]
 	path = data/openneuro_ds006812
 	url = https://github.com/OpenNeuroDatasets/ds006812.git
-[submodule "externals/simntg"]
-	path = externals/simntg
-	url = https://github.com/mrshub/SimnTG.git
-[submodule "externals/agnostic"]
-	path = externals/agnostic
-	url = https://github.com/agudmundson/agnostic.git
-[submodule "externals/mrs-digital-phantom"]
-	path = externals/mrs-digital-phantom
-	url = https://github.com/dennisvds/MRS-Digital-Phantom.git
-[submodule "externals/pygamma"]
-	path = externals/pygamma
-	url = https://github.com/pygamma-mrs/gamma.git
-[submodule "externals/gannet"]
-	path = externals/gannet
-	url = https://github.com/markmikkelsen/Gannet.git
-[submodule "externals/spm12"]
-	path = externals/spm12
-	url = https://github.com/spm/spm12.git
-[submodule "externals/spinach"]
-	path = externals/spinach
-	url = https://github.com/IlyaKuprov/Spinach.git
-[submodule "externals/mrs4brain"]
-	path = externals/mrs4brain
-	url = https://github.com/MRS4Brain/MRS4Brain-toolbox.git
-[submodule "externals/oryx-mrsi"]
-	path = externals/oryx-mrsi
-	url = https://github.com/Computational-Imaging-LAB/Oryx-MRSI.git

@@ -25,7 +25,6 @@ import torch
 from nifti_mrs.create_nmrs import gen_nifti_mrs
 
 from mrsuite import externals
-from mrsuite.core.provenance import git_version
 from mrsuite.models.base import load_file, spectra
 from mrsuite.models.pytorch import TorchModel
 
@@ -260,4 +259,4 @@ class WAND(TorchModel, paper_url="https://doi.org/10.1002/nbm.70038"):
     #   runtime   #
     #*************#
     def runtime(self) -> Dict[str, str]:
-        return {**super().runtime(), "wand-for-mrs": git_version(str(self.repo))}
+        return {**super().runtime(), "wand-for-mrs": externals.version(self.external)}

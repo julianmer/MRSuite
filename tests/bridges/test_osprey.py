@@ -193,7 +193,7 @@ def test_the_whole_toolbox_is_reachable():
 #   basis   #
 #***********#
 @needs_octave
-@pytest.mark.skipif(not BASIS.exists(), reason="osprey submodule not checked out")
+@pytest.mark.skipif(not BASIS.exists(), reason="osprey not fetched")
 def test_loading_a_basis_adds_the_spectra_and_axis():
     """The shipped .mat holds only FIDs; fit_resampleBasis reads a ppm axis that
     osp_recalculate_basis_specs has to add first."""
@@ -212,7 +212,7 @@ MEGA_BASIS = (OSPREY_ROOT / "fit" / "basissets" / "3T" / "ge" / "mega" / "press"
 
 
 @needs_octave
-@pytest.mark.skipif(not MEGA_BASIS.exists(), reason="osprey submodule not checked out")
+@pytest.mark.skipif(not MEGA_BASIS.exists(), reason="osprey not fetched")
 def test_a_basis_narrows_to_the_components_and_sub_spectrum_asked_for():
     """An edited basis holds every sub-spectrum and every simulated metabolite; an
     edit-OFF fit wants one sub-spectrum and Osprey's list, metabolites before MM/Lip."""
@@ -316,7 +316,7 @@ def test_reading_a_basis_leaves_no_file_behind():
 #   fit   #
 #*********#
 @needs_octave
-@pytest.mark.skipif(not BASIS.exists(), reason="osprey submodule not checked out")
+@pytest.mark.skipif(not BASIS.exists(), reason="osprey not fetched")
 def test_a_fit_runs_end_to_end(spectrum):
     """Osprey needs no fit adapter: the basis is an ordinary argument, so the whole
     toolbox including fit_runFit is reachable by dispatch.
@@ -345,7 +345,7 @@ def test_a_fit_runs_end_to_end(spectrum):
 #   to result   #
 #***************#
 @needs_octave
-@pytest.mark.skipif(not BASIS.exists(), reason="osprey submodule not checked out")
+@pytest.mark.skipif(not BASIS.exists(), reason="osprey not fetched")
 def test_a_fit_becomes_a_uniform_result(spectrum):
     """What lets Osprey be compared against FSL-MRS and LCModel at all: without this
     its output is a MATLAB struct that nothing downstream can read."""
@@ -365,7 +365,7 @@ def test_a_fit_becomes_a_uniform_result(spectrum):
 #   scale   #
 #***********#
 @needs_octave
-@pytest.mark.skipif(not BASIS.exists(), reason="osprey submodule not checked out")
+@pytest.mark.skipif(not BASIS.exists(), reason="osprey not fetched")
 def test_the_fit_does_not_depend_on_the_data_scale(spectrum):
     """osp_fitInitialise divides the data by max(real(data)) / max(real(basis)) before
     fitting, and the soft priors are weighed against the unnormalised residual: without
@@ -491,7 +491,7 @@ def test_spectral_registration_starts_from_oprefs_frequency_and_finds_known_shif
 #   curves   #
 #************#
 @needs_octave
-@pytest.mark.skipif(not BASIS.exists(), reason="osprey submodule not checked out")
+@pytest.mark.skipif(not BASIS.exists(), reason="osprey not fetched")
 def test_a_fit_keeps_the_curves_osprey_drew(spectrum):
     """Osprey draws a fit from its parameters with fit_OspreyParamsToModel, which the fit
     runs on its way out: over the fit range, multiplied back to the data's units, with the

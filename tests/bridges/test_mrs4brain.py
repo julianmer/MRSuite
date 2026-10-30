@@ -31,7 +31,7 @@ MRSI = DEMO / "1_MRSI_Data" / "MRSI_Data_14p1T" / "20220531_122600_FID"
 #   svs   #
 #*********#
 @needs_octave
-@pytest.mark.skipif(not SVS.is_dir(), reason="mrs4brain submodule not checked out")
+@pytest.mark.skipif(not SVS.is_dir(), reason="mrs4brain not fetched")
 def test_the_svs_demo_through_preprocessing_and_lcmodel(tmp_path):
     """The values MRS4Brain gives on its demo under Octave, from its own GUI's calls."""
     result = mrs4brain.quantify(str(SVS / "20240306_153617_SPECIAL"), 12, 11,
@@ -55,7 +55,7 @@ def test_the_svs_demo_through_preprocessing_and_lcmodel(tmp_path):
 #**********#
 #   mrsi   #
 #**********#
-@pytest.mark.skipif(not MRSI.is_dir(), reason="mrs4brain submodule not checked out")
+@pytest.mark.skipif(not MRSI.is_dir(), reason="mrs4brain not fetched")
 def test_an_mrsi_experiment_is_refused_in_one_line():
     with pytest.raises(ValueError, match="MRS4Brain's MRSI does not run under Octave"):
         mrs4brain.quantify(str(MRSI), 20, 21, "basis.BASIS")

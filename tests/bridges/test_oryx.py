@@ -37,7 +37,7 @@ def test_a_folder_in_another_layout_is_refused_in_one_line(tmp_path):
 #   maps   #
 #**********#
 @needs_octave
-@pytest.mark.skipif(not K_01.is_dir(), reason="oryx-mrsi submodule not checked out")
+@pytest.mark.skipif(not K_01.is_dir(), reason="oryx-mrsi not fetched")
 def test_k01_to_its_metabolite_maps(tmp_path):
     """The voxels Oryx keeps of K_01 under Octave, with its GUI's defaults."""
     maps = oryx.maps(str(K_01), str(tmp_path))

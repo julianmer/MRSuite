@@ -38,6 +38,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 from nifti_mrs_plus import NIfTI_MRS_Plus
+from mrsuite import externals
 from mrsuite.core import provenance, result
 from mrsuite.core.parallel import PartlyFailed
 from mrsuite.core.result import FitResult
@@ -285,6 +286,8 @@ def environment(methods: Dict[str, Any]) -> Dict[str, Any]:
         "versions": pip("list", "--format=freeze"),
         "git": {"MRSuite": _git(provenance.REPO),
                 **{path: _git(provenance.REPO / path) for path in submodules},
+                **{f"externals/{name}": {"commit": commit}
+                   for name, (_, commit) in externals.REGISTRY.items()},
                 **{name: _git(Path(importlib.import_module(name).__path__[0]))
                    for name in SIBLINGS}},
         "methods": {name: provenance.describe({"version": fit.version(), **fit.runtime()},

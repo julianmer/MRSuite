@@ -42,7 +42,7 @@ needs_mrsi = pytest.mark.skipif(
     not (mrsi_challenge.DATA_DIR / MRSI_SUBJECT / f"{MRSI_SUBJECT}_all.mat").exists(),
     reason=f"MRSI challenge {MRSI_SUBJECT} not downloaded")
 needs_sim = pytest.mark.skipif(not (mrs_sim.ROOT / "src").exists(),
-                               reason="MRS-Sim submodule not checked out")
+                               reason="MRS-Sim not fetched")
 
 
 #***************#

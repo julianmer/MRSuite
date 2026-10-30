@@ -111,8 +111,8 @@ class Basis:
         read half a file.
         """
         from mrsuite import externals, io
-        basic = externals.REGISTRY["basic"][1][:7]
-        path = externals.home() / "basis" / f"{self.checksum()[:16]}-{basic}.BASIS"
+        path = (externals.home() / "basis"
+                / f"{self.checksum()[:16]}-{externals.version('basic')}.BASIS")
         if not path.is_file():
             path.parent.mkdir(parents=True, exist_ok=True)
             part = tempfile.mkdtemp(prefix=".part", dir=path.parent)

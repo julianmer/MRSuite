@@ -168,4 +168,4 @@ def test_same_output_with_the_published_weights(kind, checkpoint):
         "path": provenance.portable(CHECKPOINTS / checkpoint),
         "sha256": hashlib.sha256((CHECKPOINTS / checkpoint).read_bytes()).hexdigest()}
     assert training["job"] == {**JOBS[kind], "basis": provenance.portable(JOBS[kind]["basis"])}
-    assert training["converted with"][cls.repo.name]
+    assert training["converted with"][cls.external]

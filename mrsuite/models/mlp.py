@@ -22,7 +22,6 @@ import numpy as np
 import torch
 
 from mrsuite import externals
-from mrsuite.core.provenance import git_version
 from mrsuite.core.result import FitResult
 from mrsuite.models.base import load_file, spectra
 from mrsuite.models.pytorch import TorchModel
@@ -220,4 +219,4 @@ class MLP(TorchModel, paper_url="https://arxiv.org/abs/2511.23135"):
     #   runtime   #
     #*************#
     def runtime(self) -> Dict[str, str]:
-        return {**super().runtime(), "ood-robust-mrs": git_version(str(self.repo))}
+        return {**super().runtime(), "ood-robust-mrs": externals.version(self.external)}

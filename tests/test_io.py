@@ -19,7 +19,6 @@
 #   imports   #
 #*************#
 import json
-import subprocess
 from pathlib import Path
 
 import numpy as np
@@ -32,10 +31,9 @@ from mrsuite.core.pipeline import Pipeline
 from tests.bridges.test_tarquin import needs_tarquin
 from tests.conftest import needs_octave
 
-PFILE = (Path(__file__).resolve().parents[1] / "externals" / "fid-a" / "exampleData" / "GE"
-         / "sample01_press" / "press" / "P17920.7")
+PFILE = externals.path("fid-a") / "exampleData" / "GE" / "sample01_press" / "press" / "P17920.7"
 
-needs_pfile = pytest.mark.skipif(not PFILE.exists(), reason="FID-A submodule not checked out")
+needs_pfile = pytest.mark.skipif(not PFILE.exists(), reason="FID-A not fetched")
 
 BASIS_2016 = (Path(__file__).resolve().parents[1] / "data" / "2016_fitting_challenge"
               / "basisset_LCModel" / "press3T_30ms.BASIS")
@@ -43,7 +41,7 @@ SAMPLES = externals.path("basic") / "sample_basis_sets"      # BasiC's own, one 
 OSPREY_BASIS = (externals.path("osprey") / "fit" / "basissets" / "3T" / "siemens" / "unedited"
                 / "slaser" / "30" / "basis_siemens_slaser30.mat")        # centred at 3.0 ppm
 
-needs_basic = pytest.mark.skipif(not SAMPLES.exists(), reason="BasiC submodule not checked out")
+needs_basic = pytest.mark.skipif(not SAMPLES.exists(), reason="BasiC not fetched")
 
 
 #**********#
@@ -470,7 +468,7 @@ def test_a_basis_set_in_another_format_is_lcmodels_own():
 #   centre   #
 #************#
 @needs_basic
-@pytest.mark.skipif(not OSPREY_BASIS.exists(), reason="Osprey submodule not checked out")
+@pytest.mark.skipif(not OSPREY_BASIS.exists(), reason="Osprey not fetched")
 def test_a_basis_set_centred_elsewhere_keeps_its_peaks_where_they_are():
     """Osprey's own sets put 3.0 ppm at 0 Hz; written for a fit, NAA stays at 2.01."""
     from fsl_mrs.utils.mrs_io import read_basis
@@ -652,12 +650,11 @@ def test_a_tool_or_output_basic_does_not_write_is_told_the_others(tmp_path):
 #**************#
 @needs_basic
 def test_reading_a_basis_set_leaves_basics_folder_as_it_was():
-    """No bytecode, which BasiC would show as changes, here and in any test before."""
+    """Nothing written into BasiC's folder, not even bytecode (beside what BasiC ships)."""
+    before = sorted(SAMPLES.parent.rglob("*"))
     io.basis(samples("JMRUI", "*.txt")).lcmodel()
 
-    status = subprocess.run(["git", "-C", str(SAMPLES.parent), "status", "--porcelain",
-                             "--ignored"], capture_output=True, text=True, check=True).stdout
-    assert "__pycache__" not in status
+    assert sorted(SAMPLES.parent.rglob("*")) == before
 
 
 ##############
@@ -682,7 +679,9 @@ def test_a_basis_file_is_written_anew_when_basic_changes(monkeypatch):
 
     naa = io.basis(samples("JMRUI", "NAA.txt"))
     path = naa.lcmodel()
+    folder = externals.ensure("basic")
     monkeypatch.setitem(externals.REGISTRY, "basic", (externals.REGISTRY["basic"][0], "0" * 40))
+    monkeypatch.setattr(externals, "ensure", lambda name: folder)   # the pin bumped, not fetched
 
     assert naa.lcmodel() != path and naa.lcmodel().is_file()
 

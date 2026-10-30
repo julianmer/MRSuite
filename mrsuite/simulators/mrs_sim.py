@@ -75,8 +75,8 @@ def config(name: str = "coil_combined_with_artifacts") -> Dict[str, Any]:
 #   version   #
 #*************#
 def version() -> Optional[str]:
-    """The MRS-Sim checkout's exact state, for the provenance."""
-    return provenance.git_version(str(externals.ensure("mrs-sim")))
+    """MRS-Sim's exact state, for the provenance."""
+    return externals.version("mrs-sim")
 
 
 #*******************#

@@ -184,7 +184,7 @@ def test_files_loaded_changed_drop_what_the_blocks_after_it_made(tmp_path):
 #***********#
 @needs_challenge
 @pytest.mark.skipif(not (externals.path("basic") / "basis_converter").exists(),
-                    reason="BasiC submodule not checked out")
+                    reason="BasiC not fetched")
 def test_a_basis_set_block_gives_a_fit_its_basis(tmp_path, monkeypatch):
     """The challenge's own basis, read by BasiC and written again, fits as the original,
     and the fit says which basis it was."""
@@ -269,7 +269,7 @@ def test_a_load_without_files_says_so():
 #**************#
 @needs_challenge
 @pytest.mark.skipif(not (externals.path("basic") / "basis_converter").exists(),
-                    reason="BasiC submodule not checked out")
+                    reason="BasiC not fetched")
 def test_spectra_and_basis_sets_wired_into_a_basis_set_become_its_functions():
     """Each by its name there; a name in two refused until one is kept, and the script
     says which."""
@@ -328,7 +328,7 @@ def test_spectra_cannot_be_wired_into_the_files_a_block_reads():
 #*************#
 @needs_challenge
 @pytest.mark.skipif(not (externals.path("basic") / "basis_converter").exists(),
-                    reason="BasiC submodule not checked out")
+                    reason="BasiC not fetched")
 def test_a_converted_basis_set_is_the_one_wired_in(tmp_path, monkeypatch):
     monkeypatch.setenv("MRSUITE_HOME", str(tmp_path))
     graph = Graph()
@@ -392,7 +392,7 @@ def test_a_basis_set_is_drawn_by_metabolite_and_written_out_as_a_basis_file(tmp_
                      for ppm in (2.01, 3.03)])
     basis = Basis(["NAA", "Cr"], fids, 4000.0, 123.2, centre=3.0)
     if not (externals.path("basic") / "basis_converter").exists():
-        pytest.skip("BasiC submodule not checked out")
+        pytest.skip("BasiC not fetched")
 
     ppm, ys, labels = traces(basis)
     line = thumb(basis)
@@ -1190,7 +1190,7 @@ def test_every_toolbox_function_lands_in_a_tab_by_where_its_toolbox_keeps_it(mon
     """Curated blocks keep their group; FID-A's and Osprey's folders, spant's prefixes and a
     bridge's steps tell the rest; a fit is a fit; what nothing says is other."""
     if not (externals.path("fid-a") / "processingTools").is_dir():
-        pytest.skip("FID-A is not checked out")
+        pytest.skip("FID-A not fetched")
     fida, osprey = blocks.categories("fid_a"), blocks.categories("osprey")
     assert fida["op_averaging"] == "preprocess" and fida["io_loadspec_twix"] == "data"
     assert fida["sim_press"] == "simulate" and fida["run_pressproc"] == "other"

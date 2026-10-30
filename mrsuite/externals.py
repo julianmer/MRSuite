@@ -8,10 +8,11 @@
 #                                                                                                  #
 # Purpose: Where the other people's code MRSuite runs lies: BasiC, FID-A, Osprey, MRS-Sim,         #
 #          MRSpecLAB and the repositories of the published models. None of it ships in the wheel;  #
-#          it carries its own licences and is run as published. A source checkout has it as the    #
-#          externals/ submodules. An installed MRSuite clones each on first use, at the commit     #
-#          its submodule pins, into a folder of the user's ($MRSUITE_HOME, else ~/.mrsuite).       #
-#          The datasets it downloads, and what it builds and scratches, lie by the same rule.      #
+#          it carries its own licences and is run as published. Each is fetched on first use, as   #
+#          torch.hub fetches a model's code: GitHub's archive of the commit MRSuite pins, without  #
+#          history, into the checkout's externals/ or, installed, a folder of the user's           #
+#          ($MRSUITE_HOME, else ~/.mrsuite). The datasets it downloads, and what it builds and     #
+#          scratches, lie by the same rule.                                                        #
 #                                                                                                  #
 ####################################################################################################
 
@@ -23,14 +24,14 @@ import contextlib
 import hashlib
 import os
 import shutil
-import subprocess
 import sys
+import tarfile
 import tempfile
 import urllib.request
 from pathlib import Path
 from typing import Iterator, List, Optional
 
-# name -> (git url, commit), as the checkout's submodules pin them (a test holds them equal)
+# name -> (git url, commit): the repository and the commit of it MRSuite runs
 REGISTRY = {
     "agnostic": ("https://github.com/agudmundson/agnostic.git",
                  "40294d7c0cd25a16186795a1636ff2a1e4f94ed1"),
@@ -85,7 +86,7 @@ def home() -> Path:
 #   checkout   #
 #**************#
 def checkout() -> bool:
-    """Whether MRSuite runs from a source checkout, which has the submodules, rather than
+    """Whether MRSuite runs from a source checkout, which has the data submodules, rather than
     as installed."""
     return (CHECKOUT / ".gitmodules").is_file()
 
@@ -111,11 +112,27 @@ def root() -> Path:
 #   path   #
 #**********#
 def path(name: str) -> Path:
-    """Where an external lies, or will once fetched: the checkout's submodule, else a folder
-    per pinned commit, so an upgraded MRSuite runs what it pins, not what an older one fetched."""
-    if checkout():
-        return root() / name
+    """Where an external lies, or will once fetched: a folder per pinned commit, so an upgraded
+    MRSuite runs what it pins, not what an older one fetched."""
     return root() / name / REGISTRY[name][1][:12]
+
+
+#*************#
+#   version   #
+#*************#
+def version(name: str) -> str:
+    """An external's exact state, for the provenance: the commit MRSuite pins, as git
+    abbreviates it. Its folder holds no history of its own to ask."""
+    return REGISTRY[name][1][:7]
+
+
+#*************#
+#   archive   #
+#*************#
+def archive(name: str) -> str:
+    """Where GitHub serves an external's files at its pinned commit, without their history."""
+    url, commit = REGISTRY[name]
+    return f"{url.removesuffix('.git')}/archive/{commit}.tar.gz"
 
 
 #************#
@@ -123,7 +140,7 @@ def path(name: str) -> Path:
 #************#
 def ensure(name: str) -> Path:
     """
-    An external's folder, cloned at its pinned commit first if it is not there yet.
+    An external's folder, fetched at its pinned commit first if it is not there yet.
 
     Args:
         name (str): A key of REGISTRY.
@@ -132,30 +149,27 @@ def ensure(name: str) -> Path:
         Path: The external's folder.
 
     Raises:
-        RuntimeError: In a checkout whose submodule is not initialised, or if the clone fails.
+        RuntimeError: If the download or its unpacking fails.
     """
     url, commit = REGISTRY[name]
     dest = path(name)
     if dest.is_dir() and any(dest.iterdir()):
         return dest
-    if checkout():
-        raise RuntimeError(f"{dest} is empty: git -C {CHECKOUT} submodule update --init "
-                           f"externals/{name}")
 
-    # cloned beside its place, each call into its own folder, and moved in whole, so a failed
-    # or concurrent clone never leaves a half-filled folder that would pass for the external;
-    # large files in Git LFS are example data, not code, and are left on the server
+    # unpacked beside its place, each call into its own folder, and moved in whole, so a failed
+    # or concurrent fetch never leaves a half-filled folder that would pass for the external;
+    # a tarball, not a zip, as only it keeps the scripts' execute bits and the links; files in
+    # Git LFS come as each repository's archives serve them (FID-A's whole, others' as pointers)
     dest.parent.mkdir(parents=True, exist_ok=True)
     part = Path(tempfile.mkdtemp(prefix=".part", dir=dest.parent))
-    env = {**os.environ, "GIT_LFS_SKIP_SMUDGE": "1"}
     try:
-        for command in (["git", "clone", "--quiet", url, str(part)],
-                        ["git", "-C", str(part), "checkout", "--quiet", commit]):
-            run = subprocess.run(command, env=env, capture_output=True, text=True)
-            if run.returncode != 0:
-                raise RuntimeError(f"fetching {name} at {commit[:7]} from {url} failed:\n"
-                                   f"{run.stderr.strip()}")
-        move_in(part, dest)
+        tarball = download(archive(name), part / "archive.tar.gz")
+        with tarfile.open(tarball) as tar:
+            tar.extractall(part / "files", filter="data")
+        top, = (part / "files").iterdir()            # GitHub's one folder, <repo>-<commit>
+        move_in(top, dest)
+    except (OSError, ValueError, tarfile.TarError) as err:
+        raise RuntimeError(f"fetching {name} at {commit[:7]} from {url} failed: {err}") from err
     finally:
         shutil.rmtree(part, ignore_errors=True)
     return dest

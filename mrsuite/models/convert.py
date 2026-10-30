@@ -27,7 +27,7 @@ from typing import Any, Dict, Type
 import torch
 
 from mrsuite import externals
-from mrsuite.core.provenance import git_version, portable, portable_file
+from mrsuite.core.provenance import portable, portable_file
 from mrsuite.models.base import classpath
 from mrsuite.models.pytorch import TorchModel
 
@@ -105,5 +105,5 @@ def convert(cls: Type[TorchModel], checkpoint: str, job: Dict[str, Any],
     model.recipe = {"training": {
         "model": classpath(cls), "checkpoint": portable_file(checkpoint),
         "job": {**copy.deepcopy(job), "basis": portable(Path(model.repo, job["basis"]))},
-        "converted with": {cls.external: git_version(str(model.repo))}}}
+        "converted with": {cls.external: externals.version(cls.external)}}}
     return model

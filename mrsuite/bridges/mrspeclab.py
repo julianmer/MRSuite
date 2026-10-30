@@ -36,7 +36,6 @@ from nifti_mrs_plus import NIfTI_MRS_Plus
 from mrsuite import externals
 from mrsuite.bridges.base import Bridge
 from mrsuite.core.method import keep_header
-from mrsuite.core.provenance import git_version
 from mrsuite.octave import scratch
 
 ROOT = externals.path("mrspeclab")
@@ -319,8 +318,8 @@ class MRSpecLABBridge(Bridge):
     #   version   #
     #*************#
     def version(self) -> Optional[str]:
-        """The MRSpecLAB checkout's exact state, e.g. 'v.1.0.0-8-g6e71664'."""
-        return git_version(str(externals.ensure("mrspeclab")))
+        """MRSpecLAB's exact state, e.g. '6e71664'."""
+        return externals.version("mrspeclab")
 
     #*************#
     #   runtime   #

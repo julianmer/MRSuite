@@ -6,8 +6,8 @@
 #                                                                                                  #
 # Created: 2026-10-07                                                                              #
 #                                                                                                  #
-# Purpose: Other people's code, where an installed MRSuite finds it. It runs what a checkout       #
-#          runs, the commits the submodules pin, fetched once on first use and never on import.    #
+# Purpose: Other people's code, where MRSuite finds it: the commits it pins, each fetched once on  #
+#          first use as GitHub's archive of that commit, and never on import.                      #
 #                                                                                                  #
 ####################################################################################################
 
@@ -15,42 +15,36 @@
 #*************#
 #   imports   #
 #*************#
+import io
 import os
 import shutil
 import subprocess
 import sys
+import tarfile
 import threading
 
 import pytest
 
 from mrsuite import externals
 
-REAL = externals.root()      # the checkout's own externals/, before a test pretends otherwise
+OOD = externals.path("ood-robust-mrs")   # the checkout's own, before a test pretends otherwise
+FIRST, SECOND = "1" * 40, "2" * 40
 
 
-#*********#
-#   git   #
-#*********#
-def git(folder, *args) -> str:
-    return subprocess.run(["git", "-C", str(folder), "-c", "user.name=t", "-c", "user.email=t",
-                           "-c", "commit.gpgsign=false", *args],
-                          check=True, capture_output=True, text=True).stdout.strip()
-
-
-#**********#
-#   repo   #
-#**********#
-def repo(folder) -> list:
-    """A repository of two commits, standing in for an upstream; both commits, oldest first."""
-    folder.mkdir()
-    git(folder, "init", "--quiet")
-    commits = []
-    for name in ("first", "second"):
-        (folder / name).write_text(name)
-        git(folder, "add", ".")
-        git(folder, "commit", "--quiet", "-m", name)
-        commits.append(git(folder, "rev-parse", "HEAD"))
-    return commits
+#**************#
+#   upstream   #
+#**************#
+def upstream(folder) -> str:
+    """GitHub, standing in: an archive per commit, FIRST holding 'first' and SECOND 'first' and
+    'second', each in the one folder GitHub's archives hold; its URL."""
+    for commit, names in ((FIRST, ["first"]), (SECOND, ["first", "second"])):
+        (folder / "archive").mkdir(parents=True, exist_ok=True)
+        with tarfile.open(folder / "archive" / f"{commit}.tar.gz", "w:gz") as tar:
+            for name in names:
+                info = tarfile.TarInfo(f"tool-{commit}/{name}")
+                info.size = len(name)
+                tar.addfile(info, io.BytesIO(name.encode()))
+    return folder.as_uri()
 
 
 #***************#
@@ -67,36 +61,60 @@ def installed(tmp_path, monkeypatch):
 #**********#
 #   pins   #
 #**********#
-@pytest.mark.skipif(not (externals.CHECKOUT / ".gitmodules").is_file(), reason="not a checkout")
-def test_an_install_runs_the_commits_the_submodules_pin():
-    """Read from the index, so a staged submodule bump has to bring the registry along."""
-    lines = git(externals.CHECKOUT, "config", "-f", ".gitmodules", "--get-regexp",
-                r"^submodule\.externals/.*\.path$").splitlines()
-    names = sorted(line.split()[1].removeprefix("externals/") for line in lines)
-
-    assert names == sorted(externals.REGISTRY)
-    for name in names:
-        url = git(externals.CHECKOUT, "config", "-f", ".gitmodules",
-                  f"submodule.externals/{name}.url")
-        commit = git(externals.CHECKOUT, "ls-files", "-s", f"externals/{name}").split()[1]
-        assert externals.REGISTRY[name] == (url, commit), name
+def test_every_external_is_a_commit_github_serves_an_archive_of():
+    for name, (url, commit) in externals.REGISTRY.items():
+        assert url.startswith("https://github.com/") and len(commit) == 40, name
+        assert externals.archive(name) == (f"{url.removesuffix('.git')}/archive/{commit}.tar.gz")
+        assert externals.version(name) == commit[:7]
 
 
 #***********#
 #   fetch   #
 #***********#
 def test_an_install_fetches_an_external_at_its_pin_once(installed, tmp_path, monkeypatch):
-    first, _ = repo(tmp_path / "upstream")
-    monkeypatch.setitem(externals.REGISTRY, "tool", (str(tmp_path / "upstream"), first))
+    monkeypatch.setitem(externals.REGISTRY, "tool", (upstream(tmp_path / "upstream"), FIRST))
 
     folder = externals.ensure("tool")
-    shutil.rmtree(tmp_path / "upstream")              # a second clone would now fail
+    shutil.rmtree(tmp_path / "upstream")              # a second fetch would now fail
 
     assert folder.is_relative_to(installed)
-    assert git(folder, "rev-parse", "HEAD") == first
-    assert not (folder / "second").exists()
+    assert sorted(os.listdir(folder)) == ["first"]
     assert externals.ensure("tool") == folder
-    assert os.listdir(folder.parent) == [folder.name], "nothing left of the clone beside it"
+    assert os.listdir(folder.parent) == [folder.name], "nothing left of the fetch beside it"
+
+
+#**************#
+#   checkout   #
+#**************#
+def test_a_checkout_fetches_into_its_own_externals(tmp_path, monkeypatch):
+    (tmp_path / "checkout").mkdir()
+    (tmp_path / "checkout" / ".gitmodules").write_text("")
+    monkeypatch.setattr(externals, "CHECKOUT", tmp_path / "checkout")
+    monkeypatch.setitem(externals.REGISTRY, "tool", (upstream(tmp_path / "upstream"), FIRST))
+
+    assert externals.ensure("tool") == tmp_path / "checkout" / "externals" / "tool" / FIRST[:12]
+
+
+#*************#
+#   as made   #
+#*************#
+def test_scripts_stay_executable_and_links_stay_links(installed, tmp_path, monkeypatch):
+    """What a toolbox runs as a program, or reads through a link, works as it did upstream."""
+    (tmp_path / "upstream" / "archive").mkdir(parents=True)
+    with tarfile.open(tmp_path / "upstream" / "archive" / f"{FIRST}.tar.gz", "w:gz") as tar:
+        script = tarfile.TarInfo(f"tool-{FIRST}/run.sh")
+        script.size, script.mode = 4, 0o755
+        tar.addfile(script, io.BytesIO(b"true"))
+        link = tarfile.TarInfo(f"tool-{FIRST}/docs/run.sh")
+        link.type, link.linkname = tarfile.SYMTYPE, "../run.sh"
+        tar.addfile(link)
+    monkeypatch.setitem(externals.REGISTRY, "tool", ((tmp_path / "upstream").as_uri(), FIRST))
+
+    folder = externals.ensure("tool")
+
+    assert os.access(folder / "run.sh", os.X_OK)
+    assert (folder / "docs" / "run.sh").is_symlink()
+    assert (folder / "docs" / "run.sh").read_text() == "true"
 
 
 #*************#
@@ -104,21 +122,20 @@ def test_an_install_fetches_an_external_at_its_pin_once(installed, tmp_path, mon
 #*************#
 def test_an_upgraded_install_runs_its_own_pin(installed, tmp_path, monkeypatch):
     """What an older MRSuite fetched is never taken for what this one pins."""
-    first, second = repo(tmp_path / "upstream")
-    monkeypatch.setitem(externals.REGISTRY, "tool", (str(tmp_path / "upstream"), first))
+    url = upstream(tmp_path / "upstream")
+    monkeypatch.setitem(externals.REGISTRY, "tool", (url, FIRST))
     old = externals.ensure("tool")
-    monkeypatch.setitem(externals.REGISTRY, "tool", (str(tmp_path / "upstream"), second))
+    monkeypatch.setitem(externals.REGISTRY, "tool", (url, SECOND))
 
-    assert git(externals.ensure("tool"), "rev-parse", "HEAD") == second
-    assert git(old, "rev-parse", "HEAD") == first
+    assert sorted(os.listdir(externals.ensure("tool"))) == ["first", "second"]
+    assert sorted(os.listdir(old)) == ["first"]
 
 
 #*************#
 #   threads   #
 #*************#
 def test_threads_fetching_at_once_all_get_the_external(installed, tmp_path, monkeypatch):
-    first, _ = repo(tmp_path / "upstream")
-    monkeypatch.setitem(externals.REGISTRY, "tool", (str(tmp_path / "upstream"), first))
+    monkeypatch.setitem(externals.REGISTRY, "tool", (upstream(tmp_path / "upstream"), FIRST))
     got, errors = [], []
 
     def fetch():
@@ -134,7 +151,7 @@ def test_threads_fetching_at_once_all_get_the_external(installed, tmp_path, monk
         thread.join()
 
     assert not errors
-    assert len(set(got)) == 1 and git(got[0], "rev-parse", "HEAD") == first
+    assert len(set(got)) == 1 and os.listdir(got[0]) == ["first"]
     assert os.listdir(got[0].parent) == [got[0].name]
 
 
@@ -143,25 +160,11 @@ def test_threads_fetching_at_once_all_get_the_external(installed, tmp_path, monk
 #************#
 def test_a_failed_fetch_leaves_nothing_that_would_pass_for_the_external(installed, tmp_path,
                                                                          monkeypatch):
-    repo(tmp_path / "upstream")
-    monkeypatch.setitem(externals.REGISTRY, "tool", (str(tmp_path / "upstream"), "0" * 40))
+    monkeypatch.setitem(externals.REGISTRY, "tool", (upstream(tmp_path / "upstream"), "0" * 40))
 
     with pytest.raises(RuntimeError, match="fetching tool at 0000000"):
         externals.ensure("tool")
     assert os.listdir(installed / "tool") == []
-
-
-#***************#
-#   submodule   #
-#***************#
-def test_a_checkout_says_how_to_get_a_submodule_it_lacks(tmp_path, monkeypatch):
-    (tmp_path / ".gitmodules").write_text("")
-    (tmp_path / "externals" / "osprey").mkdir(parents=True)
-    monkeypatch.setattr(externals, "CHECKOUT", tmp_path)
-
-    with pytest.raises(RuntimeError, match=f"git -C {tmp_path} submodule update --init "
-                                           f"externals/osprey"):
-        externals.ensure("osprey")
 
 
 #************#
@@ -205,11 +208,11 @@ def test_a_failed_fetch_is_tried_once_and_said(installed, monkeypatch):
 def test_a_model_runs_from_where_its_repository_was_fetched(installed, monkeypatch):
     """Not from where MRSuite thought, on import, it would lie."""
     from mrsuite.models import MLP
-    monkeypatch.setattr(externals, "ensure", lambda name: REAL / name)
+    monkeypatch.setattr(externals, "ensure", lambda name: OOD)
 
     model = MLP(["NAA", "Cr"], 0, 64, {"points": 128, "bandwidth": 4000.0})
 
-    assert model.repo == REAL / "ood-robust-mrs"
+    assert model.repo == OOD
 
 
 #*************#

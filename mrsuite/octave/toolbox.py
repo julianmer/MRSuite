@@ -21,7 +21,6 @@ import os
 from typing import Any, Dict, Optional, Sequence
 
 from mrsuite import externals
-from mrsuite.core.provenance import git_version
 from mrsuite.octave import resolve_runtime, session, shim_path
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -116,8 +115,8 @@ class Toolbox:
     #   version   #
     #*************#
     def version(self) -> Optional[str]:
-        """The toolbox checkout's exact state, e.g. 'v3.5.4-0-gf437bb7'."""
-        return git_version(self.root)
+        """The toolbox's exact state, e.g. 'f437bb7'."""
+        return externals.version(self.external)
 
     #*************#
     #   runtime   #
@@ -128,8 +127,7 @@ class Toolbox:
             name = "MATLAB" if self.matlab else "Octave"
             self._interpreter = f"{name} {str(self.octave.eval('version()', nout=1)).strip()}"
         return {"runtime": resolve_runtime(self._runtime), "interpreter": self._interpreter,
-                **{name: git_version(str(externals.ensure(name)))
-                   for name in self.front + self.behind}}
+                **{name: externals.version(name) for name in self.front + self.behind}}
 
     #*********#
     #   run   #

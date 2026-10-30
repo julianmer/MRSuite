@@ -8,7 +8,7 @@
 #                                                                                                  #
 # Purpose: Simulating with MRS-Sim: the truth adds up to the data, a seed replays it, the spectra  #
 #          are NIfTI-MRS in its own orientation with their provenance, and a training source       #
-#          hands out batches across its chunks. Skipped without the MRS-Sim submodule.            #
+#          hands out batches across its chunks. Skipped until MRS-Sim is fetched.                  #
 #                                                                                                  #
 ####################################################################################################
 
@@ -29,7 +29,7 @@ from mrsuite.simulators import mrs_sim
 from mrsuite.training import recipe
 
 pytestmark = pytest.mark.skipif(not (mrs_sim.ROOT / "src").exists(),
-                                reason="MRS-Sim submodule not checked out")
+                                reason="MRS-Sim not fetched")
 
 BASIS_2016 = (Path(__file__).resolve().parents[2] / "data" / "2016_fitting_challenge"
               / "basisset_LCModel" / "press3T_30ms.BASIS")

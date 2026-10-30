@@ -109,7 +109,7 @@ def fit(metabolite: str, water: Optional[str] = None, t1: Optional[str] = None,
 
     details = {**given, "settings": settings or {}, "runtime": toolbox.runtime()}
     if t1 is not None:
-        details["spm12"] = provenance.git_version(str(externals.ensure("spm12")))
+        details["spm12"] = externals.version("spm12")
     result = to_result(out)
     if not result.metabolites:
         raise RuntimeError(f"Gannet fitted nothing in {metabolite}")

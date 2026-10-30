@@ -34,7 +34,7 @@ from mrsuite.testing import check
 needs_mrspeclab = pytest.mark.skipif(
     not (mrspeclab.ROOT / "processing").exists()
     or not (mrspeclab.PYTHON or shutil.which("uv")),
-    reason="MRSpecLAB submodule not checked out, or no uv to build its environment")
+    reason="MRSpecLAB not fetched, or no uv to build its environment")
 pytestmark = needs_mrspeclab
 
 POINTS, DWELL, FREQUENCY, CENTRE = 2048, 2.5e-4, 123.2, 4.65
@@ -270,11 +270,10 @@ def test_unknown_nodes_and_parameters_are_refused(challenge):
 #   pristine   #
 #**************#
 def test_the_checkout_is_left_as_it_was(challenge):
-    """Running nodes writes nothing into MRSpecLAB's checkout, not even bytecode."""
+    """Running nodes writes nothing into MRSpecLAB's folder, not even bytecode."""
+    before = sorted(mrspeclab.ROOT.rglob("*"))
     mrspeclab.LineBroadening(challenge[0])
-    status = subprocess.run(["git", "-C", str(mrspeclab.ROOT), "status", "--porcelain",
-                             "--ignored"], capture_output=True, text=True)
-    assert status.returncode == 0 and status.stdout == ""
+    assert sorted(mrspeclab.ROOT.rglob("*")) == before
 
 
 #*****************#

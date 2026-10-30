@@ -172,7 +172,7 @@ def basis(files: Any, format: str = "auto", sw: Optional[float] = None,
         fids = np.load(result)["fids"]
     given = {"sw": sw, "sf": sf, "te": te}
     source = {"files": [provenance.portable_file(f) for f in files], "format": said.pop("format"),
-              "reader": f"BasiC {externals.REGISTRY['basic'][1][:7]}",
+              "reader": f"BasiC {externals.version('basic')}",
               "given": {k: v for k, v in given.items() if v is not None}}
     return Basis(fids=fids, source=source, **said)
 

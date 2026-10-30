@@ -21,7 +21,7 @@ classifiers = [
 
 dependencies = [
     "numpy",
-    "pandas",
+    "pandas<3",       # pyAMARES calls DataFrame.applymap, which pandas 3 removed
     "openpyxl",       # pandas needs it to read the challenge ground-truth .xlsx files
     "nifti-mrs",
     "nifti-mrs-plus>=0.2.0",   # the shared batched NIfTI-MRS wrapper; 0.2 for set_provenance

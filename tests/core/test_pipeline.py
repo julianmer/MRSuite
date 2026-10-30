@@ -20,6 +20,7 @@
 import numpy as np
 import pytest
 
+pytest.importorskip("fsl_mrs")
 from nifti_mrs_plus import NIfTI_MRS_Plus
 from mrsuite import fsl_mrs
 from mrsuite.core.pipeline import Pipeline, get_result, results

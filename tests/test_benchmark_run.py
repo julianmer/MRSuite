@@ -29,6 +29,7 @@ from unittest import mock
 
 import pytest
 
+pytest.importorskip("mrsvalidate")
 import mrsuite
 from nifti_mrs_plus import NIfTI_MRS_Plus
 from mrsuite.benchmark import mae

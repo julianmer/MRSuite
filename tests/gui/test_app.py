@@ -32,6 +32,7 @@ from mrsuite import collect, externals                                  # noqa: 
 from mrsuite.datasets import challenge2016                              # noqa: E402
 from mrsuite.gui import blocks, catalog                                 # noqa: E402
 from mrsuite.gui.app import App, _found                                 # noqa: E402
+from tests.conftest import needs_mrsvalidate                            # noqa: E402
 from mrsuite.gui.canvas import Canvas                                   # noqa: E402
 from mrsuite.gui.graph import Graph                                     # noqa: E402
 
@@ -506,6 +507,7 @@ def test_a_block_gone_while_its_functions_are_made_is_let_go(study, monkeypatch)
 #**************#
 #   analyses   #
 #**************#
+@needs_mrsvalidate
 def test_a_score_shows_its_analysis_and_its_own_arguments():
     graph = Graph()
     score = graph.add("method-comparison")

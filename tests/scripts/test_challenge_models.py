@@ -31,6 +31,7 @@ import mrsuite.models
 from mrsuite.datasets import mrsi_challenge
 from mrsuite.simulators import mrs_sim
 from mrsuite.training import Source, Truth
+from tests.conftest import needs_mrsvalidate
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "train" / "challenge_models.py"
 spec = importlib.util.spec_from_file_location("challenge_models", SCRIPT)
@@ -161,6 +162,7 @@ def test_the_nuisance_adds_up_and_stands_to_the_metabolites_as_in_its_voxel():
 #*********************#
 #   best checkpoint   #
 #*********************#
+@needs_mrsvalidate
 def test_every_checkpoint_is_scored_and_the_benchmark_takes_the_best(tmp_path, monkeypatch):
     """Each saved checkpoint of a run gets its MOSAE on held-out spectra, and the benchmark
     takes the one best.json names instead of the last."""

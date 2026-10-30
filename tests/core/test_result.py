@@ -24,6 +24,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+pytest.importorskip("fsl_mrs")
 from mrsuite import r
 from mrsuite.bridges.fsl_mrs import to_result
 from mrsuite.core.result import FitResult, load, save

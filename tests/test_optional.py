@@ -19,6 +19,9 @@
 import os
 import subprocess
 import sys
+from pathlib import Path
+
+CHECKOUT = Path(__file__).resolve().parents[1]
 
 
 #*********************#
@@ -77,6 +80,45 @@ def test_a_broken_fsl_mrs_says_what_is_missing_not_that_fsl_mrs_is(tmp_path):
     assert "FSL-MRS is not installed" not in run.stderr
 
 
+#***************#
+#   the suite   #
+#***************#
+def test_the_suite_collects_without_fsl_mrs_and_mrsvalidate():
+    """What needs them skips, so a machine with neither, as CI's core job, runs the rest."""
+    script = """
+import sys
+sys.modules.update(fsl_mrs=None, mrsvalidate=None)               # as if not installed
+import pytest
+sys.exit(pytest.main(["--collect-only", "-q", "-p", "no:cacheprovider", "tests"]))
+"""
+    run = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True,
+                         cwd=CHECKOUT)
+
+    assert run.returncode == 0, run.stdout[-3000:]
+
+
+#**************#
+#   fixtures   #
+#**************#
+def test_the_shared_spectra_and_fit_skip_without_fsl_mrs(tmp_path):
+    """They are read and fitted by FSL-MRS, so without it they skip, saying why."""
+    (tmp_path / "conftest.py").write_text(
+        "from tests.conftest import basis, fsl_mrs_fit, spectra, spectrum\n")
+    (tmp_path / "test_uses.py").write_text("".join(
+        f"def test_{name}({name}):\n    pass\n"
+        for name in ("spectrum", "spectra", "basis", "fsl_mrs_fit")))
+    script = """
+import sys
+sys.modules["fsl_mrs"] = None                                    # as if not installed
+import pytest
+sys.exit(pytest.main(["-q", "-rs", "-p", "no:cacheprovider", sys.argv[1]]))
+"""
+    run = subprocess.run([sys.executable, "-c", script, str(tmp_path)], capture_output=True,
+                         text=True, cwd=CHECKOUT)
+
+    assert "4 skipped" in run.stdout and "could not import 'fsl_mrs'" in run.stdout, run.stdout
+
+
 #********************#
 #   without octave   #
 #********************#
@@ -90,9 +132,14 @@ import mrsuite
 skipped = ("mrsuite.models.reference", "_driver", "gui.app", "gui.canvas", "gui.files")
 for module in pkgutil.walk_packages(mrsuite.__path__, "mrsuite."):
     if module.name != "mrsuite.octave.sessions" and not module.name.endswith(skipped):
-        importlib.import_module(module.name)
+        try:
+            importlib.import_module(module.name)
+        except ImportError as err:          # FSL-MRS or MRSValidate missing, and it says so
+            if "is not installed" not in str(err):
+                raise
 """
     run = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True,
                          cwd=tmp_path)
 
     assert run.returncode == 0, run.stderr
+

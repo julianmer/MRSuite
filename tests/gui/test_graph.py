@@ -26,7 +26,7 @@ from mrsuite import externals
 from mrsuite.datasets import challenge2016
 from mrsuite.gui import blocks, catalog
 from mrsuite.gui.graph import Graph, applied, brief, export, exports, thumb, traces
-from tests.conftest import needs_octave
+from tests.conftest import needs_mrsvalidate, needs_octave
 
 needs_challenge = pytest.mark.skipif(not challenge2016.BASIS.exists(),
                                      reason="challenge submodule not checked out")
@@ -39,6 +39,7 @@ needs_challenge = pytest.mark.skipif(not challenge2016.BASIS.exists(),
 def graph():
     """Two challenge spectra, broadened, then fitted with their water reference, and their
     SNR on a branch of its own."""
+    pytest.importorskip("fsl_mrs")                     # the fit's form is FSL-MRS's
     graph = Graph()
     data = graph.add("ismrm2016")
     graph.set(data, "n", 2)
@@ -468,6 +469,7 @@ def test_wires_keep_to_their_kinds_and_make_no_loops():
         graph.connect(again, "out", again, "data")
 
 
+@needs_mrsvalidate
 def test_a_block_the_user_names_keeps_its_name_in_the_script_and_the_scores(tmp_path):
     """The name is the block's variable in the script and its method in a score's table;
     another toolbox keeps it, a saved graph too, and a name Python or the script cannot
@@ -498,6 +500,7 @@ def test_a_block_the_user_names_keeps_its_name_in_the_script_and_the_scores(tmp_
         graph.rename(data, "fit")                                 # its output another's name
 
 
+@needs_mrsvalidate
 def test_an_input_taking_many_gets_them_by_name():
     graph = Graph()
     data, one, two, score = (graph.add(k) for k in
@@ -518,6 +521,7 @@ def test_an_input_taking_many_gets_them_by_name():
 #***************#
 #   analyses   #
 #***************#
+@needs_mrsvalidate
 def test_a_score_offers_its_analyses_and_their_own_arguments():
     """Another analysis keeps the reference and drops the last one's arguments; one that
     needs arguments of its own says so, and gets them by partial."""
@@ -573,6 +577,7 @@ def test_wires_into_one_input_never_share_a_name_nor_take_another_inputs():
     assert labels == ["basis_basis", "load_2_x", "x", "load_2_x_2"]
 
 
+@needs_mrsvalidate
 def test_every_analysis_score_runs_has_a_block():
     from mrsuite.benchmark import scoring
 
@@ -584,6 +589,7 @@ def test_every_analysis_score_runs_has_a_block():
 
 
 @needs_challenge
+@needs_mrsvalidate
 def test_scores_of_fits_draw_on_a_radar_as_the_script_draws_them(graph):
     """MOSAE and Lin's CCC of one fit, on one radar; the script makes the same tables."""
     data, fit = "n1", "n3"
@@ -958,7 +964,10 @@ def test_a_thumbnail_of_raw_coils_is_their_magnitude():
 #****************#
 #   call lines   #
 #****************#
-@pytest.mark.parametrize("key", [k for k, b in blocks.BLOCKS.items() if b.call and k != "load"])
+@pytest.mark.parametrize("key", [
+    pytest.param(k, marks=needs_mrsvalidate if any("mrsuite.benchmark" in i for i in b.imports)
+                 else ())
+    for k, b in blocks.BLOCKS.items() if b.call and k != "load"])
 def test_a_call_blocks_line_fits_its_function(key):
     """Every field and input given, the line binds to the function it calls."""
     import ast
@@ -1174,6 +1183,7 @@ def test_a_checkpoint_ending_in_a_slash_names_its_model_still():
 #*****************#
 #   empty radar   #
 #*****************#
+@needs_mrsvalidate
 def test_a_radar_with_nothing_wired_in_draws_empty_and_fills_as_scores_come():
     graph = Graph()
     radar = graph.add("radar")

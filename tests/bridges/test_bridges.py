@@ -23,6 +23,8 @@ import pytest
 
 from nifti_mrs.nifti_mrs import NIFTI_MRS
 from nifti_mrs_plus import NIfTI_MRS_Plus
+
+pytest.importorskip("fsl_mrs")
 from mrsuite import fid_a, fsl_mrs
 from mrsuite.bridges import describe
 

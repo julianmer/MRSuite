@@ -24,6 +24,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+pytest.importorskip("fsl_mrs")
 import mrsuite
 from mrsuite import externals, fsl_mrs, io, r
 from mrsuite.core.pipeline import Pipeline

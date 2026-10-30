@@ -15,6 +15,7 @@ import pytest
 from nifti_mrs.create_nmrs import gen_nifti_mrs
 from nifti_mrs_plus import NIfTI_MRS_Plus
 
+pytest.importorskip("fsl_mrs")
 from mrsuite import io
 from mrsuite.bridges import fsl_mrs
 from mrsuite.datasets import challenge2016

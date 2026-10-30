@@ -12,6 +12,7 @@
 import numpy as np
 import pytest
 
+pytest.importorskip("mrsvalidate")
 from mrsuite.benchmark import scoring
 from mrsuite.core.result import FitResult
 

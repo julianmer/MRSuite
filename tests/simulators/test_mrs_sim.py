@@ -22,6 +22,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+pytest.importorskip("fsl_mrs")
 from fsl_mrs.utils.misc import calculateAxes
 
 from mrsuite.core import provenance

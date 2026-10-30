@@ -17,6 +17,7 @@
 #   imports   #
 #*************#
 import glob
+import importlib.util
 import os
 import shutil
 
@@ -47,6 +48,9 @@ HAVE_MATLAB = MATLAB is not None
 
 needs_octave = pytest.mark.skipif(not HAVE_OCTAVE, reason="octave-cli not on PATH")
 needs_matlab = pytest.mark.skipif(not HAVE_MATLAB, reason="matlab not found")
+# not on PyPI yet, so not a dependency: a git install, where it is (see mrsuite/benchmark/scoring.py)
+needs_mrsvalidate = pytest.mark.skipif(importlib.util.find_spec("mrsvalidate") is None,
+                                       reason="MRSValidate not installed")
 
 
 #**************#
@@ -55,6 +59,7 @@ needs_matlab = pytest.mark.skipif(not HAVE_MATLAB, reason="matlab not found")
 @pytest.fixture(scope="session")
 def spectrum():
     """One NIfTI-MRS spectrum from the challenge submodule."""
+    pytest.importorskip("fsl_mrs")
     from fsl_mrs.utils import mrs_io
     if not os.path.exists(CHALLENGE):
         pytest.skip("challenge submodule not checked out")
@@ -67,6 +72,7 @@ def spectrum():
 @pytest.fixture(scope="session")
 def spectra():
     """Two spectra wrapped as NIfTI-MRS+, to exercise batching."""
+    pytest.importorskip("fsl_mrs")
     from fsl_mrs.utils import mrs_io
     from nifti_mrs_plus import NIfTI_MRS_Plus
     if not os.path.exists(CHALLENGE):
@@ -80,6 +86,7 @@ def spectra():
 @pytest.fixture(scope="session")
 def basis():
     """The challenge's own LCModel basis set."""
+    pytest.importorskip("fsl_mrs")
     from fsl_mrs.utils import mrs_io
     if not os.path.exists(CHALLENGE_BASIS):
         pytest.skip("challenge submodule not checked out")
@@ -97,6 +104,7 @@ def fsl_mrs_fit():
     needs the same one. A synthetic stand-in would not exercise the parts of FitRes
     that only exist once a fit has actually converged.
     """
+    pytest.importorskip("fsl_mrs")
     from fsl_mrs.utils import mrs_io, fitting
     if not (os.path.exists(CHALLENGE) and os.path.exists(CHALLENGE_BASIS)):
         pytest.skip("challenge submodule not checked out")

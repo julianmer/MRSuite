@@ -98,7 +98,7 @@ def test_a_block_clicked_is_added_after_the_selected_one_and_wired_to_it():
     async def script(user, app):
         app.select(data)
         user.find(marker="block-averaging").click()
-        await until(lambda: len(graph.nodes) == 2)
+        await until(lambda: graph.edges)               # wired once its arguments are read
         nodes, edges = drawn(user)
         assert [n["data"]["title"] for n in nodes] == ["2016 fitting challenge", "Averaging"]
         assert [(e["source"], e["sourceHandle"], e["targetHandle"]) for e in edges] == \
@@ -210,7 +210,7 @@ def test_a_wire_that_does_not_fit_is_said():
     data, fit = graph.add("ismrm2016"), graph.add("lcm-fit")
 
     async def script(user, app):
-        app.connect(data, "truth", fit, "data")
+        await app.connect(data, "truth", fit, "data")
         await user.should_see("truth cannot go into spectra")
         assert graph.edges == []
 
@@ -436,7 +436,7 @@ def test_functions_kept_are_those_still_wired_in_and_none_ticked_stays_so():
     async def script(user, app):
         app.removed("node", [other])
         with app.client:
-            app.connect(third, "basis", merge, "more")
+            await app.connect(third, "basis", merge, "more")
 
         async def kept(answer):
             async def opened():

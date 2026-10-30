@@ -445,9 +445,7 @@ class App:
                 xs = [n.position[0] for n in self.graph.nodes.values()]
                 position = (max(xs) + 280 if xs else 80, 80)
         id = self.graph.add(key, position)
-        background_tasks.create(self._asked(id))    # its arguments' inputs, read in a thread
-        if before:
-            self._join(before, id)
+        background_tasks.create(self._asked(id, before))   # read in a thread, then wired in
         self.select(id)
         if _chooses(blocks.block(key)):
             ui.timer(0, lambda: self.collect(id) if key == "load" else self.choose_files(id),
@@ -457,12 +455,14 @@ class App:
     #***********#
     #   asked   #
     #***********#
-    async def _asked(self, id: str) -> None:
-        """A new block's arguments read in a thread, then drawn as its inputs - unless the
-        block, or its whole graph, went meanwhile."""
+    async def _asked(self, id: str, after: Optional[str] = None) -> None:
+        """A new block's arguments read in a thread, then drawn as its inputs, and the block
+        wired in after ``after`` - unless the block, or its whole graph, went meanwhile."""
         graph = self.graph
         if id in graph.nodes:
             await run.io_bound(graph.ask, id)
+            if after in graph.nodes and id in graph.nodes and graph is self.graph:
+                self._join(after, id)
             self.draw()
 
     #**********#
@@ -559,7 +559,10 @@ class App:
     #*************#
     #   connect   #
     #*************#
-    def connect(self, source: str, output: str, target: str, input: str) -> None:
+    async def connect(self, source: str, output: str, target: str, input: str) -> None:
+        """A wire drawn, once the target's arguments are read in a thread: a toolbox can take
+        seconds, which the page must not wait on."""
+        await run.io_bound(self.graph.ask, target)
         try:
             self.graph.connect(source, output, target, input)
         except ValueError as err:
@@ -586,9 +589,9 @@ class App:
         for p in self.graph.ports(id)[0 if side == "source" else 1]:
             if meets(kind, p.kind) if side == "source" else meets(p.kind, kind):
                 if side == "source":
-                    self.connect(node, port, id, p.name)
+                    await self.connect(node, port, id, p.name)
                 else:
-                    self.connect(id, p.name, node, port)
+                    await self.connect(id, p.name, node, port)
                 break
 
     #*************#

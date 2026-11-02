@@ -15,6 +15,7 @@ The MRSuite project is an open-source, modular framework for magnetic resonance 
 ## Overview
 
 MRSuite is designed to support the full MRS workflow, from raw data processing to advanced analysis. It is built around the following core principles:
+
 - **Modularity**: Each processing and analysis step is encapsulated in reusable, interchangeable modules.
 - **Flexibility**: Custom algorithms, models, and external-language tools can be easily integrated.
 - **Scalability**: Capable of handling large datasets and computationally intensive workflows.
@@ -63,6 +64,7 @@ rest of the chain stands. Scoring runs on
 
 ### Processing Pipeline
 A modular pipeline for preprocessing MRS data, including:
+
 - **Data Import**: Load data from various formats.
 - **Processing**: Choose from a collection of processing steps or add your own.
 - **Provenance**: Every step is recorded in the data's own processing history (NIfTI-MRS): the
@@ -70,6 +72,7 @@ A modular pipeline for preprocessing MRS data, including:
 
 ### AI Model Zoo
 A collection of (pre-trained) AI models for MRS analysis, including:
+
 - **Interface**: A standardized interface for integrating AI models into the processing pipeline.
 - **Training**: Train or retrain a model in MRSuite (`model.learn`, one Keras 3 loop, on the CPU,
   CUDA or Apple's MPS), its recipe recorded with it.
@@ -77,6 +80,7 @@ A collection of (pre-trained) AI models for MRS analysis, including:
 
 ### Benchmarking Suite
 A suite of tools for benchmarking MRS processing and analysis methods, including:
+
 - **Accuracy and agreement**: MRSuite's own errors (MAE, MOSAE) and every analysis of
   [MRSValidate](https://github.com/JohnLaMaster/MRSValidate) that compares fits with the truth:
   errors, Lin's CCC, regression, Bland-Altman, normality; per metabolite and pooled.
@@ -111,6 +115,7 @@ the truth and drawn on a radar.*
 
 ### Reporting Standards
 A set of standards for generating reproducible reports, including:
+
 - **Documentation**: Each step of the processing pipeline is documented automatically, in the
   data's history.
 - **Training recipes**: A trained model carries how its training spectra were made, reported as

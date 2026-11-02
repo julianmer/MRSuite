@@ -9,6 +9,9 @@ __pycache__/
 *$py.class
 *.so
 
+# The docs site as built (mkdocs.yml), published by .github/workflows/docs.yml
+site/
+
 # Distribution / packaging
 .Python
 build/

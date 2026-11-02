@@ -48,6 +48,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest"]
+# the docs site (mkdocs.yml); .github/workflows/docs.yml installs these two alone
+docs = ["zensical>=0.0.74", "mkdocstrings-python>=2.0"]
 
 [project.scripts]
 mrsuite-gui = "mrsuite.gui.__main__:main"

@@ -1,0 +1,76 @@
+# MRSuite's documentation site, built by Zensical (which reads this file as MkDocs did) and
+# published to GitHub Pages by .github/workflows/docs.yml. The pages are docs/; the README and
+# CONTRIBUTING.md are included, not copied, and the API pages are read from the docstrings.
+site_name: MRSuite
+site_description: MRS Processing, Analysis, AI Model Integration, and Benchmarking
+site_url: https://julianmer.github.io/MRSuite/
+repo_url: https://github.com/julianmer/MRSuite
+repo_name: julianmer/MRSuite
+strict: true
+
+theme:
+  name: material
+  variant: classic
+  logo: https://raw.githubusercontent.com/julianmer/MRSuite/main/mrsuite/gui/static/logo.png
+  favicon: https://raw.githubusercontent.com/julianmer/MRSuite/main/mrsuite/gui/static/icon.png
+  palette:                      # dark first, as the GUI starts
+    - scheme: slate
+      primary: custom
+      accent: custom
+      toggle: {icon: material/weather-sunny, name: Light}
+    - scheme: default
+      primary: custom
+      accent: custom
+      toggle: {icon: material/weather-night, name: Dark}
+  features:
+    - navigation.sections
+    - content.code.copy
+
+extra_css:
+  - stylesheets/mrsuite.css
+
+markdown_extensions:
+  - md_in_html                  # the README's centred heading
+  - admonition
+  - tables
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.snippets:
+      base_path: ["."]          # the repository root: README.md, CONTRIBUTING.md
+      check_paths: true
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: ["."]          # read statically: nothing of MRSuite or its dependencies imported
+          options:
+            docstring_style: google
+            show_source: false
+            members_order: source
+            show_root_heading: true
+            filters: ["!^_"]
+
+nav:
+  - Home: index.md
+  - Install: install.md
+  - Guides:
+      - Python: python.md
+      - GUI: gui.md
+      - Toolboxes: toolboxes.md
+      - Models and training: models.md
+      - Benchmark: benchmark.md
+      - Datasets and simulators: datasets.md
+  - Contributing: contributing.md
+  - API reference:
+      - Core: reference/core.md
+      - Input and output: reference/io.md
+      - Bridges: reference/bridges.md
+      - Models: reference/models.md
+      - Training: reference/training.md
+      - Benchmark: reference/benchmark.md
+      - Datasets: reference/datasets.md
+      - Simulators: reference/simulators.md
+      - MRSI: reference/mrsi.md
+      - Externals: reference/externals.md

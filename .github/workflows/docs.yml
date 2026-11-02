@@ -1,0 +1,51 @@
+####################################################################################################
+# Builds the documentation site (mkdocs.yml, docs/) with Zensical on every push to main and
+# publishes it to GitHub Pages (the repository's Pages source: GitHub Actions). The API pages are
+# read from the docstrings statically, so the build installs the docs tools alone, not MRSuite.
+####################################################################################################
+name: docs
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:                    # one deployment at a time, the newest one finishing
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Build the site, failing on any broken link
+        run: |
+          pip install 'zensical>=0.0.74' 'mkdocstrings-python>=2.0'
+          zensical build --clean --strict
+
+      - uses: actions/configure-pages@v6
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

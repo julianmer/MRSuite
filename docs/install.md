@@ -59,8 +59,7 @@ Start-menu and desktop shortcut on Windows. `mrsuite-gui --uninstall` takes it a
 
 ## Scoring
 
-Scoring runs on [MRSValidate](https://github.com/JohnLaMaster/MRSValidate), which is not on
-PyPI yet:
+Scoring runs on [MRSValidate](https://github.com/JohnLaMaster/MRSValidate):
 
 ```bash
 pip install git+https://github.com/JohnLaMaster/MRSValidate.git

@@ -56,7 +56,7 @@ scores = scoring.score(fits, truth, references=["optimal"], metrics={"mosae": sc
 A step is any toolbox's function: `fid_a.step.op_alignAverages(0.2, 'n')`,
 `spant.step.hsvd_filt()`, `osprey.step.op_eccKlose(water)`. Swap one for another and the
 rest of the chain stands. Scoring runs on
-[MRSValidate](https://github.com/JohnLaMaster/MRSValidate), which is not on PyPI yet:
+[MRSValidate](https://github.com/JohnLaMaster/MRSValidate):
 `pip install git+https://github.com/JohnLaMaster/MRSValidate.git`.
 
 

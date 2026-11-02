@@ -1,8 +1,7 @@
 # Benchmark
 
 Fits are scored against the ground truth with
-[MRSValidate](https://github.com/JohnLaMaster/MRSValidate) (a git install; see
-[Install](install.md#scoring)).
+[MRSValidate](https://github.com/JohnLaMaster/MRSValidate) (see [Install](install.md#scoring)).
 
 ```python
 from mrsuite.benchmark import scoring

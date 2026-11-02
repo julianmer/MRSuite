@@ -3,7 +3,7 @@
   <h1 style="margin-top: 5px; margin-bottom: 5px;">MRSuite</h1>
   <p style="margin-top: 0px;"><em>MRS Processing, Analysis, AI Model Integration, and Benchmarking</em></p>
 
-  [![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
+  [![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/) [![PyPI](https://img.shields.io/pypi/v/mrsuite.svg)](https://pypi.org/project/mrsuite/)
 </div>
 
 ---

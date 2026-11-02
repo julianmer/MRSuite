@@ -62,6 +62,21 @@ print(pipeline.script(inputs={"water": water}))
 
 The GUI writes its graphs out the same way.
 
+## The report
+
+```python
+from mrsuite.report import report
+
+print(report(spectra, fits))                # or report(spectra, fits, path="report.md")
+```
+
+`report` writes the MRSinMRS checklist (Lin et al., NMR Biomed 2021) item by item from what the
+spectra and fits record: their NIfTI-MRS header and processing history. What they do not record
+reads "not recorded". Then every step with its toolbox, version and arguments, the MRSsynMRS table
+of each trained model in the chain, and the references of every tool used. A batch is one report;
+an item that differs across it lists each spectrum's value. In the GUI, a block's report button
+shows the same.
+
 ## Your own method
 
 `@mrsuite.method` makes a function of one spectrum a method that batches, records its

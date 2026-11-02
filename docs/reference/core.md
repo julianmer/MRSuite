@@ -14,3 +14,4 @@
 
 ::: mrsuite.testing
 
+::: mrsuite.report

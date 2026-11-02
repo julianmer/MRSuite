@@ -581,6 +581,32 @@ def test_the_header_window_shows_the_fields_and_every_step():
     simulate(graph, script)
 
 
+#************#
+#   report   #
+#************#
+@needs_challenge
+def test_the_report_window_shows_the_checklist_and_saves_it(tmp_path):
+    graph = Graph()
+    data = graph.add("ismrm2016")
+    graph.set(data, "n", 1)
+
+    async def script(user, app):
+        await app.run()
+        async def click():                             # as the block's button does, on the page
+            with app.client:
+                await app.report(data)
+        task = asyncio.create_task(click())
+        await user.should_see(marker="report")
+        await user.should_see("MRSinMRS checklist")
+        await user.should_see("spec2nii")              # the processing, step by step
+        user.find(marker="report-path").clear().type(str(tmp_path / "report.md"))
+        user.find(marker="report-save").click()
+        await task
+        assert "## MRSinMRS checklist" in (tmp_path / "report.md").read_text()
+
+    simulate(graph, script)
+
+
 #**********#
 #   fold   #
 #**********#

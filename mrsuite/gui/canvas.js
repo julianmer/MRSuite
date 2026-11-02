@@ -87,6 +87,9 @@ const Block = {
         <button title="Header and history: what it made, as NIfTI-MRS records it"
                 @click.stop="act(id, 'header')">
           <i class="material-icons">receipt_long</i></button>
+        <button title="Report: the MRSinMRS checklist, every step and the references"
+                @click.stop="act(id, 'report')">
+          <i class="material-icons">fact_check</i></button>
         <button title="Export what it made" @click.stop="act(id, 'export')">
           <i class="material-icons">download</i></button>
         <button title="Remove" @click.stop="act(id, 'remove')">

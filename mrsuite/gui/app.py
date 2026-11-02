@@ -32,8 +32,9 @@ from nicegui import app as nicegui, background_tasks, run, ui
 
 logger = logging.getLogger(__name__)
 
+from nifti_mrs.nifti_mrs import NIFTI_MRS
 from nifti_mrs_plus import NIfTI_MRS_Plus
-from mrsuite import collect, externals
+from mrsuite import collect, externals, report as reporting
 from mrsuite.core.basis import Basis
 from mrsuite.gui import blocks, catalog
 from mrsuite.gui.blocks import ANY, BLOCKS, GROUPS
@@ -633,6 +634,8 @@ class App:
             await self.export(id)
         elif what == "header":
             await self.header(id)
+        elif what == "report":
+            await self.report(id)
 
     #********************#
     #   fold the preview   #
@@ -1334,6 +1337,59 @@ class App:
                     .mark("header-close")
         await dialog
         dialog.delete()
+
+    #************#
+    #   report   #
+    #************#
+    async def report(self, id: str) -> None:
+        """What a block made, reported in a window of its own, to read or save: the MRSinMRS
+        checklist from its header and history, every step, and the references. A fit's
+        report reads the spectra wired into it."""
+        if self.graph.nodes[id].made is None:
+            await self.run(id)
+            if id not in self.graph.nodes or self.graph.nodes[id].made is None:
+                return                                 # it failed, and said why
+        value = self.graph.output(id, self.port if id == self.previewed else None)
+        fits = value if results(value) else None
+        spectra = value
+        if fits is not None:
+            wire = next((e for e in self.graph.edges if e.target == id and e.input == "data"),
+                        None)
+            spectra = wire and self.graph.output(wire.source, wire.output)
+        if not isinstance(spectra, (NIFTI_MRS, NIfTI_MRS_Plus)):
+            ui.notify("A report is of spectra, or of fits with their spectra wired in",
+                      type="info")
+            return
+        try:
+            text = await run.io_bound(reporting.report, spectra, fits)
+        except Exception as err:                       # noqa: BLE001 - said, not hidden
+            _said(err)
+            return
+        name = self.graph.nodes[id].name
+        with ui.dialog() as dialog, ui.card().classes("w-[60rem] max-w-full").mark("report"):
+            with ui.scroll_area().classes("w-full h-[70vh]"):
+                ui.markdown(text).classes("w-full")
+            with ui.row().classes("w-full no-wrap items-center gap-1"):
+                path = ui.input("Save to", value=str(self.folder / f"{name}-report.md")) \
+                    .classes("grow").props("dense outlined").mark("report-path")
+                ui.button(icon="folder_open",
+                          on_click=lambda: self._browse(path, "save", f"{name}-report.md")) \
+                    .props("flat dense").tooltip("Choose where")
+            with ui.row().classes("w-full"):
+                ui.space()
+                ui.button("Close", on_click=lambda: dialog.submit(None)).props("flat") \
+                    .mark("report-close")
+                ui.button("Save", icon="save", on_click=lambda: dialog.submit(path.value)) \
+                    .props("unelevated no-caps").mark("report-save")
+        target = await dialog
+        dialog.delete()
+        if target:
+            try:
+                Path(target).expanduser().write_text(text + "\n")
+            except OSError as err:
+                _said(err)
+                return
+            ui.notify(f"Wrote {target}", type="positive")
 
     #************#
     #   export   #

@@ -22,6 +22,7 @@ import subprocess
 import sys
 import tarfile
 import threading
+from pathlib import Path
 
 import pytest
 
@@ -233,12 +234,18 @@ def test_converting_fetches_the_original_first(installed, monkeypatch):
 #************#
 #   docker   #
 #************#
-def test_the_octave_container_sees_what_an_install_fetched(installed):
+def test_the_octave_container_sees_what_an_install_fetched(installed, monkeypatch):
     from mrsuite.octave import docker
 
     home = installed.parent                     # the toolboxes, data, scratch and MEX
+    monkeypatch.setattr(docker, "TEMP_DIR", home / ".octave-tmp")   # as an install imports it
+    package = docker.HERE.parent
+    written = [Path(volume.split(":")[0]) for volume in docker.mounts()[1::2]
+               if not volume.endswith(":ro")]
     assert f"{home}:{home}" in docker.mounts()
     assert home.is_dir(), "made here, else Docker makes it as root"
+    assert f"{package}:{package}:ro" in docker.mounts()
+    assert not any(package.is_relative_to(path) for path in written), "never written"
 
 
 #***********#

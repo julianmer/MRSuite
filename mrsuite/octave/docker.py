@@ -100,15 +100,20 @@ def mounts() -> List[str]:
     The repo covers the toolboxes, the shims, the data and oct2py's scratch. oct2py also
     adds its own package directory to the Octave path, so that has to be visible too, and
     an installed MRSuite keeps the toolboxes, data, scratch and MEX in its own folder
-    (see externals.local).
+    (see externals.local). Code is mounted read-only: an installed package is never written.
     """
     import oct2py
 
-    paths = [str(REPO), str(Path(oct2py.__file__).resolve().parent)]
-    if not externals.checkout():
+    code = [Path(oct2py.__file__).resolve().parent]
+    if externals.checkout():
+        mine = [REPO]
+    else:
         externals.home().mkdir(parents=True, exist_ok=True)   # else Docker makes it, as root
-        paths += [str(externals.home()), str(TEMP_DIR.parent)]  # the scratch as imported
-    return [arg for p in dict.fromkeys(paths) for arg in ("-v", f"{p}:{p}")]
+        code.append(HERE.parent)                               # the shims and drivers
+        mine = [externals.home(), TEMP_DIR.parent]             # the scratch as imported
+    volumes = [f"{p}:{p}" for p in dict.fromkeys(map(str, mine))]
+    volumes += [f"{p}:{p}:ro" for p in dict.fromkeys(map(str, code))]
+    return [arg for volume in volumes for arg in ("-v", volume)]
 
 
 #****************#
@@ -118,7 +123,8 @@ def _is_current() -> bool:
     """Whether the existing container runs the current image and sees every path this
     environment needs."""
     proc = _docker("inspect", "-f",
-                   "{{.Image}} {{range .Mounts}}{{.Source}}:{{.Destination}} {{end}}",
+                   "{{.Image}} {{range .Mounts}}{{.Source}}:{{.Destination}}"
+                   "{{if not .RW}}:ro{{end}} {{end}}",
                    CONTAINER, check=False, timeout=60)
     have = proc.stdout.split()
     return bool(have) and have[0] == image_id() and set(mounts()[1::2]) <= set(have[1:])

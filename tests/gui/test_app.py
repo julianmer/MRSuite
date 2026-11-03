@@ -44,13 +44,18 @@ needs_challenge = pytest.mark.skipif(not challenge2016.BASIS.exists(),
 #   simulate   #
 #**************#
 def simulate(graph, script):
-    """Open the page over a graph and play a user's part on it, the page at hand."""
+    """Open the page over a graph and play a user's part on it, the page at hand, as its
+    events do: inside the page, so what the app says reaches it."""
     apps = []
+
+    async def played(user):
+        with user.client:
+            await script(user, apps[-1])
 
     async def play():
         async with user_simulation(root=lambda: apps.append(App(graph))) as user:
             await user.open("/")
-            await asyncio.wait_for(script(user, apps[-1]), 300)   # a hang fails, with where
+            await asyncio.wait_for(played(user), 300)   # a hang fails, with where
     asyncio.run(play())
 
 
@@ -929,7 +934,10 @@ def test_files_loaded_during_a_run_are_read(monkeypatch, tmp_path):
     challenge2016.load(1)[0].list()[0].save(str(tmp_path / "one.nii.gz"))
 
     async def script(user, app):
-        task = asyncio.create_task(app.run())
+        async def ran():
+            with app.client:
+                await app.run()
+        task = asyncio.create_task(ran())
         await until(lambda: app.running == data)
 
         async def opened():

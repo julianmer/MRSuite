@@ -240,12 +240,26 @@ def test_the_octave_container_sees_what_an_install_fetched(installed, monkeypatc
     home = installed.parent                     # the toolboxes, data, scratch and MEX
     monkeypatch.setattr(docker, "TEMP_DIR", home / ".octave-tmp")   # as an install imports it
     package = docker.HERE.parent
-    written = [Path(volume.split(":")[0]) for volume in docker.mounts()[1::2]
-               if not volume.endswith(":ro")]
-    assert f"{home}:{home}" in docker.mounts()
-    assert home.is_dir(), "made here, else Docker makes it as root"
-    assert f"{package}:{package}:ro" in docker.mounts()
-    assert not any(package.is_relative_to(path) for path in written), "never written"
+    volumes = docker.mounts()[1::2]
+    writable = [Path(v.split(":")[0]) for v in volumes if not v.endswith(":ro")]
+
+    assert f"{home}:{home}" in volumes and home.is_dir(), "made here, else Docker makes it as root"
+    assert f"{package}:{package}:ro" in volumes
+    assert not any(package.is_relative_to(p) for p in writable), "never written"
+
+
+#*******************#
+#   oct2py located   #
+#*******************#
+def test_mounting_does_not_import_oct2py(installed, monkeypatch):
+    """Importing oct2py starts an Octave session, loudly where only the container has one."""
+    from mrsuite.octave import docker
+
+    monkeypatch.delitem(sys.modules, "oct2py", raising=False)
+    volumes = docker.mounts()[1::2]
+
+    assert "oct2py" not in sys.modules
+    assert any(volume.endswith("/oct2py:ro") for volume in volumes)
 
 
 #***********#

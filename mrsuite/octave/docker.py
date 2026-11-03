@@ -17,6 +17,7 @@
 #*************#
 #   imports   #
 #*************#
+import importlib.util
 import os
 import shutil
 import subprocess
@@ -101,10 +102,10 @@ def mounts() -> List[str]:
     adds its own package directory to the Octave path, so that has to be visible too, and
     an installed MRSuite keeps the toolboxes, data, scratch and MEX in its own folder
     (see externals.local). Code is mounted read-only: an installed package is never written.
+    oct2py is located, not imported: its import starts a session, which fails loudly
+    before OCTAVE_EXECUTABLE points into the container.
     """
-    import oct2py
-
-    code = [Path(oct2py.__file__).resolve().parent]
+    code = [Path(importlib.util.find_spec("oct2py").origin).resolve().parent]
     if externals.checkout():
         mine = [REPO]
     else:

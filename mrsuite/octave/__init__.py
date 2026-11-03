@@ -136,14 +136,14 @@ def session(root: str, runtime: Optional[str] = None, verbose: bool = False) -> 
             oc.eval("warning('off', 'all');")
         return oc
 
-    from mrsuite.octave.sessions import FreshExchange, Unprompted
-
     if which == "docker":
         docker.start()
         docker.TEMP_DIR.mkdir(parents=True, exist_ok=True)
-        # oct2py reads OCTAVE_EXECUTABLE when it builds the engine, and nowhere else
+        # oct2py reads OCTAVE_EXECUTABLE when it builds the engine, and nowhere else: set
+        # before it is first imported, since its import starts a session of its own
         previous = os.environ.get("OCTAVE_EXECUTABLE")
         os.environ["OCTAVE_EXECUTABLE"] = docker.executable()
+        from mrsuite.octave.sessions import FreshExchange
         # a folder of its own: oct2py passes every call through writer.mat and reader.mat
         # in it, so sessions sharing one overwrite each other's data
         exchange = scratch("oct2py_")
@@ -156,6 +156,7 @@ def session(root: str, runtime: Optional[str] = None, verbose: bool = False) -> 
             else:
                 os.environ["OCTAVE_EXECUTABLE"] = previous
     else:
+        from mrsuite.octave.sessions import Unprompted
         oc = Unprompted()
 
     if not verbose:

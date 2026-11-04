@@ -144,6 +144,19 @@ def test_a_tool_without_a_citation_says_so():
 
 
 #***************#
+#   free text   #
+#***************#
+def test_another_programs_free_text_details_are_shown_as_they_are():
+    """spec2nii's conversion entry has Details as text, not MRSuite's JSON."""
+    nifti = spectrum()
+    provenance.append(nifti, {"Time": "2026-11-04T12:00:00.000000", "Program": "spec2nii",
+                              "Version": "0.8.15", "Method": "Conversion",
+                              "Details": "Converted from sub-01.dat"})
+
+    assert "1. **spec2nii** 0.8.15: `Conversion` (Converted from sub-01.dat)" in report(nifti)
+
+
+#***************#
 #   synthetic   #
 #***************#
 def test_a_trained_model_in_the_chain_adds_its_mrssynmrs_table(monkeypatch):

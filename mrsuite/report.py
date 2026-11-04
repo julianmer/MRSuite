@@ -410,12 +410,27 @@ def _number(value: Any) -> str:
     return f"{value:.4g}" if isinstance(value, (int, float)) else str(value)
 
 
+#*************#
+#   details   #
+#*************#
+def _details(entry: Dict[str, str]) -> Dict[str, Any]:
+    """An entry's Details as MRSuite writes them, JSON; another program's free text, as
+    spec2nii's conversion entry has, gives nothing."""
+    try:
+        details = json.loads(entry.get("Details") or "{}")
+    except ValueError:
+        return {}
+    return details if isinstance(details, dict) else {}
+
+
 #***************#
 #   arguments   #
 #***************#
 def _arguments(entry: Dict[str, str]) -> str:
-    """A step's arguments as its entry records them, each value shortened."""
-    details = json.loads(entry.get("Details") or "{}")
+    """A step's arguments as its entry records them, each value shortened; free text as it is."""
+    details = _details(entry)
+    if not details and entry.get("Details"):
+        return entry["Details"]
     shown = [_short(a) for a in details.get("args", [])] + \
         [f"{k}={_short(v)}" for k, v in details.get("kwargs", {}).items()]
     return ", ".join(shown) or "no arguments"
@@ -457,7 +472,7 @@ def _synthetic(histories: List[List[Dict[str, str]]]) -> str:
     """The MRSsynMRS table of each trained model in the chain, from its recipe."""
     sources = {}
     for entry in (e for history in histories for e in history):
-        source = json.loads(entry.get("Details") or "{}").get("source")
+        source = _details(entry).get("source")
         if isinstance(source, dict) and source.get("name"):
             sources[(source["name"], source.get("revision"))] = None
     if not sources:
@@ -488,7 +503,7 @@ def _references(histories: List[List[Dict[str, str]]]) -> str:
     """The checklist, MRSuite, then every tool the history names, each once."""
     cited = dict.fromkeys([STANDARD, MRSUITE])
     for entry in (e for history in histories for e in history):
-        if isinstance(json.loads(entry.get("Details") or "{}").get("source"), dict):
+        if isinstance(_details(entry).get("source"), dict):
             cited[SYNTHETIC] = None
         for name in _named(entry):
             cited[CITATIONS.get(name) or OWN.get(name) or f"{name}: citation not declared"] = None
@@ -502,6 +517,6 @@ def _named(entry: Dict[str, str]) -> List[str]:
     """What an entry used: its Program, or for MRSuite's own the dataset or model it names."""
     if entry["Program"] != "MRSuite":
         return [entry["Program"]]
-    model = json.loads(entry.get("Details") or "{}").get("model")
+    model = _details(entry).get("model")
     module = entry["Method"].rpartition(".")[0]
     return [found for found in (model, module) if found in OWN]

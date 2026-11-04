@@ -77,6 +77,24 @@ of each trained model in the chain, and the references of every tool used. A bat
 an item that differs across it lists each spectrum's value. In the GUI, a block's report button
 shows the same.
 
+## Examples
+
+One script per claim in `examples/`, each taking `--n` for a small run and saying what it
+needs at the top; the two on COWS take the TE 26 ms basis set (`--basis`), the rest fetch
+everything on first use.
+
+| Script | Shows |
+|:---|:---|
+| `processing.py` | one in vivo chain across four languages (COWS sub-01), then the report |
+| `fitters.py` | one processed spectrum fitted by LCModel, FSL-MRS, spant, TARQUIN and Osprey |
+| `benchmark.py` | the 2016 challenge into three fitters and WAND then LCModel, scored on a radar |
+| `mrsi.py` | the 2024 MRSI challenge slice: augmentation, two fits, maps over the truth |
+| `simulate_train.py` | MRS-Sim into a QuantMLP, saved with its recipe, scored on the challenge |
+
+```bash
+python examples/benchmark.py --n 4 --out out/benchmark
+```
+
 ## Your own method
 
 `@mrsuite.method` makes a function of one spectrum a method that batches, records its

@@ -19,6 +19,7 @@
 #*************#
 #   imports   #
 #*************#
+import platform
 import re
 import sys
 import warnings
@@ -30,6 +31,11 @@ import numpy as np
 from mrsuite.bridges.base import Deferred
 from mrsuite.core.method import method
 from mrsuite.core.result import FitResult
+
+# pyAMARES' PyPI release needs hlsvdpro, which has no Apple Silicon wheel; its source has
+# dropped it, so there the install is from GitHub (pyproject leaves it out there too)
+PYAMARES = ("git+https://github.com/hawkMRS/pyAMARES"
+            if sys.platform == "darwin" and platform.machine() == "arm64" else "pyAMARES")
 
 
 #*************#
@@ -85,7 +91,7 @@ def fit(data: Any, prior: str, opts: Optional[Dict[str, Any]] = None) -> FitResu
     try:
         import pyAMARES
     except ImportError as err:
-        raise ImportError("pyAMARES is not installed: pip install pyAMARES") from err
+        raise ImportError(f"pyAMARES is not installed: pip install {PYAMARES}") from err
 
     # the NIfTI-MRS array and pyAMARES' model share numpy's FFT sign convention, so the
     # FID goes over as stored; the carrier puts the prior's absolute ppm on the axis

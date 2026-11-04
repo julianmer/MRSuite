@@ -34,6 +34,8 @@ Each says what is missing, and how to get it, when a step first needs it, for in
 - FSL-MRS: `conda install -c conda-forge -c https://fsl.fmrib.ox.ac.uk/fsldownloads/fslconda/public/ fsl_mrs`
 - MATLAB: `pip install <matlabroot>/extern/engines/python` (the MATLAB Engine for Python)
 - Octave: "no Octave available: install one, or start Docker for the containerised runtime"
+- pyAMARES on Apple Silicon: `pip install git+https://github.com/hawkMRS/pyAMARES` (its PyPI
+  release needs hlsvdpro, which has no wheel for it, so `pip install mrsuite` leaves it out there)
 
 The rules are `mrsuite.octave.resolve_runtime` and `mrsuite.r`; the Docker images are built
 from `mrsuite/octave/dockerfile` and `mrsuite/r/dockerfile`.

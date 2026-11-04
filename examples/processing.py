@@ -13,7 +13,7 @@
 #          the rest of the chain stands.                                                           #
 #                                                                                                  #
 #          Needs Octave, R and LCModel (fetched on first use); the subject's data (1 GB) is        #
-#          fetched on first use. The basis set is the TE 26 ms sLASER set (--basis).               #
+#          fetched on first use, as is its TE 26 ms sLASER basis set.                              #
 #                                                                                                  #
 #          python examples/processing.py --n 2 --out out/processing                                #
 #                                                                                                  #
@@ -28,23 +28,22 @@ from pathlib import Path
 
 import pandas as pd
 
-from mrsuite import io, report
+from mrsuite import report
 from mrsuite.benchmark import scoring
 from mrsuite.bridges import fid_a, fsl_mrs, lcmodel, mrspeclab, osprey, spant
 from mrsuite.core.pipeline import Pipeline
 from mrsuite.datasets import openneuro
 
-BASIS = Path("data/basis_sets/TE26_basis_summed")
 
 
 #**********#
 #   main   #
 #**********#
-def main(n: int, out: Path, basis: Path) -> None:
+def main(n: int, out: Path) -> None:
     """The chain on the first ``n`` spectra of sub-01, the fits and the report into ``out``."""
     spectra, water, *_ = openneuro.load("ds006812", "sub-01")     # metabolite and water
     spectra, water = spectra[:n], water[:n]
-    basis = io.basis(sorted(str(f) for f in basis.glob("*.json")))
+    basis = openneuro.basis("ds006812")                         # TE 26 ms sLASER
 
     # the water reference weights the coil combination as acquired; combined once, it feeds
     # the eddy-current correction and the fit
@@ -74,6 +73,5 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--n", type=int, default=8, help="spectra of sub-01 to take (8 in all)")
     parser.add_argument("--out", type=Path, default=Path("out/processing"))
-    parser.add_argument("--basis", type=Path, default=BASIS, help="a folder of FSL-MRS .json")
     args = parser.parse_args()
-    main(args.n, args.out, args.basis)
+    main(args.n, args.out)

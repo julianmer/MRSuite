@@ -20,6 +20,7 @@
 #*************#
 import json
 import shutil
+from dataclasses import replace
 import tempfile
 import urllib.request
 import warnings
@@ -32,6 +33,7 @@ from nifti_mrs.nifti_mrs import NIFTI_MRS
 from nifti_mrs_plus import NIfTI_MRS_Plus
 
 from mrsuite import collect, externals
+from mrsuite.core.basis import Basis
 from mrsuite.datasets.challenge2016 import DATA
 
 # what a spectrum file is called: BIDS MRS NIfTI by suffix, raw scanner files by extension
@@ -51,6 +53,14 @@ WATER_INSIDE = {"ds006812": {"data": "water", "mm": "mm_water"}}
 # which lists a snapshot's files with a URL each, pinned to that snapshot
 TAGS = {"ds005371": "2.3.1", "ds006812": "1.0.1"}
 API = "https://openneuro.org/crn/graphql"
+
+# a dataset's basis set, where one is published for it: COWS' is Julian's TE 26 ms sLASER
+# set (FSL-MRS .json, one per function), as the Augmentrum repository keeps it at this commit
+AUGMENTRUM = "https://github.com/julianmer/Augmentrum"
+BASES = {"ds006812": ("d9e198bc2c75da41fcf05c09cb8ce240f3010a5c",
+                      "data/basis_sets/TE26_basis_summed",
+                      ("Asc", "Asp", "Cho", "Cr", "GABA", "GPC", "GSH", "Gln", "Glu", "Gly", "Lac",
+                       "MM", "MM09", "NAA", "NAAG", "PCr", "PE", "Tau", "mI", "sI"))}
 
 
 #**********#
@@ -107,6 +117,38 @@ def load(dataset: str, subject: str = "sub-01") -> Tuple[NIfTI_MRS_Plus, ...]:
         found[name], found[water] = map(list, zip(*map(_water_apart, found.get(name, [])))) \
             if found.get(name) else ([], [])
     return tuple(NIfTI_MRS_Plus(found.get(name, [])) for name in DATASETS[dataset])
+
+
+#***********#
+#   basis   #
+#***********#
+def basis(dataset: str) -> Basis:
+    """
+    The basis set published for a dataset's spectra, fetched on first use.
+
+    Args:
+        dataset (str): An accession number of ``BASES``.
+
+    Returns:
+        Basis: The set, its source naming the repository, commit and folder it came from
+            and what it was converted from.
+
+    Raises:
+        ValueError: If no basis is published for the dataset here.
+    """
+    from mrsuite import io
+
+    if dataset not in BASES:
+        raise ValueError(f"no basis set for {dataset!r} here; there are {sorted(BASES)}")
+    commit, folder, names = BASES[dataset]
+    files = externals.fetched(f"the {dataset} basis set", DATA / "basis_sets" / Path(folder).name,
+                              f"{AUGMENTRUM.replace('github.com', 'raw.githubusercontent.com')}"
+                              f"/{commit}/{folder}", [f"{n}.json" for n in names])
+    with open(files[0]) as fh:
+        origin = json.load(fh)["meta"].get("SimVersion")
+    read = io.basis([str(f) for f in files])
+    return replace(read, source={**read.source, "repository": AUGMENTRUM, "commit": commit,
+                                 "folder": folder, "origin": origin})
 
 
 #*****************#

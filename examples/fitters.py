@@ -11,8 +11,8 @@
 #          to creatine side by side, in a table and a figure. The fit is the step where the        #
 #          fitters differ; everything before it is shared.                                         #
 #                                                                                                  #
-#          Needs Octave, R and LCModel and TARQUIN (fetched on first use); the subject's data      #
-#          (1 GB) is fetched on first use. The basis set is the TE 26 ms sLASER set (--basis).     #
+#          Needs Octave, R, LCModel and TARQUIN (fetched on first use); the subject's data (1 GB)  #
+#          and its TE 26 ms sLASER basis set are fetched on first use.                             #
 #                                                                                                  #
 #          python examples/fitters.py --n 1 --out out/fitters                                      #
 #                                                                                                  #
@@ -27,24 +27,22 @@ from pathlib import Path
 
 import pandas as pd
 
-from mrsuite import io
 from mrsuite.benchmark import scoring
 from mrsuite.bridges import fid_a, fsl_mrs, lcmodel, osprey, spant, tarquin
 from mrsuite.core.pipeline import Pipeline
 from mrsuite.datasets import openneuro
 
-BASIS = Path("data/basis_sets/TE26_basis_summed")
 SHOWN = ["NAA", "NAAG", "Glu", "Gln", "mI", "GPC", "GSH", "Lac"]
 
 
 #**********#
 #   main   #
 #**********#
-def main(n: int, out: Path, basis: Path) -> None:
+def main(n: int, out: Path) -> None:
     """The first ``n`` spectra of sub-01 through one processing and five fitters."""
     spectra, water, *_ = openneuro.load("ds006812", "sub-01")
     spectra, water = spectra[:n], water[:n]
-    basis = io.basis(sorted(str(f) for f in basis.glob("*.json")))
+    basis = openneuro.basis("ds006812")                         # TE 26 ms sLASER
 
     # the Twix is sampled twice as fast as the basis: both go onto the basis' grid, since
     # TARQUIN takes the data as it is
@@ -86,6 +84,5 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--n", type=int, default=1, help="spectra of sub-01 to take (8 in all)")
     parser.add_argument("--out", type=Path, default=Path("out/fitters"))
-    parser.add_argument("--basis", type=Path, default=BASIS, help="a folder of FSL-MRS .json")
     args = parser.parse_args()
-    main(args.n, args.out, args.basis)
+    main(args.n, args.out)

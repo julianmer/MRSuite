@@ -17,7 +17,7 @@
 #   imports   #
 #*************#
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 from nifti_mrs.create_nmrs import gen_nifti_mrs
@@ -75,8 +75,9 @@ def basis(sequence: str = "press", vendor: str = "siemens", te: float = 30, band
             f"_NPts_{int(points)}")
     folder = DATA / "basis_sets" / sequence / vendor / name
     url = f"{BASIS_SETS}/{sequence}/inspector/{vendor}/{name}"
-    files = _fetched(f"the MR SCIENCE Lab {SEQUENCES[sequence]} {VENDORS[vendor]} TE {_plain(te)} "
-                     f"basis set", folder, url, [f"{m}.mat" for m in metabolites])
+    files = externals.fetched(f"the MR SCIENCE Lab {SEQUENCES[sequence]} {VENDORS[vendor]} "
+                              f"TE {_plain(te)} basis set", folder, url,
+                              [f"{m}.mat" for m in metabolites])
     fids, frequency, width = [], None, None
     for file in files:
         expt = loadmat(file, squeeze_me=True, struct_as_record=False)["exptDat"]
@@ -110,7 +111,7 @@ def spectrum(model: str = "perfect", broadening: int = 8) -> NIfTI_MRS_Plus:
 
     folder = {"perfect": "PerfectModelSpectra", "imperfect": "ImperfectModelSpectra"}[model]
     name = f"GB{int(broadening)}Hz2.mat"
-    file, = _fetched(f"the MR SCIENCE Lab {model} synthetic spectrum ({name})",
+    file, = externals.fetched(f"the MR SCIENCE Lab {model} synthetic spectrum ({name})",
                      DATA / "synthetic" / folder, f"{SPECTRA}/{folder}", [name])
     mat = loadmat(file, squeeze_me=True, struct_as_record=False)
     expt = mat["exptDat"] if "exptDat" in mat else mat["lcm"].expt      # the one full worksheet
@@ -121,24 +122,6 @@ def spectrum(model: str = "perfect", broadening: int = 8) -> NIfTI_MRS_Plus:
         "MRSuite", provenance.mrsuite_version(), "mrsuite.datasets.mr_science_lab.spectrum",
         {"repository": f"{SPECTRA}/{folder}/{name}", "simulator": "INSPECTOR", "licence": LICENCE}))
     return NIfTI_MRS_Plus([item])
-
-
-#*************#
-#   fetched   #
-#*************#
-def _fetched(what: str, folder: Path, url: str, names: Iterable[str]) -> List[Path]:
-    """The files of a set, downloaded into ``folder`` the first time."""
-    names = list(names)
-    missing = [n for n in names if not (folder / n).is_file()]
-    if missing:
-        folder.mkdir(parents=True, exist_ok=True)
-        with externals.fetching(what, folder):
-            for n in missing:
-                try:
-                    externals.download(f"{url}/{n}", folder / n)
-                except Exception as err:               # noqa: BLE001 - said with the URL
-                    raise FileNotFoundError(f"{url}/{n}: {err}") from err
-    return [folder / n for n in names]
 
 
 #***********#

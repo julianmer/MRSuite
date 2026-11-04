@@ -183,3 +183,26 @@ def test_an_install_downloads_the_snapshot_the_submodule_pins(dataset):
     tags = subprocess.run(["git", "-C", str(root), "tag", "--points-at", "HEAD"],
                           capture_output=True, text=True, check=True).stdout.split()
     assert openneuro.TAGS[dataset] in tags
+
+
+#***********#
+#   basis   #
+#***********#
+def test_a_datasets_basis_is_pinned_to_a_commit_and_named_by_function():
+    for dataset, (commit, folder, names) in openneuro.BASES.items():
+        assert dataset in openneuro.DATASETS and len(commit) == 40 and len(names) == len(set(names))
+
+
+@pytest.mark.skipif(not (openneuro.DATA / "basis_sets" / "TE26_basis_summed").is_dir(),
+                    reason="the ds006812 basis is not fetched")
+def test_the_cows_basis_reads_with_where_it_came_from():
+    basis = openneuro.basis("ds006812")
+
+    assert sorted(basis.names) == sorted(openneuro.BASES["ds006812"][2])
+    assert basis.source["commit"] == openneuro.BASES["ds006812"][0]
+    assert basis.source["origin"] == "Converted from SLASER_Siemens26.basis"
+
+
+def test_a_dataset_without_a_basis_says_so():
+    with pytest.raises(ValueError, match="no basis set for 'ds005371'"):
+        openneuro.basis("ds005371")

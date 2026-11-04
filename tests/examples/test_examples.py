@@ -31,7 +31,7 @@ from tests.datasets.test_challenges import needs_2016, needs_mrsi, needs_r, need
 
 CHECKOUT = Path(__file__).resolve().parents[2]
 COWS = openneuro.DATA / "openneuro_ds006812" / "sub-01"
-TE26 = CHECKOUT / "data" / "basis_sets" / "TE26_basis_summed"
+TE26 = openneuro.DATA / "basis_sets" / "TE26_basis_summed"
 
 needs_cows = pytest.mark.skipif(
     not (COWS.is_dir() and all(e.path.exists() for e in collect.discover(COWS))

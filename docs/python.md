@@ -79,9 +79,8 @@ shows the same.
 
 ## Examples
 
-One script per claim in `examples/`, each taking `--n` for a small run and saying what it
-needs at the top; the two on COWS take the TE 26 ms basis set (`--basis`), the rest fetch
-everything on first use.
+One script per claim in `examples/`, each runnable as it is: it says at the top what it needs,
+fetches its data on first use, and takes `--n` for a small run.
 
 | Script | Shows |
 |:---|:---|

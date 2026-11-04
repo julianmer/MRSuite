@@ -29,7 +29,7 @@ import tarfile
 import tempfile
 import urllib.request
 from pathlib import Path
-from typing import Iterator, List, Optional
+from typing import Iterable, Iterator, List, Optional
 
 # name -> (git url, commit): the repository and the commit of it MRSuite runs
 REGISTRY = {
@@ -187,6 +187,24 @@ def move_in(part: Path, dest: Path) -> None:
     except OSError:
         if not (dest.is_dir() and any(dest.iterdir())):
             raise
+
+
+#*************#
+#   fetched   #
+#*************#
+def fetched(what: str, folder: Path, url: str, names: Iterable[str]) -> List[Path]:
+    """The files of a set, each at ``url``/name, downloaded into ``folder`` the first time."""
+    names = list(names)
+    missing = [n for n in names if not (folder / n).is_file()]
+    if missing:
+        folder.mkdir(parents=True, exist_ok=True)
+        with fetching(what, folder):
+            for n in missing:
+                try:
+                    download(f"{url}/{n}", folder / n)
+                except Exception as err:               # noqa: BLE001 - said with the URL
+                    raise FileNotFoundError(f"{url}/{n}: {err}") from err
+    return [folder / n for n in names]
 
 
 #**************#

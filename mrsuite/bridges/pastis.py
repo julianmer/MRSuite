@@ -34,7 +34,6 @@ from mrsuite.core.method import method
 from mrsuite.core.result import FitResult
 from mrsuite.simulators import pygamma_build
 
-PROGRAM = "PASTIS"
 # PASTIS's sequence classes (its sim.py), by a short name
 SEQUENCES = {"fid": "mrs_seq_fid", "press": "mrs_seq_press", "steam": "mrs_seq_steam",
              "slaser": "mrs_seq_eja_svs_slaser", "eja_svs_press": "mrs_seq_eja_svs_press",
@@ -214,7 +213,7 @@ def basis(te: float, sequence: str = "press", frequency: float = 297.206258, poi
                    * np.exp(1j * seq.additional_phi0))
     return Basis(list(meta.keys()), fids, float(bandwidth), float(frequency),
                  centre=float(seq.ppm_water), te=float(te), seq=sequence,
-                 source={"simulated": {"program": PROGRAM, "version": externals.version("pastis"),
+                 source={"simulated": {"program": "PASTIS", "version": externals.version("pastis"),
                                        "engine": {"program": "PyGAMMA",
                                                   "version": pygamma.__version__,
                                                   "commit": externals.REGISTRY["pygamma"][1]},
@@ -230,7 +229,7 @@ def basis(te: float, sequence: str = "press", frequency: float = 297.206258, poi
 #*********#
 #   fit   #
 #*********#
-@method(PROGRAM, version=_version, name="fit_pastis")
+@method("PASTIS", version=_version, name="fit_pastis")
 def fit(data: Any, basis: Basis, metabolites: Optional[Sequence[str]] = None,
         ppmlim: Optional[Tuple[float, float]] = None,
         opts: Optional[Dict[str, Any]] = None) -> FitResult:
@@ -278,7 +277,7 @@ def fit(data: Any, basis: Basis, metabolites: Optional[Sequence[str]] = None,
         raise ValueError(f"PASTIS fits single spectra, not shape {data.shape}; combine coils "
                          f"and averages first")
     simulated = (basis.source or {}).get("simulated", {}) if isinstance(basis, Basis) else {}
-    if simulated.get("program") != PROGRAM:
+    if simulated.get("program") != "PASTIS":
         raise ValueError("PASTIS fits the metabolite model it simulated: pass a basis from "
                          "mrsuite.simulators.bases.pastis")
     args = dict(simulated["arguments"])
@@ -450,7 +449,7 @@ def _back(out: Any, added: Tuple[int, ...], like: Any) -> Any:
 #*************#
 #   combine   #
 #*************#
-@method(PROGRAM, version=_version, name="correct_combine_channels_3d")
+@method("PASTIS", version=_version, name="correct_combine_channels_3d")
 def combine(data: Any, reference: Any = None, phasing: bool = False) -> Any:
     """
     The coils combined with SVD weights (suspect's), from the water reference where given,
@@ -474,7 +473,7 @@ def combine(data: Any, reference: Any = None, phasing: bool = False) -> Any:
 #***********#
 #   phase   #
 #***********#
-@method(PROGRAM, version=_version, name="correct_phase_3d")
+@method("PASTIS", version=_version, name="correct_phase_3d")
 def phase(data: Any, reference: Any = None, peak_range: Tuple[float, float] = (4.5, 5.0),
           order: int = 0, offset: float = 0.0, per_channel: bool = False,
           first_point: bool = False) -> Any:
@@ -506,7 +505,7 @@ def phase(data: Any, reference: Any = None, peak_range: Tuple[float, float] = (4
 #**********#
 #   align   #
 #**********#
-@method(PROGRAM, version=_version, name="correct_realign_2d")
+@method("PASTIS", version=_version, name="correct_realign_2d")
 def align(data: Any, peak_range: Tuple[float, float] = (4.5, 5.0), moving_averages: int = 1,
           correlation: bool = False, max_shift: float = 25.0, apodization: float = 5.0) -> Any:
     """
@@ -533,7 +532,7 @@ def align(data: Any, peak_range: Tuple[float, float] = (4.5, 5.0), moving_averag
 #************#
 #   reject   #
 #************#
-@method(PROGRAM, version=_version, name="correct_analyze_and_reject_2d")
+@method("PASTIS", version=_version, name="correct_analyze_and_reject_2d")
 def reject(data: Any, peak_range: Tuple[float, float] = (4.5, 5.0),
            snr_range: Tuple[float, float] = (1.8, 2.2),
            linewidth_range: Tuple[float, float] = (4.5, 5.0), moving_averages: int = 1,

@@ -72,6 +72,15 @@ CITATIONS: Dict[str, str] = {
     "pyAMARES": "Xu J, Vaeggemose M, Schulte RF, et al. PyAMARES, an Open-Source Python Library "
                 "for Fitting Magnetic Resonance Spectroscopy Data. Diagnostics (Basel). "
                 "2024;14(23):2668. doi:10.3390/diagnostics14232668",
+    "PASTIS": "Roussel T, Le Fur Y, Guye M, Viout P, Ranjeva JP, Callot V. Respiratory-triggered "
+              "quantitative MR spectroscopy of the human cervical spinal cord at 7 T. Magn Reson "
+              "Med. 2022;87(6):2600-2612. doi:10.1002/mrm.29182",
+    "OXSA": "Purvis LAB, Clarke WT, Biasiolli L, Valkovic L, Robson MD, Rodgers CT. OXSA: An "
+            "open-source magnetic resonance spectroscopy analysis toolbox in MATLAB. PLoS One. "
+            "2017;12(9):e0185356. doi:10.1371/journal.pone.0185356; its AMARES: Vanhamme L, van "
+            "den Boogaart A, Van Huffel S. Improved method for accurate and efficient "
+            "quantification of MRS data with use of prior knowledge. J Magn Reson. "
+            "1997;129(1):35-43. doi:10.1006/jmre.1997.1244",
     "MRSpecLAB": "Xiao Y, Kaiser A, Kockisch M, et al. A graphical pipeline platform for MRS data"
                  " processing and analysis: MRSpecLAB. Front Neuroimaging. 2025;4:1610658. "
                  "doi:10.3389/fnimg.2025.1610658",

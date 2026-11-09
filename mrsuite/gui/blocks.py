@@ -25,6 +25,7 @@ from typing import Any, Dict, List, Tuple
 
 from mrsuite.gui import catalog
 from mrsuite.gui.catalog import Field
+from mrsuite.bridges.pastis import SEQUENCES as PASTIS_SEQUENCES
 from mrsuite.simulators import bases
 from mrsuite.simulators.mrsandbox import SEQUENCES
 
@@ -241,7 +242,7 @@ _PREPROCESS = [
     ("coil-combination", "Coil combination",
      [("fsl_mrs", "coilcombine"), ("fid_a", "op_addrcvrs"), ("osprey", "op_addrcvrs"),
       ("mrspeclab", "CoilCombinationSVD"), ("mrspeclab", "CoilCombinationAdaptive"),
-      ("suspect", "combine_channels")],
+      ("suspect", "combine_channels"), ("pastis", "combine")],
      "Combine the receive coils' signals into one."),
     ("eddy-current", "Eddy-current correction",
      [("fsl_mrs", "ecc"), ("fid_a", "op_ecc"), ("osprey", "op_eccKlose"),
@@ -249,11 +250,12 @@ _PREPROCESS = [
      "Correct the phase eddy currents cause, from the water reference."),
     ("outliers", "Outlier removal",
      [("fsl_mrs", "remove_unlike"), ("fid_a", "op_rmbadaverages"),
-      ("mrspeclab", "RemoveBadAverages")],
+      ("mrspeclab", "RemoveBadAverages"), ("pastis", "reject")],
      "Remove corrupted transients, e.g. from motion."),
     ("alignment", "Frequency & phase alignment",
      [("fsl_mrs", "align"), ("fid_a", "op_alignAverages"), ("osprey", "op_robustSpecReg"),
-      ("spant", "align"), ("mrspeclab", "FreqPhaseAlignment"), ("suspect", "alignment")],
+      ("spant", "align"), ("mrspeclab", "FreqPhaseAlignment"), ("suspect", "alignment"),
+      ("pastis", "align")],
      "Correct frequency and phase drift between transients."),
     ("averaging", "Averaging",
      [("fsl_mrs", "average"), ("fid_a", "op_averaging"), ("osprey", "op_averaging"),
@@ -271,7 +273,7 @@ _PREPROCESS = [
      "Remove the residual water peak (HLSVD)."),
     ("phasing", "Phasing",
      [("fsl_mrs", "phase_correct"), ("fid_a", "op_autophase"), ("spant", "auto_phase"),
-      ("suspect", "phasing")],
+      ("suspect", "phasing"), ("pastis", "phase")],
      "Zero-order phase correction."),
     ("referencing", "Frequency referencing",
      [("fsl_mrs", "shift_to_reference"), ("fid_a", "op_ppmref"), ("osprey", "op_ppmref")],
@@ -535,6 +537,21 @@ BLOCKS: Dict[str, Block] = {b.key: b for b in [
                "with make, g++ and SWIG): its bundled ideal sequences on its metabolites' spin "
                "systems, unbroadened; timings in ms, one per loop (PRESS: TE1, TE2; STEAM: TE, "
                "TM; Spin-Echo: TE), None for Vespa's default of 0 ms; frequency in MHz."),
+    # PASTIS's own defaults: its sequence classes' (sim.py: f0, npts, fs), its default template
+    Block("pastis-basis", "simulate", "PASTIS basis set", folder="Basis set simulation",
+          call="bases.pastis", imports=("from mrsuite.simulators import bases",),
+          fields=(_value("te", positional=True),
+                  _choice("sequence", list(PASTIS_SEQUENCES), "'press'"),
+                  _value("frequency", "297.206258"), _value("points", "16384"),
+                  _value("bandwidth", "5000.0"),
+                  _choice("template", ["Brain_7T", "Muscle", "Lipids", "Ethanol"], "'Brain_7T'"),
+                  _choice("nucleus", ["1H", "31P"], "'1H'"),
+                  _choice("shaped_pulses", [False, True], "False")),
+          outputs=(Port("basis", BASIS),),
+          help="A basis set simulated by PASTIS on PyGAMMA (built on first use): one of its "
+               "sequences on a template of its metabolite database, 1H or 31P; te in ms, "
+               "frequency in MHz; shaped_pulses simulates the sLASER's adiabatic refocusing "
+               "pulses as waveforms (the pulse's duration, R and N under further arguments)."),
     Block("spinach-basis", "simulate", "Spinach spin systems", folder="Basis set simulation",
           call="spinach.simulate", imports=("from mrsuite.simulators import spinach",),
           fields=(_value("systems", positional=True), _value("sequence", "'acquire'"),
@@ -750,6 +767,10 @@ BLOCKS: Dict[str, Block] = {b.key: b for b in [
           help="Model the spectrum as a combination of basis spectra."),
     Block("peak-fit", "fit", "Peak fit (AMARES)", out=RESULTS, options=(("pyamares", "fit"),),
           help="Model the spectrum as peaks with prior knowledge."),
+    Block("pastis-fit", "fit", "PASTIS time-domain fit", out=RESULTS,
+          options=(("pastis", "fit"),),
+          help="PASTIS's linear combination in the time domain, each metabolite with its "
+               "amplitude, damping, shift and phase; takes a PASTIS basis set."),
     Block("gannet", "fit", "Gannet (edited MRS)", call="gannet.fit",
           imports=("from mrsuite.bridges import gannet",),
           fields=(_value("metabolite", positional=True), _value("water", "None"),
@@ -982,7 +1003,8 @@ def label(option: Tuple[str, str]) -> str:
     where = "MRSValidate" if where.startswith(f"{_MRSV}.") else where
     return {"fsl_mrs": "FSL-MRS", "fid_a": "FID-A", "osprey": "Osprey", "spant": "spant",
             "mrspeclab": "MRSpecLAB", "lcmodel": "LCModel", "tarquin": "TARQUIN",
-            "pyamares": "pyAMARES", "vespa": "Vespa", "nifti_mrs": "NIfTI-MRS tools",
+            "pyamares": "pyAMARES", "vespa": "Vespa", "pastis": "PASTIS",
+            "nifti_mrs": "NIfTI-MRS tools",
             "augmentrum": "Augmentrum", "suspect": "suspect",
             _CHALLENGE: "2016 challenge", _SCORING: "MRSuite"}.get(where, where) + f" · {function}"
 

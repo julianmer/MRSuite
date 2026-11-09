@@ -23,6 +23,7 @@ its package.
 | [TARQUIN](https://github.com/julianmer/PyTARQUIN) | `mrsuite.tarquin` | a binary, through PyTARQUIN | its fit |
 | [pyAMARES](https://pypi.org/project/pyAMARES/) | `mrsuite.pyamares` | Python | AMARES peak fitting from a prior-knowledge file |
 | [Vespa](https://github.com/vespa-mrs/vespa) | `mrsuite.vespa` | Python | Vespa-Analysis's fit; basis simulation through PyGAMMA |
+| [PASTIS](https://github.com/tngrssl/pastis) | `mrsuite.pastis` | Python, PyGAMMA built on first use | its time-domain linear-combination fit; basis simulation of its sequences (sLASER with shaped adiabatic pulses among them, 1H and 31P); transient rejection, realignment, phasing and coil combination as steps |
 
 Each toolbox keeps its own licence; see its repository. The simulators MRSuite drives are
 listed under [Datasets and simulators](datasets.md).

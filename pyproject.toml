@@ -37,6 +37,10 @@ dependencies = [
     "keras>=3.0",     # Model.learn: one Keras loop for PyTorch, TensorFlow and JAX models
     "nicegui[native,plotly]>=3.17,<4",   # mrsuite-gui; 4.0 changes its process pool and run
     "suspect",        # its readers and processing as steps (bridges/suspect.py)
+    # what PASTIS (bridges/pastis.py) imports beyond what spec2nii and suspect bring
+    "termcolor",
+    "xlrd",           # its metabolite database is .xls
+    "ipython",
     # the pyAMARES fit; its PyPI release needs hlsvdpro, which has no Apple Silicon wheel, so
     # there the bridge says the install (pyAMARES's source has dropped hlsvdpro since)
     "pyAMARES; sys_platform != 'darwin' or platform_machine != 'arm64'",

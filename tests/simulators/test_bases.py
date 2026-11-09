@@ -17,12 +17,14 @@ import numpy as np
 import pytest
 
 from mrsuite import externals, r
-from mrsuite.bridges import fid_a
+from mrsuite.bridges import fid_a, pastis
 from mrsuite.simulators import bases, pygamma_build
 from tests.conftest import needs_octave
 
 needs_vespa = pytest.mark.skipif(importlib.util.find_spec("vespa") is None,
                                  reason="Vespa not installed")
+needs_pastis = pytest.mark.skipif(pastis._version() is None,
+                                  reason="what PASTIS imports is not installed")
 needs_pygamma = pytest.mark.skipif(
     not (pygamma_build.folder() / "pygamma").is_dir()
     and not all(shutil.which(tool) for tool in pygamma_build.TOOLS),
@@ -103,6 +105,59 @@ def test_vespa_refuses_what_its_database_does_not_hold():
         bases.vespa(["NAA"])
     with pytest.raises(ValueError, match=r"Spin-Echo takes a timing per loop, \['TE \[ms\]'\], not 2"):
         bases.vespa(["creatine"], "Spin-Echo", (15.0, 15.0))
+
+
+#************#
+#   pastis   #
+#************#
+@needs_pastis
+@needs_pygamma
+def test_pastis_simulates_a_press_basis_in_niftis_orientation():
+    basis = bases.pastis(30.0, "press", frequency=127.8, points=2048, bandwidth=4000.0)
+
+    assert {"NAA", "Cr_CH3", "Water", "LipA"} <= set(basis.names)
+    assert basis.fids.shape == (len(basis.names), 2048)
+    assert _peak(basis, "NAA") == pytest.approx(2.01, abs=0.02)
+    assert _peak(basis, "Cr_CH3") == pytest.approx(3.03, abs=0.02)
+    assert _peak(basis, "Water") == pytest.approx(4.7, abs=0.01)
+    assert basis.te == 30.0 and basis.seq == "press" and basis.centre == 4.7
+    simulated = basis.source["simulated"]
+    assert simulated["program"] == "PASTIS"
+    assert simulated["version"] == externals.version("pastis")
+    assert simulated["engine"] == {"program": "PyGAMMA", "version": "4.3.4",
+                                   "commit": externals.REGISTRY["pygamma"][1]}
+    assert simulated["function"] == "mrs_seq_press.initialize"
+    assert simulated["arguments"]["template"] == "Brain_7T"
+
+
+@needs_pastis
+@needs_pygamma
+def test_pastis_simulates_the_slaser_with_shaped_pulses_and_31p():
+    """The shaped adiabatic pulses change the coupled metabolites' evolution, not where the
+    singlets lie; the 31P database has its own template."""
+    shaped = bases.pastis(50.0, "slaser", frequency=297.2, points=1024, bandwidth=5000.0,
+                          shaped_pulses=True)
+    hard = bases.pastis(50.0, "slaser", frequency=297.2, points=1024, bandwidth=5000.0)
+    phosphorus = bases.pastis(1.0, "fid", frequency=120.3, points=1024, bandwidth=5000.0,
+                              nucleus="31P")
+
+    assert _peak(shaped, "NAA") == pytest.approx(2.01, abs=0.03)
+    assert shaped.source["simulated"]["arguments"]["shaped_pulses"] is True
+    glu = shaped.names.index("Glu")
+    assert not np.allclose(shaped.fids[glu], hard.fids[glu])
+    assert phosphorus.names and np.isfinite(phosphorus.fids).all()
+
+
+@needs_pastis
+def test_pastis_refuses_what_it_lacks_before_simulating():
+    with pytest.raises(ValueError, match="no sequence 'mega'"):
+        bases.pastis(30.0, "mega")
+    with pytest.raises(ValueError, match="not '13C'"):
+        bases.pastis(30.0, nucleus="13C")
+    with pytest.raises(ValueError, match="sLASER"):
+        bases.pastis(30.0, "press", shaped_pulses=True)
+    with pytest.raises(ValueError, match="no template 'Liver'"):
+        bases.pastis(30.0, template="Liver")
 
 
 #*************#

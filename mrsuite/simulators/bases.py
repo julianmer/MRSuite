@@ -8,8 +8,8 @@
 #                                                                                                  #
 # Purpose: Basis sets simulated by the toolboxes - FID-A's density-matrix simulation of ideal      #
 #          sequences, spant's, FSL-MRS's fsl_mrs_sim from its sequence description, Vespa's        #
-#          Simulation on PyGAMMA - as one Basis every fit takes, with how it was simulated in its  #
-#          source.                                                                                 #
+#          Simulation and PASTIS's sequences on PyGAMMA - as one Basis every fit takes, with how   #
+#          it was simulated in its source.                                                         #
 #                                                                                                  #
 ####################################################################################################
 
@@ -27,6 +27,7 @@ from typing import Any, Dict, Optional, Sequence
 
 import numpy as np
 
+from mrsuite.bridges.pastis import basis as pastis          # PASTIS's, written with its fit
 from mrsuite.core.basis import CENTRE, Basis
 
 # the 1H brain metabolites FID-A holds spin systems for (simulationTools/metabolites), as it

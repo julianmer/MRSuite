@@ -26,10 +26,12 @@ from mrsuite.testing import check
 
 from tests.bridges.test_lcmodel import needs_lcmodel
 from tests.bridges.test_mrspeclab import needs_mrspeclab
+from tests.bridges.test_pastis import needs_pastis
 from tests.bridges.test_pyamares import SINGLETS as AMARES_SINGLETS, needs_pyamares
 from tests.bridges.test_tarquin import needs_tarquin
 from tests.bridges.test_vespa import SINGLETS as VESPA_SINGLETS, needs_vespa
 from tests.conftest import needs_fsl_mrs, needs_octave
+from tests.simulators.test_bases import needs_pygamma
 from tests.models.test_models import (MLP_ACQUISITION, MLP_METABOLITES, WAND_ACQUISITION,
                                       WAND_METABOLITES, _spectra)
 
@@ -138,6 +140,21 @@ def test_vespa_fit(challenge):
     """Vespa takes metabolite line lists rather than a basis."""
     from mrsuite import vespa
     check(vespa.fit, challenge[0], VESPA_SINGLETS)
+
+
+#****************#
+#   pastis fit   #
+#****************#
+@needs_pastis
+@needs_pygamma
+def test_pastis_fit(challenge):
+    """PASTIS fits the model it simulates: its basis names the simulation."""
+    from mrsuite import pastis
+    from mrsuite.simulators import bases
+    data = challenge[0]
+    basis = bases.pastis(30.0, "press", frequency=float(data.spectrometer_frequency[0]),
+                         points=data.shape[3], bandwidth=1.0 / data.dwelltime)
+    check(pastis.fit, data, basis, metabolites=["NAA", "Cr_CH3", "Cr_CH2", "mI", "Glu"])
 
 
 #***********#

@@ -18,6 +18,8 @@
 
 ::: mrsuite.bridges.vespa
 
+::: mrsuite.bridges.pastis
+
 ::: mrsuite.bridges.suspect
 
 ::: mrsuite.bridges.nifti_mrs

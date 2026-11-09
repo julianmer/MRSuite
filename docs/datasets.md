@@ -25,7 +25,7 @@ spectra, water, truth = challenge2016.load()
 
 | Module | What it simulates |
 |---|---|
-| `bases` | basis sets by the toolboxes: FID-A's density-matrix simulation of ideal sequences, spant's, FSL-MRS's from its sequence description, and Vespa's on PyGAMMA, each recording how it was simulated |
+| `bases` | basis sets by the toolboxes: FID-A's density-matrix simulation of ideal sequences, spant's, FSL-MRS's from its sequence description, and Vespa's and PASTIS's on PyGAMMA (PASTIS: sLASER with shaped adiabatic pulses, 1H and 31P), each recording how it was simulated |
 | `spinach` | Spinach (Hogben, Kuprov et al.): 1H spin systems with their chemical shifts and J-couplings |
 | `synthetic` | spectra synthesised from a basis set or a brain model: FSL-MRS's synthetic module, spant's `sim_brain_1h` |
 | `mrs_sim` | MRS-Sim (LaMaster et al., NMR Biomed 2025), in a process of its own, with the whole truth |

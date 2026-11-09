@@ -765,8 +765,10 @@ BLOCKS: Dict[str, Block] = {b.key: b for b in [
           options=(("fsl_mrs", "fit"), ("lcmodel", "fit"), ("osprey", "fit"), ("spant", "fit"),
                    ("tarquin", "fit")),
           help="Model the spectrum as a combination of basis spectra."),
-    Block("peak-fit", "fit", "Peak fit (AMARES)", out=RESULTS, options=(("pyamares", "fit"),),
-          help="Model the spectrum as peaks with prior knowledge."),
+    Block("peak-fit", "fit", "Peak fit (AMARES)", out=RESULTS,
+          options=(("pyamares", "fit"), ("oxsa", "fit")),
+          help="Model the spectrum as peaks with prior knowledge: pyAMARES from a prior file, "
+               "OXSA's AMARES from one of its prior-knowledge sets (31P) or your own tables."),
     Block("pastis-fit", "fit", "PASTIS time-domain fit", out=RESULTS,
           options=(("pastis", "fit"),),
           help="PASTIS's linear combination in the time domain, each metabolite with its "
@@ -1003,7 +1005,7 @@ def label(option: Tuple[str, str]) -> str:
     where = "MRSValidate" if where.startswith(f"{_MRSV}.") else where
     return {"fsl_mrs": "FSL-MRS", "fid_a": "FID-A", "osprey": "Osprey", "spant": "spant",
             "mrspeclab": "MRSpecLAB", "lcmodel": "LCModel", "tarquin": "TARQUIN",
-            "pyamares": "pyAMARES", "vespa": "Vespa", "pastis": "PASTIS",
+            "pyamares": "pyAMARES", "vespa": "Vespa", "pastis": "PASTIS", "oxsa": "OXSA",
             "nifti_mrs": "NIfTI-MRS tools",
             "augmentrum": "Augmentrum", "suspect": "suspect",
             _CHALLENGE: "2016 challenge", _SCORING: "MRSuite"}.get(where, where) + f" · {function}"

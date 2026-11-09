@@ -24,7 +24,7 @@ The LCModel and TARQUIN binaries download on first use too, through `lcmodel-wra
 
 | Toolboxes | Runtime | How MRSuite finds it |
 |---|---|---|
-| FID-A, Osprey, Gannet, MRS4Brain, Oryx-MRSI, Spinach, SimnTG | Octave, MATLAB or Docker | `MRSUITE_OCTAVE_RUNTIME`: `auto` (default: `octave-cli` on `PATH`, else Docker), `local`, `docker` or `matlab` |
+| FID-A, Osprey, Gannet, MRS4Brain, Oryx-MRSI, OXSA, Spinach, SimnTG | Octave, MATLAB or Docker | `MRSUITE_OCTAVE_RUNTIME`: `auto` (default: `octave-cli` on `PATH`, else Docker), `local`, `docker` or `matlab` |
 | spant | R, or Docker | `MRSUITE_R_RUNTIME`: `auto` (default: `Rscript` on `PATH`, else Docker), `local` or `docker` |
 | FSL-MRS | its conda package | imported when a step first needs it |
 | MRSpecLAB | an environment of its own | built with `uv` on first use, or `MRSUITE_MRSPECLAB_PYTHON` |

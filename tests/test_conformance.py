@@ -26,6 +26,7 @@ from mrsuite.testing import check
 
 from tests.bridges.test_lcmodel import needs_lcmodel
 from tests.bridges.test_mrspeclab import needs_mrspeclab
+from tests.bridges.test_oxsa import NAA_PRIOR
 from tests.bridges.test_pastis import needs_pastis
 from tests.bridges.test_pyamares import SINGLETS as AMARES_SINGLETS, needs_pyamares
 from tests.bridges.test_tarquin import needs_tarquin
@@ -140,6 +141,16 @@ def test_vespa_fit(challenge):
     """Vespa takes metabolite line lists rather than a basis."""
     from mrsuite import vespa
     check(vespa.fit, challenge[0], VESPA_SINGLETS)
+
+
+#**************#
+#   oxsa fit   #
+#**************#
+@needs_octave
+def test_oxsa_fit(challenge):
+    """OXSA takes a prior-knowledge set rather than a basis: NAA on the 1H challenge data."""
+    from mrsuite import oxsa
+    check(oxsa.fit, challenge[0], NAA_PRIOR)
 
 
 #****************#

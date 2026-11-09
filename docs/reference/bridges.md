@@ -20,6 +20,8 @@
 
 ::: mrsuite.bridges.pastis
 
+::: mrsuite.bridges.oxsa
+
 ::: mrsuite.bridges.suspect
 
 ::: mrsuite.bridges.nifti_mrs

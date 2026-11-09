@@ -55,6 +55,8 @@ REGISTRY = {
                   "0b6ae5e56cdb457cf29bc00f3930998ab24f8056"),
     "osprey": ("https://github.com/schorschinho/osprey.git",
                "98b2e354f633211e5ff79ab6d263edde674a2e58"),
+    "oxsa": ("https://github.com/OXSAtoolbox/OXSA.git",
+             "7cf1fdd30d9f4775f52c41af70cf9960d2db6cd7"),
     "pastis": ("https://github.com/tngrssl/pastis.git",
                "6282dc7f165fc5cc9092c46fdc7b864ce4673d5f"),
     "pygamma": ("https://github.com/pygamma-mrs/gamma.git",

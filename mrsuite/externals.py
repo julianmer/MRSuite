@@ -69,6 +69,8 @@ REGISTRY = {
               "03ac9473cad402407b6472228377c0167fdc54b8"),
     "wand-for-mrs": ("https://github.com/julianmer/WAND-for-MRS.git",
                      "2642659ccf8f5ca6376b44a351dd9420a846b1f0"),
+    "wat-lip-removal-l2": ("https://github.com/mrshub/Wat_Lip_Removal_L2.git",
+                           "c691a392c695da35e83b808bfd56990dc4280a96"),
 }
 
 CHECKOUT = Path(__file__).resolve().parents[1]

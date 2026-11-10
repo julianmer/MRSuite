@@ -143,6 +143,18 @@ def test_vespa_fit(challenge):
     check(vespa.fit, challenge[0], VESPA_SINGLETS)
 
 
+#****************#
+#   l2 removal   #
+#****************#
+@needs_octave
+def test_wat_lip_l2_processing(challenge):
+    """The two removals share one basis over a batch; the shift takes a reference."""
+    from mrsuite import wat_lip_l2
+    check(wat_lip_l2.water_removal, challenge[0], seed=1)
+    check(wat_lip_l2.lipid_removal, challenge[0], seed=1)
+    check(wat_lip_l2.water_shift, *challenge)
+
+
 #**************#
 #   oxsa fit   #
 #**************#

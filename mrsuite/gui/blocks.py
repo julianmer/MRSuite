@@ -269,8 +269,10 @@ _PREPROCESS = [
      "Subtract edited sub-spectra."),
     ("water-removal", "Residual water removal",
      [("fsl_mrs", "remove_peaks"), ("osprey", "op_iterativeWaterFilter"),
-      ("fid_a", "op_removeWater"), ("spant", "hsvd_filt"), ("suspect", "water_removal")],
-     "Remove the residual water peak (HLSVD)."),
+      ("fid_a", "op_removeWater"), ("spant", "hsvd_filt"), ("suspect", "water_removal"),
+      ("wat_lip_l2", "water_removal")],
+     "Remove the residual water peak: HLSVD, or L2 regularisation against a synthesised water "
+     "basis (Wat_Lip_Removal_L2)."),
     ("phasing", "Phasing",
      [("fsl_mrs", "phase_correct"), ("fid_a", "op_autophase"), ("spant", "auto_phase"),
       ("suspect", "phasing"), ("pastis", "phase")],
@@ -873,15 +875,18 @@ BLOCKS: Dict[str, Block] = {b.key: b for b in [
           help="The slice in k-space: zero-filled, apodised, shifted, extrapolated, or "
                "transformed there and back, with spant."),
     Block("mrsi-alignment", "mrsi", "MRSI frequency alignment",
-          options=(("fsl_mrs", "mrsi_freq_align"),),
-          help="Every voxel aligned in frequency to a target or to their mean, with FSL-MRS."),
+          options=(("fsl_mrs", "mrsi_freq_align"), ("wat_lip_l2", "water_shift")),
+          help="Every voxel aligned in frequency to a target or to their mean, with FSL-MRS; or "
+               "its water put on the carrier from an unsuppressed reference (Wat_Lip_Removal_L2)."),
     Block("mrsi-phasing", "mrsi", "MRSI phase correction",
           options=(("fsl_mrs", "mrsi_phase_corr"),),
           help="Every voxel phased, with FSL-MRS."),
     Block("lipid-removal", "mrsi", "Lipid removal",
-          options=(("fsl_mrs", "lipid_removal_l2"), ("spant", "ssp")),
+          options=(("fsl_mrs", "lipid_removal_l2"), ("spant", "ssp"),
+                   ("wat_lip_l2", "lipid_removal")),
           help="Lipids from the skull taken out of the voxels: FSL-MRS's L2 regularisation "
-               "on a lipid mask or basis, or spant's signal-space projection."),
+               "on a lipid mask or basis, spant's signal-space projection, or L2 regularisation "
+               "against a synthesised lipid basis (Wat_Lip_Removal_L2)."),
     Block("voxel-mask", "mrsi", "Voxel mask",
           options=(("spant", "mask_xy_ellipse"), ("spant", "mask_xy_corners"),
                    ("spant", "crop_xy")),
@@ -1006,6 +1011,7 @@ def label(option: Tuple[str, str]) -> str:
     return {"fsl_mrs": "FSL-MRS", "fid_a": "FID-A", "osprey": "Osprey", "spant": "spant",
             "mrspeclab": "MRSpecLAB", "lcmodel": "LCModel", "tarquin": "TARQUIN",
             "pyamares": "pyAMARES", "vespa": "Vespa", "pastis": "PASTIS", "oxsa": "OXSA",
+            "wat_lip_l2": "Wat_Lip_Removal_L2",
             "nifti_mrs": "NIfTI-MRS tools",
             "augmentrum": "Augmentrum", "suspect": "suspect",
             _CHALLENGE: "2016 challenge", _SCORING: "MRSuite"}.get(where, where) + f" · {function}"

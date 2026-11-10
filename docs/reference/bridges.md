@@ -22,6 +22,8 @@
 
 ::: mrsuite.bridges.oxsa
 
+::: mrsuite.bridges.wat_lip_l2
+
 ::: mrsuite.bridges.suspect
 
 ::: mrsuite.bridges.nifti_mrs

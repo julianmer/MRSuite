@@ -81,6 +81,9 @@ CITATIONS: Dict[str, str] = {
             "den Boogaart A, Van Huffel S. Improved method for accurate and efficient "
             "quantification of MRS data with use of prior knowledge. J Magn Reson. "
             "1997;129(1):35-43. doi:10.1006/jmre.1997.1244",
+    "Wat_Lip_Removal_L2": "Lin L, Považan M, Berrington A, Chen Z, Barker PB. Water removal in MR "
+                          "spectroscopic imaging with L2 regularization. Magn Reson Med. "
+                          "2019;82(4):1278-1287. doi:10.1002/mrm.27824",
     "MRSpecLAB": "Xiao Y, Kaiser A, Kockisch M, et al. A graphical pipeline platform for MRS data"
                  " processing and analysis: MRSpecLAB. Front Neuroimaging. 2025;4:1610658. "
                  "doi:10.3389/fnimg.2025.1610658",

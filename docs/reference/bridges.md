@@ -24,6 +24,8 @@
 
 ::: mrsuite.bridges.wat_lip_l2
 
+::: mrsuite.bridges.specvis
+
 ::: mrsuite.bridges.suspect
 
 ::: mrsuite.bridges.nifti_mrs

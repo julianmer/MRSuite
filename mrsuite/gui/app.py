@@ -326,7 +326,7 @@ class App:
                 if isinstance(names, dict):
                     names = {n: g for n, g in names.items()
                              if not text or text in n.lower() or text in bridge}
-                    if text and not names:
+                    if not names:            # none found, or none at all (SpecVis has no steps)
                         continue
                 with ui.expansion(blocks.label((bridge, "")).rstrip(" ·"),
                                   value=bool(text) or bridge in self.opened,

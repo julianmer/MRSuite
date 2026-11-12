@@ -33,7 +33,8 @@ __version__ = "0.1.0"
 nifti_mrs_plus.set_provenance("MRSuite", __version__)
 
 _BRIDGES = {"augmentrum", "fid_a", "fsl_mrs", "lcmodel", "mrspeclab", "nifti_mrs", "osprey",
-            "oxsa", "pastis", "pyamares", "spant", "suspect", "tarquin", "vespa", "wat_lip_l2"}
+            "oxsa", "pastis", "pyamares", "spant", "specvis", "suspect", "tarquin", "vespa",
+            "wat_lip_l2"}
 
 __all__ = ["__version__", "Method", "method", *sorted(_BRIDGES)]
 

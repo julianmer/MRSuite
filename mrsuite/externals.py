@@ -63,6 +63,8 @@ REGISTRY = {
                 "4707348a9b26c9bcf99aa22d04c2e8ccbe5bf05c"),
     "simntg": ("https://github.com/mrshub/SimnTG.git",
                "98444f6db495a3e17d3d179e8f36ee1fe0c7b345"),
+    "specvis": ("https://github.com/HJZollner/SpecVis.git",
+                "8e18409bea546523e0090f9bed391633038b9e42"),
     "spinach": ("https://github.com/IlyaKuprov/Spinach.git",
                 "4138eb5fc2414a6b0f510d1e34103189599d1a58"),
     "spm12": ("https://github.com/spm/spm12.git",

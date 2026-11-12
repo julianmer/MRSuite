@@ -84,6 +84,9 @@ CITATIONS: Dict[str, str] = {
     "Wat_Lip_Removal_L2": "Lin L, Považan M, Berrington A, Chen Z, Barker PB. Water removal in MR "
                           "spectroscopic imaging with L2 regularization. Magn Reson Med. "
                           "2019;82(4):1278-1287. doi:10.1002/mrm.27824",
+    "SpecVis": "Zöllner HJ, Považan M, Hui SCN, Tapper S, Edden RAE, Oeltzschner G. Comparison of "
+               "different linear-combination modeling algorithms for short-TE proton spectra. NMR "
+               "Biomed. 2021;34(4):e4482. doi:10.1002/nbm.4482",
     "MRSpecLAB": "Xiao Y, Kaiser A, Kockisch M, et al. A graphical pipeline platform for MRS data"
                  " processing and analysis: MRSpecLAB. Front Neuroimaging. 2025;4:1610658. "
                  "doi:10.3389/fnimg.2025.1610658",

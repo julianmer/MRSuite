@@ -10,6 +10,8 @@
 #          spectra as NIfTI-MRS files, and the result comes back the same way. Out of process      #
 #          on purpose, see driver.R. Either a local R or the container built from the dockerfile   #
 #          beside this file, which mounts the repo at its own path so every path still holds.      #
+#          A toolbox needing more of R brings a driver of its own and a layer on that image         #
+#          (SpecVis: specvis.R, dockerfile.specvis).                                               #
 #                                                                                                  #
 ####################################################################################################
 
@@ -70,18 +72,22 @@ def available() -> bool:
 #*********#
 #   run   #
 #*********#
-def run(job: Dict[str, Any], folder: str, runtime: Optional[str] = None) -> Dict[str, Any]:
+def run(job: Dict[str, Any], folder: str, runtime: Optional[str] = None,
+        driver: str = DRIVER, layer: Optional[str] = None) -> Dict[str, Any]:
     """
-    Run one job through driver.R.
+    Run one job through an R driver, driver.R unless told otherwise.
 
     Args:
-        job (Dict[str, Any]): The task and its arguments, as driver.R reads them.
+        job (Dict[str, Any]): The task and its arguments, as the driver reads them.
         folder (str): Where the job, its spectra and its result live; in octave.scratch,
             so that the container sees it at the same path.
         runtime (Optional[str]): 'local', 'docker' or 'auto'. Defaults to ``RUNTIME``.
+        driver (str): The R script that runs the job.
+        layer (Optional[str]): A toolbox's own image on top of the R one, built from
+            ``dockerfile.<layer>`` beside this file, for what it needs beyond spant.
 
     Returns:
-        Dict[str, Any]: What driver.R wrote back.
+        Dict[str, Any]: What the driver wrote back.
 
     Raises:
         RuntimeError: With R's own message, if the job failed.
@@ -89,15 +95,18 @@ def run(job: Dict[str, Any], folder: str, runtime: Optional[str] = None) -> Dict
     path, result = os.path.join(folder, "job.json"), os.path.join(folder, "result.json")
     with open(path, "w") as fh:
         json.dump({**job, "result": result}, fh)
-    command = ["Rscript", DRIVER, path]
+    command = ["Rscript", driver, path]
     if resolve_runtime(runtime) == "docker":
-        docker.build(image=IMAGE, dockerfile=Path(HERE) / "dockerfile")
+        image = docker.build(image=IMAGE, dockerfile=Path(HERE) / "dockerfile")
+        if layer:
+            image = docker.build(image=f"{IMAGE}-{layer}",
+                                 dockerfile=Path(HERE) / f"dockerfile.{layer}")
         # as the host user, so what R writes stays the caller's; a bare uid has no HOME
         command = ["docker", "run", "--rm", "--user", f"{os.getuid()}:{os.getgid()}",
-                   "-e", "HOME=/tmp", *docker.mounts(), IMAGE] + command
+                   "-e", "HOME=/tmp", *docker.mounts(), image] + command
     proc = subprocess.run(command, capture_output=True, text=True)
     if proc.returncode != 0 or not os.path.exists(result):
-        raise RuntimeError(f"spant job '{job['task']}' failed:\n{proc.stderr[-2000:]}")
+        raise RuntimeError(f"R job '{job['task']}' failed:\n{proc.stderr[-2000:]}")
     with open(result) as fh:
         return json.load(fh)
 

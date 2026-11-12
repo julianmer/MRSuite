@@ -991,7 +991,8 @@ def test_a_call_blocks_line_fits_its_function(key):
         key, output = {blocks.RESULTS: ("lcm-fit", "out"), blocks.BASIS: ("basis", "basis"),
                        blocks.SPECTRA: ("ismrm2016", "spectra"),
                        blocks.SCORES: ("errors", "scores"),
-                       blocks.SEQUENCE: ("seq-press", "sequence")}.get(p.kind, ("ismrm2016", "truth"))
+                       blocks.SEQUENCE: ("seq-press", "sequence"),
+                       blocks.TABLE: ("specvis-table", "table")}.get(p.kind, ("ismrm2016", "truth"))
         graph.connect(graph.add(key), output, id, p.name)
 
     call = ast.parse(graph.code(id)[0]).body[0].value

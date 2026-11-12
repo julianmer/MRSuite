@@ -46,6 +46,7 @@ FORMATS = ["nifti", "truth", "twix", "ge", "philips", "dicom", "rda", "bruker", 
 # are scoring.score's table; a sequence is a pulse sequence a simulator plays
 SPECTRA, RESULTS, TRUTH, SIMULATED, BASIS, FILES, SCORES, SEQUENCE, ANY = \
     "spectra", "results", "truth", "simulated", "basis", "files", "scores", "sequence", "any"
+TABLE = "table"                 # SpecVis's table of fits, a row per fit (specvis.table)
 
 
 #**************************************************************************************************#
@@ -102,7 +103,9 @@ GROUPS = {g.key: g for g in [
     Group("evaluate", "Evaluate", "#7fe0e6",
           "Judge the spectra and the fits: spectral quality (SNR, linewidth), and fits against "
           "the ground truth with every analysis of MRSValidate that compares the two (Kreis et "
-          "al., NMR Biomed 2021, section 4.3), its plots, and a radar of the scores."),
+          "al., NMR Biomed 2021, section 4.3), its plots, and a radar of the scores; and fits "
+          "against each other, without a truth, in SpecVis's raincloud, correlation and "
+          "Bland-Altman plots and its statistics."),
     Group("mrsi", "MRSI", "#3a9ac7",
           "Spectroscopic imaging on a spatial NIfTI-MRS: spant's k-space, mask and voxel "
           "tools and FSL-MRS's alignment, phasing and lipid removal across the voxels; then "
@@ -130,7 +133,7 @@ class Port:
     Attributes:
         name (str): The argument it gives, or the output it is.
         kind (str): What flows: SPECTRA, RESULTS, TRUTH, SIMULATED, BASIS, FILES, SCORES,
-            SEQUENCE or ANY.
+            SEQUENCE, TABLE or ANY.
         many (bool): Takes any number of wires, as one dictionary by block name.
     """
 
@@ -372,6 +375,8 @@ _REFERENCES = ["optimal", "tCr", "water", "none"]
 _JUDGED = (Port("methods", RESULTS, many=True), Port("truth", TRUTH))
 _SCORED = (Port("scores", SCORES),)
 _SCORE = "from mrsuite.benchmark import scoring"
+_SPECVIS = ("from mrsuite.bridges import specvis",)
+_MEASURES = "['tNAA', 'tCho', 'Ins', 'Glx']"
 
 # what a toolbox's own standard pipeline passes where its function has no default of its own
 # (FID-A at 1eaa207, Osprey at 98b2e35, plain single-voxel 1H): a new block's form starts with
@@ -860,6 +865,37 @@ BLOCKS: Dict[str, Block] = {b.key: b for b in [
                "naming its measures, or by measure a spoke per measure, each scaled from the "
                "worst method to the best at the rim, a polygon per method, as bsuite draws "
                "its agents."),
+    Block("specvis-table", "evaluate", "SpecVis table", call="specvis.table", imports=_SPECVIS,
+          fields=(_choice("scaling", ["tCr", "raw", "molarity"], "'tCr'"),),
+          inputs=(Port("methods", RESULTS, many=True),), outputs=(Port("table", TABLE),),
+          help="A row per fit and a column per metabolite, each method's fits under its name "
+               "as the wire is called, laid out as SpecVis reads Osprey's, LCModel's and "
+               "TARQUIN's results: ratios to total creatine, or a scaling the fits have."),
+    Block("raincloud", "evaluate", "Raincloud", call="specvis.raincloud", imports=_SPECVIS,
+          fields=(_value("measures", _MEASURES), _value("columns", "2")),
+          inputs=(Port("frame", TABLE),), outputs=(Port("figure"),),
+          help="SpecVis's raincloud (Allen et al. 2019): every fit as a point, the boxplot, "
+               "the distribution and the mean ± SD per method, one facet per metabolite."),
+    Block("specvis-correlation", "evaluate", "Correlation (SpecVis)",
+          call="specvis.correlation", imports=_SPECVIS,
+          fields=(_value("measures", _MEASURES), _value("x"), _value("y"), _value("columns", "2")),
+          inputs=(Port("frame", TABLE),), outputs=(Port("figure"),),
+          help="One method's fits against another's per metabolite, named as the table names "
+               "them, with the regression line and Pearson's r, as the Osprey group compares "
+               "algorithms (Zöllner et al. 2021)."),
+    Block("specvis-bland-altman", "evaluate", "Bland-Altman (SpecVis)",
+          call="specvis.bland_altman", imports=_SPECVIS,
+          fields=(_value("measures", _MEASURES), _value("x"), _value("y"), _value("columns", "2")),
+          inputs=(Port("frame", TABLE),), outputs=(Port("figure"),),
+          help="Two methods' differences against their means per metabolite, with the mean "
+               "difference, its limits of agreement and a distribution ellipse."),
+    Block("specvis-statistics", "evaluate", "Statistics (SpecVis)", call="specvis.statistics",
+          imports=_SPECVIS,
+          fields=(_value("measures", _MEASURES), _choice("paired", [True, False], "True")),
+          inputs=(Port("frame", TABLE),), outputs=(Port("tables", ANY),),
+          help="Per method the descriptive statistics, then the tests for normality and equal "
+               "variances, the variance analysis they call for (ANOVA, Welch or Kruskal-"
+               "Wallis) and its post hoc tests, Bonferroni-corrected."),
     # other
     *[Block(key, "other", title, options=tuple(options), help=help)
       for key, title, options, help in _OTHER],
@@ -1011,7 +1047,7 @@ def label(option: Tuple[str, str]) -> str:
     return {"fsl_mrs": "FSL-MRS", "fid_a": "FID-A", "osprey": "Osprey", "spant": "spant",
             "mrspeclab": "MRSpecLAB", "lcmodel": "LCModel", "tarquin": "TARQUIN",
             "pyamares": "pyAMARES", "vespa": "Vespa", "pastis": "PASTIS", "oxsa": "OXSA",
-            "wat_lip_l2": "Wat_Lip_Removal_L2",
+            "wat_lip_l2": "Wat_Lip_Removal_L2", "specvis": "SpecVis",
             "nifti_mrs": "NIfTI-MRS tools",
             "augmentrum": "Augmentrum", "suspect": "suspect",
             _CHALLENGE: "2016 challenge", _SCORING: "MRSuite"}.get(where, where) + f" · {function}"

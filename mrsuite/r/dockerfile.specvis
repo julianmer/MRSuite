@@ -1,0 +1,23 @@
+####################################################################################################
+#                                        dockerfile.specvis                                        #
+####################################################################################################
+#                                                                                                  #
+# Authors: J. M.                                                                                   #
+#                                                                                                  #
+# Created: 10/11/26                                                                                #
+#                                                                                                  #
+# Purpose: The R packages SpecVis loads, on MRSuite's R image: ggplot2 and its extensions, the     #
+#          statistics packages, and the three its raincloud script checks for. One CRAN snapshot  #
+#          pins them all, so the image draws the same figures tomorrow. Built by                   #
+#          mrsuite/r/__init__.py as the layer "specvis".                                           #
+#                                                                                                  #
+####################################################################################################
+
+FROM mrsuite-r
+
+# CRAN as of 7 Nov 2026 (ggplot2 4.0.3, ggpmisc 1.0.0), as Ubuntu noble binaries: the list of
+# its dependencies.R, and the three its raincloud script checks for
+RUN install2.r --error --skipinstalled -r https://p3m.dev/cran/__linux__/noble/2026-11-07 \
+    ggplot2 dplyr lavaan plyr cowplot rmarkdown patchwork RColorBrewer moments ggnewscale readr \
+    caTools bitops gridExtra svglite see tidyr ggpmisc lawstat onewaytests ggExtra ggthemes \
+    weights R.matlab smooth Hmisc

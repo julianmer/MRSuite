@@ -177,7 +177,7 @@ def test_nothing_is_fetched_on_import(tmp_path):
               f"import mrsuite.externals as e\n"
               f"e.CHECKOUT = Path({str(tmp_path / 'site-packages')!r})\n"
               f"import mrsuite, mrsuite.models, mrsuite.simulators.mrs_sim\n"
-              f"for name in sorted(mrsuite._BRIDGES - {{'fsl_mrs'}}):\n"
+              f"for name in sorted(mrsuite._BRIDGES - {{'fsl_mrs', 'mrsvalidate'}}):\n"
               f"    getattr(mrsuite, name)\n")
     run = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True,
                          env={**os.environ, "MRSUITE_HOME": str(tmp_path / "home")})

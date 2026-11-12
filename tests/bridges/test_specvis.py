@@ -103,7 +103,14 @@ def test_what_the_plots_cannot_pair_is_refused_before_r_is_needed():
 #*************#
 @pytest.fixture(scope="module")
 def example():
-    """SpecVis's own example data: Big GABA, three sites, by three algorithms."""
+    """SpecVis's own example data: Big GABA, three sites, by three algorithms. Skipped where
+    R lacks SpecVis's packages."""
+    try:
+        specvis.runtime()
+    except RuntimeError as error:
+        if "needs the R packages" not in str(error):
+            raise
+        pytest.skip("R without SpecVis's packages")
     return externals.ensure("specvis") / "examples" / "data"
 
 
@@ -221,7 +228,7 @@ def test_the_statistics_are_those_of_example_md(frame):
 
 
 @needs_r
-def test_the_runtime_says_what_it_has():
+def test_the_runtime_says_what_it_has(example):
     found = specvis.runtime()
 
     assert found["runtime"] in ("local", "docker") and found["ggplot2"]

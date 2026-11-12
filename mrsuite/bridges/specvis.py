@@ -37,12 +37,16 @@ DRIVER = os.path.join(r.HERE, "specvis.R")
 Limits = Optional[Sequence[Tuple[float, float]]]
 
 # the names SpecVis's importers give the sums (Osprey's), so one table serves every fitter:
-# LCModel's and TARQUIN's own names for them, and the singles they are made of
+# LCModel's and TARQUIN's own names for them, and the singles they are made of (a basis set
+# may spell phosphocholine PCho, as the 2016 challenge's does)
 RENAMED = {"NAA+NAAG": "tNAA", "Cr+PCr": "tCr", "PCh+GPC": "tCho", "GPC+PCh": "tCho",
-           "Glu+Gln": "Glx", "Glc+Tau": "GlcTau", "-CrCH2": "CrCH2",
+           "Glu+Gln": "Glx", "Glc+Tau": "GlcTau", "-CrCH2": "CrCH2", "PCho": "PCh",
            "TNAA": "tNAA", "TCr": "tCr", "TCho": "tCho", "Glth": "GSH", "PEth": "PE"}
 SUMS = {"tNAA": ("NAA", "NAAG"), "tCr": ("Cr", "PCr"), "tCho": ("GPC", "PCh"),
         "Glx": ("Glu", "Gln")}
+
+# the measures SpecVis's own example compares (Big GABA, Zöllner et al. 2021): the default
+MEASURES = ("tNAA", "tCho", "Ins", "Glx")
 
 
 #***********#
@@ -167,6 +171,8 @@ def _plot(func: str, frames: Union[pd.DataFrame, List[pd.DataFrame]], args: Dict
 
     if path and os.path.splitext(path)[1] not in (".pdf", ".png", ".svg"):
         raise ValueError(f"{path}: write a .pdf, .png or .svg")
+    for frame in [frames] if isinstance(frames, pd.DataFrame) else frames:
+        _has(frame, args["MeasureVar"])
     folder = scratch("mrsuite_specvis_")
     try:
         job: Dict[str, Any] = {"task": "plot", "func": func, "args": args,
@@ -188,6 +194,16 @@ def _plot(func: str, frames: Union[pd.DataFrame, List[pd.DataFrame]], args: Dict
         return figure
     finally:
         shutil.rmtree(folder, ignore_errors=True)
+
+
+#*********#
+#   has   #
+#*********#
+def _has(frame: pd.DataFrame, measures: Sequence[str]) -> None:
+    """A measure the table lacks is said here, not by R."""
+    missing = [m for m in measures if m not in frame.columns]
+    if missing:
+        raise ValueError(f"no column {missing[0]!r} in the table; it has {list(frame.columns)}")
 
 
 #***********#
@@ -219,7 +235,12 @@ def _distribution(func: str, frame: pd.DataFrame, measures: Sequence[str], quant
                   by: str, limits: Limits, title: Optional[str], columns: int,
                   size: Tuple[float, float], path: Optional[str]) -> Any:
     """The raincloud, box and violin plots, which share their arguments; SpecVis groups
-    them by the Group column alone, so ``by`` becomes it."""
+    them by the Group column alone, so ``by`` becomes it. Its raincloud, as published,
+    sets its axes from the limits whether given or not, so each measure's range stands
+    in where none are."""
+    _has(frame, measures)
+    if func == "spvs_RainCloud" and limits is None:
+        limits = [(float(frame[m].min()), float(frame[m].max())) for m in measures]
     frame = frame.assign(Group=frame[by] if by in frame.columns else "all")
     args = {"Quant": quant, "MeasureVar": list(measures), "GroupVars": ["Group"],
             **_limits(limits, measures), "colNum": int(columns)}
@@ -231,7 +252,7 @@ def _distribution(func: str, frame: pd.DataFrame, measures: Sequence[str], quant
 #***************#
 #   raincloud   #
 #***************#
-def raincloud(frame: pd.DataFrame, measures: Sequence[str], quant: str = "/ [tCr]",
+def raincloud(frame: pd.DataFrame, measures: Sequence[str] = MEASURES, quant: str = "/ [tCr]",
               by: str = "Group", limits: Limits = None, title: Optional[str] = None,
               columns: int = 2, size: Tuple[float, float] = (10, 10),
               path: Optional[str] = None) -> Any:
@@ -242,10 +263,12 @@ def raincloud(frame: pd.DataFrame, measures: Sequence[str], quant: str = "/ [tCr
 
     Args:
         frame (pd.DataFrame): The table (``table`` or ``load``).
-        measures (Sequence[str]): Its columns to draw, e.g. ['tNAA', 'tCho', 'Ins', 'Glx'].
+        measures (Sequence[str]): Its columns to draw; by default MEASURES, the four
+            SpecVis's own example compares.
         quant (str): The axis label after the measure's name.
         by (str): The column that groups the rows; 'Group', the methods of ``table``.
-        limits: The axis limits, one (lower, upper) per measure.
+        limits: The axis limits, one (lower, upper) per measure; by default each
+            measure's range.
         title (Optional[str]): The figure's title.
         columns (int): Facets per row.
         size (Tuple[float, float]): Width and height in inches.
@@ -262,7 +285,7 @@ def raincloud(frame: pd.DataFrame, measures: Sequence[str], quant: str = "/ [tCr
 #*************#
 #   boxplot   #
 #*************#
-def boxplot(frame: pd.DataFrame, measures: Sequence[str], quant: str = "/ [tCr]",
+def boxplot(frame: pd.DataFrame, measures: Sequence[str] = MEASURES, quant: str = "/ [tCr]",
             by: str = "Group", limits: Limits = None, title: Optional[str] = None,
             columns: int = 2, size: Tuple[float, float] = (10, 10),
             path: Optional[str] = None) -> Any:
@@ -274,7 +297,7 @@ def boxplot(frame: pd.DataFrame, measures: Sequence[str], quant: str = "/ [tCr]"
 #************#
 #   violin   #
 #************#
-def violin(frame: pd.DataFrame, measures: Sequence[str], quant: str = "/ [tCr]",
+def violin(frame: pd.DataFrame, measures: Sequence[str] = MEASURES, quant: str = "/ [tCr]",
            by: str = "Group", limits: Limits = None, title: Optional[str] = None,
            columns: int = 2, size: Tuple[float, float] = (10, 10),
            path: Optional[str] = None) -> Any:
@@ -286,13 +309,16 @@ def violin(frame: pd.DataFrame, measures: Sequence[str], quant: str = "/ [tCr]",
 #***********#
 #   pairs   #
 #***********#
-def _pairs(frame: pd.DataFrame, x: str, y: str, by: Optional[str],
-           hue: Optional[str]) -> Tuple[List[pd.DataFrame], Dict[str, Any]]:
+def _pairs(frame: pd.DataFrame, x: str, y: str, by: Optional[str], hue: Optional[str],
+           measures: Sequence[str]) -> Tuple[List[pd.DataFrame], Dict[str, Any]]:
     """
     Two methods' rows as SpecVis's correlation and Bland-Altman plots take them: a frame
     per method and group, each named by both, the groups the values of ``by`` in order of
-    appearance, and the hue a column of every frame.
+    appearance, and the hue a column of every frame. A pair with a measure one method has
+    no value for (a fit that failed) is left out: SpecVis takes the measure's range over
+    the data, and NA there halts it.
     """
+    _has(frame, measures)
     if "Group" not in frame.columns:
         raise ValueError("the table has no Group column to tell the methods apart")
     for name in (x, y):
@@ -316,6 +342,10 @@ def _pairs(frame: pd.DataFrame, x: str, y: str, by: Optional[str],
             raise ValueError(f"{x} has {len(frames[k])} rows and {y} {len(frames[k + half])}"
                              + (f" in group {named[k]!r}" if by else "")
                              + ": SpecVis pairs them one to one")
+        whole = (frames[k][list(measures)].notna().all(axis=1)
+                 & frames[k + half][list(measures)].notna().all(axis=1))
+        frames[k] = frames[k][whole].reset_index(drop=True)
+        frames[k + half] = frames[k + half][whole].reset_index(drop=True)
     return frames, {"GroupVarNames1": methods, "GroupVarNames2": named,
                     "HueVar": [hue] * len(frames) if hue else None}
 
@@ -323,7 +353,7 @@ def _pairs(frame: pd.DataFrame, x: str, y: str, by: Optional[str],
 #*****************#
 #   correlation   #
 #*****************#
-def correlation(frame: pd.DataFrame, measures: Sequence[str], x: str, y: str,
+def correlation(frame: pd.DataFrame, x: str, y: str, measures: Sequence[str] = MEASURES,
                 by: Optional[str] = None, hue: Optional[str] = None, quant: str = " / [tCr]",
                 limits: Limits = None, title: Optional[str] = None, columns: int = 2,
                 facet: bool = False, size: Tuple[float, float] = (10, 10),
@@ -335,8 +365,8 @@ def correlation(frame: pd.DataFrame, measures: Sequence[str], x: str, y: str,
 
     Args:
         frame (pd.DataFrame): The table, with the two methods under Group.
-        measures (Sequence[str]): Its columns to draw.
         x, y (str): The two methods, as Group names them; x goes along the x axis.
+        measures (Sequence[str]): Its columns to draw; by default MEASURES.
         by (Optional[str]): A column that groups the rows (a vendor, a site), each group
             its own colour and correlation.
         hue (Optional[str]): A column of sub-groups within those, as the point style.
@@ -351,11 +381,14 @@ def correlation(frame: pd.DataFrame, measures: Sequence[str], x: str, y: str,
     Returns:
         matplotlib.figure.Figure: The figure, as a picture of what R drew.
 
+    A spectrum one of the two has no value for (a fit that failed, NaN) is left out of
+    the pairs.
+
     Raises:
         ValueError: For a method or column the table lacks, rows that do not pair up,
             or limits that do not match the measures.
     """
-    frames, grouped = _pairs(frame, x, y, by, hue)
+    frames, grouped = _pairs(frame, x, y, by, hue, measures)
     args = {"Quant": quant, "MeasureVar": list(measures), **grouped,
             **_limits(limits, measures), "colNum": int(columns)}
     if title is not None:
@@ -367,7 +400,7 @@ def correlation(frame: pd.DataFrame, measures: Sequence[str], x: str, y: str,
 #******************#
 #   bland-altman   #
 #******************#
-def bland_altman(frame: pd.DataFrame, measures: Sequence[str], x: str, y: str,
+def bland_altman(frame: pd.DataFrame, x: str, y: str, measures: Sequence[str] = MEASURES,
                  by: Optional[str] = None, hue: Optional[str] = None,
                  quant: str = " / [tCr]", limits: Limits = None, differences: Limits = None,
                  title: Optional[str] = None, columns: int = 2,
@@ -378,9 +411,10 @@ def bland_altman(frame: pd.DataFrame, measures: Sequence[str], x: str, y: str,
     each with a distribution ellipse (Zöllner et al. 2021, Figure 4).
 
     Args:
-        frame, measures, x, y, by, hue, quant, title, columns, size, path: As in
+        frame, x, y, measures, by, hue, quant, title, columns, size, path: As in
             ``correlation``.
-        limits: The limits of the means' axis, one (lower, upper) per measure.
+        limits: The limits of the means' axis, one (lower, upper) per measure; by default
+            the means' range, as SpecVis's Bland-Altman needs them.
         differences: The limits of the differences' axis, likewise; given with ``limits``.
 
     Returns:
@@ -388,11 +422,17 @@ def bland_altman(frame: pd.DataFrame, measures: Sequence[str], x: str, y: str,
     """
     if (limits is None) != (differences is None):
         raise ValueError("limits and differences go together, one pair per measure each")
-    frames, grouped = _pairs(frame, x, y, by, hue)
+    frames, grouped = _pairs(frame, x, y, by, hue, measures)
+    if limits is None:             # SpecVis's Bland-Altman, as published, halts without them
+        half = len(frames) // 2
+        xs, ys = (pd.concat(frames[k:k + half], ignore_index=True) for k in (0, half))
+        xs, ys = xs[list(measures)], ys[list(measures)]
+        means, spans = (xs + ys) / 2, ys - xs
+        limits = [(float(means[m].min()), float(means[m].max())) for m in measures]
+        differences = [(float(spans[m].min()), float(spans[m].max())) for m in measures]
     args = {"Quant": quant, "MeasureVar": list(measures), **grouped, "colNum": int(columns)}
-    if limits is not None:
-        means, spans = _limits(limits, measures), _limits(differences, measures, "differences")
-        args.update({k: means[k] + spans[k] for k in means})
+    means, spans = _limits(limits, measures), _limits(differences, measures, "differences")
+    args.update({k: means[k] + spans[k] for k in means})
     if title is not None:
         args["title"] = title
     return _plot("spvs_BlandAltman", frames, args, size, path)
@@ -401,7 +441,7 @@ def bland_altman(frame: pd.DataFrame, measures: Sequence[str], x: str, y: str,
 #****************#
 #   statistics   #
 #****************#
-def statistics(frame: pd.DataFrame, measures: Sequence[str],
+def statistics(frame: pd.DataFrame, measures: Sequence[str] = MEASURES,
                paired: bool = True) -> Dict[str, Union[pd.DataFrame, str]]:
     """
     SpecVis's statistics over the groups: descriptive statistics, Shapiro-Wilk per group,
@@ -411,7 +451,7 @@ def statistics(frame: pd.DataFrame, measures: Sequence[str],
 
     Args:
         frame (pd.DataFrame): The table, grouped by its Group column.
-        measures (Sequence[str]): Its columns to test.
+        measures (Sequence[str]): Its columns to test; by default MEASURES.
         paired (bool): Paired post hoc tests, for the same spectra under every group;
             SpecVis's unpaired ones hold for two groups.
 
@@ -419,6 +459,7 @@ def statistics(frame: pd.DataFrame, measures: Sequence[str],
         Dict[str, Union[pd.DataFrame, str]]: SpecVis's tables under its own names, and a
             line where it has nothing to tabulate.
     """
+    _has(frame, measures)
     folder = scratch("mrsuite_specvis_")
     try:
         out = _run({"task": "statistics", "frame": _write(frame, folder, "frame"),

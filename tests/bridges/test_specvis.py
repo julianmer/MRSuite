@@ -46,7 +46,7 @@ def test_the_table_names_the_sums_as_specvis_does_and_pairs_the_rows():
     lcm = [_fit("lcmodel", **{"NAA": 10.0, "NAAG": 1.0, "Cr": 6.0, "PCr": 2.0,
                               "NAA+NAAG": 11.0, "Cr+PCr": 8.0, "GPC+PCh": 2.0, "GPC": 1.5,
                               "PCh": 0.5})]
-    fsl = [_fit("fsl", NAA=9.0, NAAG=2.0, Cr=5.0, PCr=3.0, GPC=1.0, PCh=1.0)]
+    fsl = [_fit("fsl", NAA=9.0, NAAG=2.0, Cr=5.0, PCr=3.0, GPC=1.0, PCho=1.0)]   # the basis's name
     frame = specvis.table({"LCModel": lcm, "FSL-MRS": fsl},
                           covariates=pd.DataFrame({"age (years)": [30]}))
 
@@ -75,19 +75,27 @@ def test_what_the_plots_cannot_pair_is_refused_before_r_is_needed():
     frame = pd.DataFrame({"tNAA": [1.0, 1.1, 1.2], "Group": ["A", "A", "B"],
                           "site": ["x", "y", "x"]})
     with pytest.raises(ValueError, match="no 'C'"):
-        specvis.correlation(frame, ["tNAA"], x="A", y="C")
+        specvis.correlation(frame, "A", "C", ["tNAA"])
     with pytest.raises(ValueError, match="pairs them one to one"):
-        specvis.correlation(frame, ["tNAA"], x="A", y="B")
+        specvis.correlation(frame, "A", "B", ["tNAA"])
+    with pytest.raises(ValueError, match="no column 'tCho'"):
+        specvis.correlation(frame.iloc[[0, 2]].assign(tNAA=[np.nan, 1.0]), "A", "B", ["tCho"])
     with pytest.raises(ValueError, match="no column 'vendor'"):
-        specvis.bland_altman(frame.iloc[[0, 2]], ["tNAA"], x="A", y="B", by="vendor")
+        specvis.bland_altman(frame.iloc[[0, 2]], "A", "B", ["tNAA"], by="vendor")
     with pytest.raises(ValueError, match="2 limits for 1 measures"):
-        specvis.correlation(frame.iloc[[0, 2]], ["tNAA"], x="A", y="B", limits=LIMITS[:2])
+        specvis.correlation(frame.iloc[[0, 2]], "A", "B", ["tNAA"], limits=LIMITS[:2])
     with pytest.raises(ValueError, match="go together"):
-        specvis.bland_altman(frame.iloc[[0, 2]], ["tNAA"], x="A", y="B", limits=LIMITS[:1])
+        specvis.bland_altman(frame.iloc[[0, 2]], "A", "B", ["tNAA"], limits=LIMITS[:1])
     with pytest.raises(ValueError, match="no Group column"):
-        specvis.correlation(frame.drop(columns="Group"), ["tNAA"], x="A", y="B")
+        specvis.correlation(frame.drop(columns="Group"), "A", "B", ["tNAA"])
     with pytest.raises(ValueError, match=r"\.pdf, \.png or \.svg"):
         specvis.raincloud(frame, ["tNAA"], path="figure.eps")
+    with pytest.raises(ValueError, match="no column 'tCho' in the table"):
+        specvis.raincloud(frame, ["tNAA", "tCho"])
+    with pytest.raises(ValueError, match="no column 'tCho' in the table"):
+        specvis.correlation(frame.iloc[[0, 2]], "A", "B", ["tCho"])
+    with pytest.raises(ValueError, match="no column 'tCho' in the table"):
+        specvis.statistics(frame, ["tCho"])
 
 
 #*************#
@@ -161,6 +169,7 @@ def test_the_distribution_plots_draw_and_write(frame, tmp_path):
                              columns=4, size=(20, 5), path=str(tmp_path / "raincloud.pdf"))
     assert isinstance(made, Figure) and (tmp_path / "raincloud.pdf").stat().st_size > 0
     assert isinstance(specvis.boxplot(frame, MEASURES[:2], by="vendor", limits=LIMITS[:2]), Figure)
+    assert isinstance(specvis.raincloud(frame, MEASURES[:2]), Figure)   # its limits from the data
     assert isinstance(specvis.violin(frame, MEASURES[:2], path=str(tmp_path / "v.png")), Figure)
     assert (tmp_path / "v.png").stat().st_size > 0
 
@@ -169,20 +178,24 @@ def test_the_distribution_plots_draw_and_write(frame, tmp_path):
 def test_the_comparison_plots_draw_pooled_and_by_group(frame, tmp_path):
     from matplotlib.figure import Figure
 
-    pooled = specvis.correlation(frame, MEASURES, x="Osprey", y="LCModel", limits=LIMITS,
+    pooled = specvis.correlation(frame, "Osprey", "LCModel", MEASURES, limits=LIMITS,
                                  columns=4)
-    grouped = specvis.correlation(frame, MEASURES, x="Osprey", y="LCModel", by="vendor",
+    grouped = specvis.correlation(frame, "Osprey", "LCModel", MEASURES, by="vendor",
                                   hue="group name", limits=LIMITS, columns=4,
                                   path=str(tmp_path / "correlation.svg"))
-    facets = specvis.correlation(frame, MEASURES, x="Osprey", y="Tarquin", by="vendor",
+    facets = specvis.correlation(frame, "Osprey", "Tarquin", MEASURES, by="vendor",
                                  hue="group name", facet=True, size=(30, 10))
-    agreement = specvis.bland_altman(frame, MEASURES, x="Osprey", y="LCModel", by="vendor",
+    agreement = specvis.bland_altman(frame, "Osprey", "LCModel", MEASURES, by="vendor",
                                      hue="group name", limits=[(1, 2.1), (0.1, 0.33),
                                                                (0.5, 1.22), (1, 2.75)],
                                      differences=[(-0.5, 0.5), (-0.1, 0.1), (-0.5, 0.5),
                                                   (-1, 1)], columns=4)
 
-    for made in (pooled, grouped, facets, agreement):
+    failed = frame.copy()                       # a fit that failed pairs with nothing
+    failed.loc[failed.index[0], "tNAA"] = np.nan
+    one = specvis.correlation(failed, "Osprey", "LCModel", ["tNAA"])
+    ranged = specvis.bland_altman(frame, "Osprey", "LCModel", MEASURES[:2])   # limits from the data
+    for made in (pooled, grouped, facets, agreement, one, ranged):
         assert isinstance(made, Figure)
     assert (tmp_path / "correlation.svg").read_text().startswith("<?xml")
 
@@ -214,3 +227,12 @@ def test_the_runtime_says_what_it_has():
     assert found["runtime"] in ("local", "docker") and found["ggplot2"]
     assert {"spvs_RainCloud", "spvs_Correlation", "spvs_BlandAltman"} <= set(found["functions"])
     assert specvis.version() == "8e18409"
+
+
+#**************#
+#   defaults   #
+#**************#
+def test_the_gui_shows_the_measures_the_bridge_draws_by_default():
+    from mrsuite.gui import blocks
+
+    assert blocks._MEASURES == repr(list(specvis.MEASURES))

@@ -31,7 +31,7 @@ HIGHER = {"lin_ccc", "robust_ccc", "pearson_r", "r_squared_direct", "adjusted_r_
 ONE = {"passing_bablok", "deming", "theil_sen", "regression_metrics", "concise_score_original"}
 SIGNED = {"bias", "mpe", "mepe", "mean", "median", "bland_altman", "equivalence_test_1",
           "equivalence_test_2", "equivalence_test_3"}
-OWN = {"mae", "bias", "mosae"}                 # MRSuite's own error measures (scoring.py)
+OWN = {"mae", "bias", "mosae"}             # MRSuite's own error measures (the MRSValidate bridge)
 # the one analysis MRSValidate runs under a name other than its function's (meta.method)
 RUN_AS = {"manuscript_robust_ccc": "robust_ccc"}
 # how a metric is labelled on the radar, by its name in the score tables; others by that name
@@ -240,8 +240,10 @@ def aspect(metric: str, analysis: str) -> str:
     """The aspect a measure judges, as MRSValidate groups its analyses: the module of the
     analysis that ran, or of the metric's own name; MRSuite's own errors (MAE, bias, MOSAE)
     are errors."""
-    from mrsuite.benchmark.scoring import analyses
+    if metric in OWN:
+        return "Errors"
+    from mrsuite.bridges.mrsvalidate import analyses
 
     modules = {name.split(".")[1]: name.split(".")[0] for name in analyses()}
-    module = "errors" if metric in OWN else modules.get(analysis) or modules.get(metric, "errors")
+    module = modules.get(analysis) or modules.get(metric, "errors")
     return ASPECTS.get(module, module.replace("_", " ").capitalize())

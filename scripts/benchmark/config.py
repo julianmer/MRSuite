@@ -26,7 +26,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence
 from mrsvalidate.analysis import agreement, descriptive, errors, method_comparison, regression
 
 from nifti_mrs_plus import NIfTI_MRS_Plus
-from mrsuite.benchmark import bias, mae
+from mrsuite.bridges.mrsvalidate import bias, mae
 from mrsuite.bridges import fsl_mrs, lcmodel, osprey, pyamares, spant, tarquin, vespa
 from mrsuite.core.method import method
 from mrsuite.core.provenance import mrsuite_version

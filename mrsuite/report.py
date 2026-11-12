@@ -107,6 +107,9 @@ CITATIONS: Dict[str, str] = {
                  "source software for proton magnetic resonance spectroscopic imaging data "
                  "analysis. Int J Imaging Syst Technol. 2022;32(4):1068-1083. "
                  "doi:10.1002/ima.22748",
+    "MRSValidate": "LaMaster JT, Igwe KC, Near J, Reyes M, Kreis R, Rizzo R. Laying the Foundation"
+                   " for the Clinical Translation of Deep Learning-based Spectral Fitting Models in"
+                   " Magnetic Resonance Spectroscopy. 2026.",
     "Augmentrum": "LaMaster JT, Merkofer JP, Igwe KC. Augmentrum: A Data Augmentation Package for"
                   " MR Spectroscopy. Abstract 05685. ISMRM Annual Meeting; 2026; Cape Town, South"
                   " Africa.",

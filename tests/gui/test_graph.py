@@ -514,9 +514,9 @@ def test_an_input_taking_many_gets_them_by_name():
     graph.set(score, "output_dir", "runs")
 
     assert graph.code(score)[0] == (
-        "errors_ = scoring.score({'fsl_mrs_fit': fsl_mrs_fit, 'fsl_mrs_fit_2': fsl_mrs_fit_2}, "
-        "ismrm2016_truth, references=['optimal'], output_dir='runs', "
-        "metrics={'mae': scoring.mae})")
+        "errors_ = mrsvalidate.score({'fsl_mrs_fit': fsl_mrs_fit, "
+        "'fsl_mrs_fit_2': fsl_mrs_fit_2}, ismrm2016_truth, references=['optimal'], "
+        "output_dir='runs', metrics={'mae': mrsvalidate.mae})")
 
 
 #***************#
@@ -580,13 +580,13 @@ def test_wires_into_one_input_never_share_a_name_nor_take_another_inputs():
 
 @needs_mrsvalidate
 def test_every_analysis_score_runs_has_a_block():
-    from mrsuite.benchmark import scoring
+    from mrsuite.bridges import mrsvalidate
 
     offered = [(where.rsplit(".", 1)[-1], f) for b in blocks.BLOCKS.values()
                for where, f in b.analyses]
 
-    assert sorted(offered) == sorted([("scoring", "mae"), ("scoring", "bias"),
-                                      *(tuple(k.split(".")) for k in scoring.analyses())])
+    assert sorted(offered) == sorted([("mrsvalidate", "mae"), ("mrsvalidate", "bias"),
+                                      *(tuple(k.split(".")) for k in mrsvalidate.analyses())])
 
 
 @needs_challenge
@@ -970,7 +970,7 @@ def test_a_thumbnail_of_raw_coils_is_their_magnitude():
 #   call lines   #
 #****************#
 @pytest.mark.parametrize("key", [
-    pytest.param(k, marks=[mark for mark, module in ((needs_mrsvalidate, "mrsuite.benchmark"),
+    pytest.param(k, marks=[mark for mark, module in ((needs_mrsvalidate, "mrsvalidate"),
                                                      (needs_fsl_mrs, "fsl_mrs"))
                            if any(module in i for i in b.imports)])
     for k, b in blocks.BLOCKS.items() if b.call and k != "load"])

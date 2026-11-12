@@ -29,8 +29,7 @@ from typing import Optional
 
 import numpy as np
 
-from mrsuite import models
-from mrsuite.benchmark import scoring
+from mrsuite import models, mrsvalidate
 from mrsuite.core.pipeline import Pipeline
 from mrsuite.datasets import challenge2016
 from mrsuite.models.mlp import MLP
@@ -65,8 +64,8 @@ def main(steps: int, n: Optional[int], out: Path) -> None:
     trained = models.load(str(checkpoint))                     # weights, recipe and all
     spectra, _, truth = challenge2016.load(n)
     fits = Pipeline([trained]).run(spectra)                    # a model is a step
-    scores = scoring.score({"QuantMLP": fits}, truth, references=["optimal"],
-                           metrics={"mosae": scoring.mae})
+    scores = mrsvalidate.score({"QuantMLP": fits}, truth, references=["optimal"],
+                               metrics={"mosae": mrsvalidate.mae})
     print(scores.to_string())
     print(recipe.table(trained.recipe))                       # how it was trained, as MRSsynMRS
     print(f"the checkpoint and its recipe.json are in {checkpoint}")

@@ -3,8 +3,7 @@
 The README's example fits the 2016 fitting challenge with two fitters and scores them:
 
 ```python
-from mrsuite import io, lcmodel, tarquin
-from mrsuite.benchmark import scoring
+from mrsuite import io, lcmodel, mrsvalidate, tarquin
 from mrsuite.core.pipeline import Pipeline
 from mrsuite.datasets import challenge2016
 
@@ -12,7 +11,8 @@ spectra, water, truth = challenge2016.load()            # fetched on first use
 basis = io.basis(challenge2016.BASIS)
 fits = {"LCModel": Pipeline([lcmodel.step.fit(basis=basis)]).run(spectra),
         "TARQUIN": Pipeline([tarquin.step.fit(basis=basis)]).run(spectra)}
-scores = scoring.score(fits, truth, references=["optimal"], metrics={"mosae": scoring.mae})
+scores = mrsvalidate.score(fits, truth, references=["optimal"],
+                           metrics={"mosae": mrsvalidate.mae})
 ```
 
 ## Steps

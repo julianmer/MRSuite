@@ -40,7 +40,7 @@ from mrsuite.gui.__main__ import main
 from mrsuite.simulators import mrs_sim
 uses = {"mrsuite.bridges.fsl_mrs": lambda: mrsuite.fsl_mrs,
         "mrsuite.bridges.augmentrum": lambda: mrsuite.augmentrum,
-        "mrsuite.benchmark": lambda: importlib.import_module("mrsuite.benchmark"),
+        "mrsuite.bridges.mrsvalidate": lambda: mrsuite.mrsvalidate,
         "augmentrum": lambda: mrsi_challenge._module(mrsi_challenge.DATA_DIR),
         "compile_basis": lambda: mrs_sim.compile_basis("x.BASIS", "x.mat", te=30),
         "gui": lambda: main([])}
@@ -61,7 +61,7 @@ for name, use in uses.items():
     assert run.returncode == 0, run.stderr
     for line in ("mrsuite.bridges.fsl_mrs FSL-MRS is not installed: conda install",
                  "mrsuite.bridges.augmentrum Augmentrum is not installed: pip install augmentrum",
-                 "mrsuite.benchmark MRSValidate is not installed: pip install",
+                 "mrsuite.bridges.mrsvalidate MRSValidate is not installed: pip install",
                  "augmentrum Augmentrum is not installed: pip install augmentrum",
                  "compile_basis FSL-MRS is not installed: conda install",
                  "gui The GUI needs nicegui, which comes with MRSuite: pip install mrsuite"):

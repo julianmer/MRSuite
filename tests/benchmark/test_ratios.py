@@ -12,7 +12,6 @@
 import numpy as np
 import pytest
 
-pytest.importorskip("mrsvalidate")
 from mrsuite.benchmark import scoring
 from mrsuite.core.result import FitResult
 
@@ -51,3 +50,14 @@ def test_ratios_need_creatine_and_only_know_it():
     assert np.isnan(scoring.ratios([FitResult(method="m:M", metabolites=["Cr", "NAA"],
                                               concentrations={"raw": {"Cr": 2.0, "NAA": np.nan}})]
                                    )[0].concentrations["tCr"]["NAA"])
+
+
+def test_a_fit_without_any_creatine_has_no_ratios():
+    """A fitter can put zero on both Cr and PCr (one did on a 2016 challenge spectrum): no
+    reference to take, so every ratio is NaN rather than a division by zero."""
+    fit = FitResult(method="m:M", metabolites=["Cr", "PCr", "NAA"],
+                    concentrations={"raw": {"Cr": 0.0, "PCr": 0.0, "NAA": 1.0}})
+
+    out, = scoring.ratios([fit])
+
+    assert all(np.isnan(v) for v in out.concentrations["tCr"].values())

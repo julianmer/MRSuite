@@ -43,7 +43,7 @@ FORMATS = ["nifti", "truth", "twix", "ge", "philips", "dicom", "rda", "bruker", 
 # what flows along a wire; 'any' meets everything. A challenge's truth is concentrations per
 # spectrum, as scoring takes it; a simulation's is MRS-Sim's own (amplitudes, signals); a
 # basis is a basis set (mrsuite.core.basis); files are one written for another tool; scores
-# are scoring.score's table; a sequence is a pulse sequence a simulator plays
+# are mrsvalidate.score's table; a sequence is a pulse sequence a simulator plays
 SPECTRA, RESULTS, TRUTH, SIMULATED, BASIS, FILES, SCORES, SEQUENCE, ANY = \
     "spectra", "results", "truth", "simulated", "basis", "files", "scores", "sequence", "any"
 TABLE = "table"                 # SpecVis's table of fits, a row per fit (specvis.table)
@@ -157,7 +157,7 @@ class Block:
     along; its options are the toolboxes' functions that do it, as (bridge, function),
     and its form is the chosen function's arguments. A call is any other Python call,
     written as ``call(...)`` with the fields it declares; a score is a call of
-    scoring.score with one of its analyses, whose own arguments join its form.
+    mrsvalidate.score with one of its analyses, whose own arguments join its form.
 
     Attributes:
         key (str): Its name in code and in a saved graph.
@@ -338,9 +338,9 @@ _CHALLENGE = "mrsuite.datasets.challenge2016"
 ZOO = {"wand": ("MRSuite/wand-ismrm2016",),
        "mlp": ("MRSuite/mlp-supervised-7t-slaser", "MRSuite/mlp-selfsupervised-7t-slaser")}
 
-# MRSValidate's analyses that compare fits with the ground truth (scoring.analyses lists
+# MRSValidate's analyses that compare fits with the ground truth (mrsvalidate.analyses lists
 # them; a test keeps the two the same), a block per module of it, MRSuite's MAE and bias first
-_SCORING, _MRSV = "mrsuite.benchmark.scoring", "mrsvalidate.analysis"
+_SCORING, _MRSV = "mrsuite.bridges.mrsvalidate", "mrsvalidate.analysis"
 _SCORES = [
     ("errors", "Errors",
      [(_SCORING, "mae"), (_SCORING, "bias"),
@@ -374,7 +374,8 @@ _SCORES = [
 _REFERENCES = ["optimal", "tCr", "water", "none"]
 _JUDGED = (Port("methods", RESULTS, many=True), Port("truth", TRUTH))
 _SCORED = (Port("scores", SCORES),)
-_SCORE = "from mrsuite.benchmark import scoring"
+_SCORE = "from mrsuite.bridges import mrsvalidate"
+_RATIOS = "from mrsuite.benchmark import scoring"
 _SPECVIS = ("from mrsuite.bridges import specvis",)
 _MEASURES = "['tNAA', 'tCho', 'Ins', 'Glx']"
 
@@ -802,7 +803,7 @@ BLOCKS: Dict[str, Block] = {b.key: b for b in [
                "with MRSuite's LCModel, as its GUI's SVS buttons; its parameters from its "
                "own configuration (Others/SVS_parameters.mat, or a shipped one by name such "
                "as 'Demo_SVS_14p1T_SPECIAL'). Its MRSI does not run under Octave."),
-    Block("ratios", "fit", "Ratios to creatine", call="scoring.ratios", imports=(_SCORE,),
+    Block("ratios", "fit", "Ratios to creatine", call="scoring.ratios", imports=(_RATIOS,),
           inputs=(Port("results", RESULTS),),
           fields=(_choice("to", ["tCr"], "'tCr'"), _value("scaling", "None")),
           outputs=(Port("out", RESULTS),),
@@ -831,18 +832,18 @@ BLOCKS: Dict[str, Block] = {b.key: b for b in [
           options=(("fid_a", "op_getLW"), ("osprey", "op_getLW")),
           help="Full width at half maximum. FID-A and Osprey measure the water peak unless a "
                "range is given: ppmmin 1.8, ppmmax 2.2 for NAA on water-suppressed spectra."),
-    Block("mosae", "evaluate", "MOSAE", call="scoring.score", imports=(_SCORE,),
+    Block("mosae", "evaluate", "MOSAE", call="mrsvalidate.score", imports=(_SCORE,),
           fields=(_value("output_dir", "None"),), inputs=_JUDGED, outputs=_SCORED,
-          fixed={"references": "['optimal']", "metrics": "{'mosae': scoring.mae}"},
+          fixed={"references": "['optimal']", "metrics": "{'mosae': mrsvalidate.mae}"},
           help="Mean optimal-scale absolute error (Merkofer et al., arXiv:2511.23135, Eq. 16): "
                "each fit scaled to match its truth best, then the MAE; 'all' pools the "
                "metabolites."),
-    *[Block(key, "evaluate", title, call="scoring.score", imports=(_SCORE,),
+    *[Block(key, "evaluate", title, call="mrsvalidate.score", imports=(_SCORE,),
             fields=(_choice("references", _REFERENCES), _value("output_dir", "None")),
             inputs=_JUDGED, outputs=_SCORED, wrap={"references": "[{}]"},
             analyses=tuple(analyses), help=help)
       for key, title, analyses, help in _SCORES],
-    Block("bland-altman", "evaluate", "Bland-Altman plot", call="scoring.figure",
+    Block("bland-altman", "evaluate", "Bland-Altman plot", call="mrsvalidate.figure",
           imports=(_SCORE, "from mrsvalidate.analysis import method_comparison",
                    "from mrsvalidate.viz.agreement import plot_bland_altman"),
           fields=(_choice("reference", _REFERENCES), _value("metabolite", "'all'")),
@@ -850,7 +851,7 @@ BLOCKS: Dict[str, Block] = {b.key: b for b in [
           fixed={"analysis": "method_comparison.bland_altman", "plot": "plot_bland_altman"},
           help="Each method's differences from the truth against the truth, with its bias and "
                "limits of agreement."),
-    Block("regression-plot", "evaluate", "Regression plot", call="scoring.figure",
+    Block("regression-plot", "evaluate", "Regression plot", call="mrsvalidate.figure",
           imports=(_SCORE, "from mrsvalidate.analysis import regression",
                    "from mrsvalidate.viz.scatter import plot_regression_result"),
           fields=(_choice("reference", _REFERENCES), _value("metabolite", "'all'")),
@@ -878,14 +879,14 @@ BLOCKS: Dict[str, Block] = {b.key: b for b in [
                "the distribution and the mean ± SD per method, one facet per metabolite."),
     Block("specvis-correlation", "evaluate", "Correlation (SpecVis)",
           call="specvis.correlation", imports=_SPECVIS,
-          fields=(_value("measures", _MEASURES), _value("x"), _value("y"), _value("columns", "2")),
+          fields=(_value("x"), _value("y"), _value("measures", _MEASURES), _value("columns", "2")),
           inputs=(Port("frame", TABLE),), outputs=(Port("figure"),),
           help="One method's fits against another's per metabolite, named as the table names "
                "them, with the regression line and Pearson's r, as the Osprey group compares "
                "algorithms (Zöllner et al. 2021)."),
     Block("specvis-bland-altman", "evaluate", "Bland-Altman (SpecVis)",
           call="specvis.bland_altman", imports=_SPECVIS,
-          fields=(_value("measures", _MEASURES), _value("x"), _value("y"), _value("columns", "2")),
+          fields=(_value("x"), _value("y"), _value("measures", _MEASURES), _value("columns", "2")),
           inputs=(Port("frame", TABLE),), outputs=(Port("figure"),),
           help="Two methods' differences against their means per metabolite, with the mean "
                "difference, its limits of agreement and a distribution ellipse."),
@@ -1050,7 +1051,8 @@ def label(option: Tuple[str, str]) -> str:
             "wat_lip_l2": "Wat_Lip_Removal_L2", "specvis": "SpecVis",
             "nifti_mrs": "NIfTI-MRS tools",
             "augmentrum": "Augmentrum", "suspect": "suspect",
-            _CHALLENGE: "2016 challenge", _SCORING: "MRSuite"}.get(where, where) + f" · {function}"
+            _CHALLENGE: "2016 challenge",
+            _SCORING: "MRSValidate"}.get(where, where) + f" · {function}"
 
 
 #***********#

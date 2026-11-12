@@ -31,7 +31,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from challenge_models import MODELS, RELEASE, RUNS, config
 from mrsuite import models
-from mrsuite.benchmark import scoring
+from mrsuite.bridges import mrsvalidate
 from mrsuite.datasets import mrsi_challenge
 from mrsuite.simulators import mrs_sim
 
@@ -74,7 +74,7 @@ def score(name: str, n: int = 1024, runs: Path = RUNS) -> Dict[str, float]:
     found = {}
     for folder in checkpoints:
         fits = models.load(str(folder)).run(data)
-        table = scoring.score({name: fits}, truths, ["optimal"], {"mosae": scoring.mae})
+        table = mrsvalidate.score({name: fits}, truths, ["optimal"], {"mosae": mrsvalidate.mae})
         found[folder.name] = float(table.query("metabolite == 'all'")["value"].iloc[0])
         print(f"{folder.name}: MOSAE {found[folder.name]:.4f}", flush=True)
     return found

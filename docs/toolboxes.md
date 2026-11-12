@@ -25,6 +25,7 @@ its package.
 | [Vespa](https://github.com/vespa-mrs/vespa) | `mrsuite.vespa` | Python | Vespa-Analysis's fit; basis simulation through PyGAMMA |
 | [OXSA](https://github.com/OXSAtoolbox/OXSA) | `mrsuite.oxsa` | Octave, MATLAB or Docker | its AMARES fit with its 31P prior-knowledge sets (non-commercial licence) |
 | [Wat_Lip_Removal_L2](https://github.com/mrshub/Wat_Lip_Removal_L2) | `mrsuite.wat_lip_l2` | Octave, MATLAB or Docker | water and lipid removal by L2 regularisation against synthesised bases (Lin et al. 2019), and its water shift, for single voxels and MRSI grids |
+| [MRSValidate](https://github.com/JohnLaMaster/MRSValidate) | `mrsuite.mrsvalidate` | Python | fits scored against the ground truth (LaMaster et al. 2026): every analysis of its that compares the two, run as its analysis plan, and its plots |
 | [SpecVis](https://github.com/HJZollner/SpecVis) | `mrsuite.specvis` | R or Docker | fits compared with each other, without a truth: its raincloud, box, violin, correlation and Bland-Altman plots and its statistics over a table of fit results (Zöllner et al. 2021), and its readers of Osprey's, LCModel's and TARQUIN's result files |
 | [PASTIS](https://github.com/tngrssl/pastis) | `mrsuite.pastis` | Python, PyGAMMA built on first use | its time-domain linear-combination fit; basis simulation of its sequences (sLASER with shaped adiabatic pulses among them, 1H and 31P); transient rejection, realignment, phasing and coil combination as steps |
 

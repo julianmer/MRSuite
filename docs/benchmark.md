@@ -4,10 +4,11 @@ Fits are scored against the ground truth with
 [MRSValidate](https://github.com/JohnLaMaster/MRSValidate) (see [Install](install.md#scoring)).
 
 ```python
-from mrsuite.benchmark import scoring
+from mrsuite import mrsvalidate
 
-scores = scoring.score(fits, truth, references=["optimal", "tCr"],
-                       metrics={"mosae": scoring.mae, "ccc": scoring.analyses()["agreement.lin_ccc"]})
+scores = mrsvalidate.score(fits, truth, references=["optimal", "tCr"],
+                           metrics={"mosae": mrsvalidate.mae,
+                                    "ccc": mrsvalidate.analyses()["agreement.lin_ccc"]})
 ```
 
 `score` takes the fits by method, one per spectrum, and gives one table: every metric for
@@ -17,7 +18,8 @@ scored on the same metabolites, so pooled scores compare like with like.
 ## References
 
 Fits report amplitudes on a scale of their own, so they meet the truth on a reference. There
-is no default, as the right one depends on the question (`scoring.REFERENCES`):
+is no default, as the right one depends on the question (`mrsuite.benchmark.REFERENCES`;
+`mrsuite.benchmark.pair` pairs the two sides):
 
 | Reference | The fits against the truth |
 |---|---|
@@ -30,10 +32,10 @@ Only single metabolites are scored; sums, a tool's own or the truth's, are not.
 
 ## Metrics
 
-`scoring.mae` and `scoring.bias` are MRSuite's own; `mae` pooled on `optimal` is the MOSAE.
-`scoring.analyses()` lists every MRSValidate analysis that compares fits with the truth:
-errors, Lin's CCC, regression, Bland-Altman, normality. `scoring.figure` draws MRSValidate's
-plots.
+`mrsvalidate.mae` and `mrsvalidate.bias` are MRSuite's own; `mae` pooled on `optimal` is the
+MOSAE. `mrsvalidate.analyses()` lists every MRSValidate analysis that compares fits with the
+truth: errors, Lin's CCC, regression, Bland-Altman, normality. `mrsvalidate.figure` draws
+MRSValidate's plots.
 
 ## The radar
 

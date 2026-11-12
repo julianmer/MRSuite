@@ -29,15 +29,15 @@ from typing import Optional
 from mrsvalidate.analysis import agreement, descriptive, method_comparison, regression
 
 from mrsuite import io, models
-from mrsuite.benchmark import scoring
-from mrsuite.benchmark.radar import plot_scores
-from mrsuite.bridges import fsl_mrs, lcmodel, spant
+from mrsuite.benchmark import plot_scores
+from mrsuite.bridges import fsl_mrs, lcmodel, mrsvalidate, spant
 from mrsuite.core.pipeline import Pipeline
 from mrsuite.datasets import challenge2016
 
 # one metric per aspect of MRSValidate, each a corner of the radar
-ASPECTS = {"mosae": scoring.mae, "lin_ccc": agreement.lin_ccc, "pearson_r": regression.pearson_r,
-           "bland_altman": method_comparison.bland_altman, "mean": descriptive.mean}
+ASPECTS = {"mosae": mrsvalidate.mae, "lin_ccc": agreement.lin_ccc,
+           "pearson_r": regression.pearson_r, "bland_altman": method_comparison.bland_altman,
+           "mean": descriptive.mean}
 
 
 #**********#
@@ -54,7 +54,7 @@ def main(n: Optional[int], out: Path) -> None:
             "spant": Pipeline([spant.step.fit(basis=basis)]).run(spectra),
             "WAND then LCModel": Pipeline([wand, lcmodel.step.fit(basis=basis)]).run(spectra)}
 
-    scores = scoring.score(fits, truth, references=["optimal"], metrics=ASPECTS)
+    scores = mrsvalidate.score(fits, truth, references=["optimal"], metrics=ASPECTS)
     out.mkdir(parents=True, exist_ok=True)
     scores.to_csv(out / "scores.csv", index=False)
     plot_scores(scores).figure.savefig(out / "radar.svg")

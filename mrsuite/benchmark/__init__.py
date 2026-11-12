@@ -6,9 +6,10 @@
 #                                                                                                  #
 # Created: 2026-10-01                                                                              #
 #                                                                                                  #
-# Purpose: Benchmarking on MRSValidate. Fits and ground truth become its ObservationSets on a      #
-#          reference the caller names (water, tCr, the optimal scale or none), every metric runs   #
-#          as a step of its analysis plan, and radar draws the resulting scores.                   #
+# Purpose: MRSuite's own part of a benchmark: fits and ground truth paired on a reference          #
+#          the caller names (water, tCr, the optimal scale or none), ratios to creatine,           #
+#          what the fits cover, and a radar of the scores. The statistics are MRSValidate's,       #
+#          through its bridge.                                                                     #
 #                                                                                                  #
 ####################################################################################################
 
@@ -17,8 +18,8 @@
 #   imports   #
 #*************#
 from mrsuite.benchmark.radar import plot_scores, radar
-from mrsuite.benchmark.scoring import (REFERENCES, analyses, bias, coverage, figure, mae,
-                                       observations, optimal_scale, score)
+from mrsuite.benchmark.scoring import (REFERENCES, coverage, metabolites, optimal_scale, pair,
+                                       ratios)
 
-__all__ = ["REFERENCES", "observations", "optimal_scale", "score", "analyses", "figure",
-           "coverage", "mae", "bias", "radar", "plot_scores"]
+__all__ = ["REFERENCES", "pair", "metabolites", "ratios", "optimal_scale", "coverage",
+           "radar", "plot_scores"]

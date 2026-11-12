@@ -32,7 +32,7 @@ import pytest
 pytest.importorskip("mrsvalidate")
 import mrsuite
 from nifti_mrs_plus import NIfTI_MRS_Plus
-from mrsuite.benchmark import mae
+from mrsuite.bridges.mrsvalidate import mae
 from mrsuite.core.result import FitResult
 from mrsuite.datasets import challenge2016, mrsi_challenge
 

@@ -27,7 +27,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence
 import numpy as np
 import pandas as pd
 
-from mrsuite.benchmark import observations, score
+from mrsuite.bridges.mrsvalidate import observations, score
 from mrsuite.core.result import FitResult
 
 import run

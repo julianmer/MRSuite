@@ -26,6 +26,8 @@
 
 ::: mrsuite.bridges.specvis
 
+::: mrsuite.bridges.mrsvalidate
+
 ::: mrsuite.bridges.suspect
 
 ::: mrsuite.bridges.nifti_mrs

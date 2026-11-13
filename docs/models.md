@@ -1,9 +1,10 @@
 # Models and training
 
 A trained model is a method like any other: it runs on NIfTI-MRS, batches, records its
-provenance and goes into a pipeline as a step. MRSuite carries two kinds, both wrapped from
+provenance and goes into a pipeline as a step. MRSuite carries three kinds, all wrapped from
 their authors' code, not ported: WAND (`mrsuite.models.WAND`), a processing step that gives
-spectra, and the MLPs (`mrsuite.models.MLP`), which fit.
+spectra, the MLPs (`mrsuite.models.MLP`), which fit, and VAE-MRS (`mrsuite.models.VAEMRS`),
+which synthesises MEGA-PRESS transients from the measured ones of a scan.
 
 ## The zoo
 
@@ -19,6 +20,16 @@ model = mrsuite.models.load("MRSuite/wand-ismrm2016")   # any Hub repo or local 
 
 `load` picks the class from the repo's config. A model whose `acquisition` is set refuses
 spectra acquired unlike its training data.
+
+VAE-MRS comes with the checkpoint of its paper, from its own repository:
+
+```python
+vae = mrsuite.models.VAEMRS.published()
+more = vae(scan, method="random_sampling", samples=9)
+```
+
+A scan is one NIfTI-MRS with its transients along `DIM_DYN` and OFF then ON along `DIM_EDIT`,
+preprocessed as the model's class says.
 
 ## Training
 

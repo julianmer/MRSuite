@@ -10,5 +10,7 @@
 
 ::: mrsuite.models.mlp
 
+::: mrsuite.models.vae_mrs
+
 ::: mrsuite.models.convert
 

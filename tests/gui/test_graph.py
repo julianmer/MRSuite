@@ -1042,6 +1042,18 @@ def test_a_model_block_loads_its_checkpoint_and_runs_it_as_a_step_with_its_optio
     assert "from mrsuite import models" in graph.code(mlp)[1]
 
 
+def test_a_model_block_without_checkpoints_loads_the_one_its_class_publishes():
+    graph = Graph()
+    data, vae = graph.add("ismrm2016"), graph.add("vae-mrs")
+    graph.connect(data, "spectra", vae, "data")
+    graph.set(vae, "method", "interpolation")
+    graph.set(vae, "samples", 9)
+
+    assert graph.code(vae)[0] == ("vae_mrs = Pipeline([models.VAEMRS.published().step("
+                                  "method='interpolation', samples=9)]).run(ismrm2016_spectra)")
+    assert "from mrsuite import models" in graph.code(vae)[1]
+
+
 #****************#
 #   invalidate   #
 #****************#

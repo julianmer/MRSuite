@@ -145,6 +145,10 @@ OWN: Dict[str, str] = {
     "mrsuite.models.mlp.MLP": "Merkofer JP, Kaiser A, Schrantee A, Gurney-Champion OJ, van Sloun "
                               "RJG. Strategies to Minimize Out-of-Distribution Effects in Data-"
                               "Driven MRS Quantification. arXiv. 2025. arXiv:2511.23135",
+    "mrsuite.models.vae_mrs.VAEMRS":
+        "van de Sande DMJ, Merkofer JP, Amirrajab S, et al. Data-driven Synthesis of Magnetic "
+        "Resonance Spectroscopy Data using a Variational Autoencoder. arXiv. 2026. "
+        "arXiv:2603.00736",
 }
 
 

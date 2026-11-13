@@ -69,6 +69,8 @@ REGISTRY = {
                 "4138eb5fc2414a6b0f510d1e34103189599d1a58"),
     "spm12": ("https://github.com/spm/spm12.git",
               "03ac9473cad402407b6472228377c0167fdc54b8"),
+    "vae-mrs": ("https://github.com/dennisvds/VAE-MRS.git",
+                "7cbfa78fc37c39195298dcab24ea30e9d97e02bb"),
     "wand-for-mrs": ("https://github.com/julianmer/WAND-for-MRS.git",
                      "2642659ccf8f5ca6376b44a351dd9420a846b1f0"),
     "wat-lip-removal-l2": ("https://github.com/mrshub/Wat_Lip_Removal_L2.git",

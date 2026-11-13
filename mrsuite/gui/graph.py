@@ -442,12 +442,15 @@ class Graph:
                 imports = {f"from {package} import {alias}"}
             return f"{node.name} = {line}", imports, [node.name]
         if b.model:
-            checkpoint = node.values.get("checkpoint")
-            if not checkpoint:
-                raise ValueError(f"{node.name}: choose a checkpoint")
+            loaded = f"models.{b.model.rsplit('.', 1)[-1]}.published()"
+            if any(f.name == "checkpoint" for f in b.fields):
+                checkpoint = node.values.get("checkpoint")
+                if not checkpoint:
+                    raise ValueError(f"{node.name}: choose a checkpoint")
+                loaded = f"models.load({checkpoint!r})"
             options = self._args(node, [f for f in b.fields if f.name != "checkpoint"], wires,
                                  b.wrap)
-            line = f"Pipeline([models.load({checkpoint!r}).step({options})]).run({wires['data']})"
+            line = f"Pipeline([{loaded}.step({options})]).run({wires['data']})"
             return f"{node.name} = {line}", {*b.imports, PIPELINE}, [node.name]
         if node.block == "load":
             chosen = node.values.get("entries")

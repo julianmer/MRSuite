@@ -7,8 +7,8 @@
 # Created: 2026-09-27                                                                              #
 #                                                                                                  #
 # Purpose: Trained models as pipeline steps. Model is the interface, in any framework;             #
-#          TorchModel adapts it to PyTorch; MLP and WAND wrap the published networks; load         #
-#          brings any of them back from the Hub or a folder by name alone.                         #
+#          TorchModel adapts it to PyTorch; MLP, WAND and VAEMRS wrap the published networks;      #
+#          load brings any of them back from the Hub or a folder by name alone.                    #
 #                                                                                                  #
 ####################################################################################################
 
@@ -24,9 +24,10 @@ from typing import Any, Dict, Optional
 from mrsuite.models.base import DOWNLOAD, Model
 from mrsuite.models.mlp import MLP
 from mrsuite.models.pytorch import TorchModel
+from mrsuite.models.vae_mrs import VAEMRS
 from mrsuite.models.wand import WAND
 
-__all__ = ["Model", "TorchModel", "MLP", "WAND", "load", "zoo"]
+__all__ = ["Model", "TorchModel", "MLP", "WAND", "VAEMRS", "load", "zoo"]
 
 
 #**********#

@@ -99,7 +99,8 @@ GROUPS = {g.key: g for g in [
           "al., NMR Biomed 2021, section 4.2)."),
     Group("models", "Models", "#3fcfae",
           "Trained networks from MRSuite's model zoo on the Hugging Face Hub: a checkpoint "
-          "each, loaded by name. WAND is a processing step and gives spectra; the MLPs fit."),
+          "each, loaded by name. WAND is a processing step and gives spectra; the MLPs fit; "
+          "VAE-MRS synthesises transients, with the checkpoint of its own repository."),
     Group("evaluate", "Evaluate", "#7fe0e6",
           "Judge the spectra and the fits: spectral quality (SNR, linewidth), and fits against "
           "the ground truth with every analysis of MRSValidate that compares the two (Kreis et "
@@ -176,7 +177,8 @@ class Block:
         analyses (Tuple[Tuple[str, str], ...]): A score's choice of analysis, as
             (module, function).
         model (str): A trained model's class, e.g. 'mrsuite.models.wand.WAND'; the block
-            loads a checkpoint of it by name and runs it as a step with its fields.
+            loads a checkpoint of it by name, or without a checkpoint field the one its class
+            publishes, and runs it as a step with its fields.
         folder (str): A fold of its group the palette lists it under, e.g. 'Basis sets';
             '' for the group itself.
         help (str): One line on what it does.
@@ -823,6 +825,15 @@ BLOCKS: Dict[str, Block] = {b.key: b for b in [
           inputs=(Port("data", SPECTRA),), outputs=(Port("out", RESULTS),),
           help="Quantifies each spectrum with a multilayer perceptron, trained supervised on "
                "simulated spectra or self-supervised with a signal model."),
+    Block("vae-mrs", "models", "VAE-MRS", model="mrsuite.models.vae_mrs.VAEMRS",
+          imports=("from mrsuite import models",),
+          fields=(_choice("method", ["random_sampling", "interpolation", "random_interpolation",
+                                     "reconstruction"], "'random_sampling'"),
+                  _value("samples", "3"), _value("originals", "False"), _value("seed", "None")),
+          inputs=(Port("data", SPECTRA),), outputs=(Port("out", SPECTRA),),
+          help="Synthesises MEGA-PRESS transients from the measured ones of a scan (transients "
+               "along DIM_DYN, OFF then ON along DIM_EDIT): drawn around each transient's "
+               "latent vector, between them, or both; or each transient reconstructed."),
     # evaluate
     Block("snr", "evaluate", "SNR", out=ANY,
           options=((_CHALLENGE, "snr"), ("fid_a", "op_getSNR"), ("osprey", "op_getSNR"),

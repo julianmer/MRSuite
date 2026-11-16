@@ -109,8 +109,7 @@ def fit(data: Any, prior: str, opts: Optional[Dict[str, Any]] = None) -> FitResu
         from pyAMARES.kernel.objective_func import objective_range
         fitting["objective_func"] = objective_range
     settings = {"MHz": float(data.spectrometer_frequency[0]), "sw": 1.0 / data.dwelltime,
-                "deadtime": 0.0, "carrier": float(data.SpecFreqChemShift), "g_global": False,
-                **options}
+                "deadtime": 0.0, "carrier": float(data.SpecFreqChemShift), **options}
     params = pyAMARES.initialize_FID(fid / scale, priorknowledgefile=str(prior), **settings)
     fitted = pyAMARES.fitAMARES(params, params.initialParams, ifplot=False, inplace=False,
                                 **fitting)

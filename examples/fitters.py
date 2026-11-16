@@ -74,8 +74,12 @@ def main(n: int, out: Path) -> None:
                                            opts={"rescale_lcm_basis": False}),
                "Osprey": osprey.step.fit(basis=basis),
                "Vespa": vespa.step.fit({name: {"fid": fid} for name, fid in functions.items()}),
-               # a prior of this many peaks needs more evaluations than lmfit's 1000
-               "pyAMARES": pyamares.step.fit(prior, opts={"fit_kws": {"max_nfev": None,
+               # pyAMARES fits the whole sweep unless told the range the others take, starts
+               # best from its Levenberg-Marquardt pass, and a prior of this many peaks
+               # needs more evaluations than lmfit's 1000
+               "pyAMARES": pyamares.step.fit(prior, opts={"fit_range": (0.2, 4.2),
+                                                          "initialize_with_lm": True,
+                                                          "fit_kws": {"max_nfev": None,
                                                                       "xtol": 1e-6,
                                                                       "ftol": 1e-6}})}
     ratios = {name: scoring.ratios(Pipeline([fit]).run(processed)) for name, fit in fitters.items()}

@@ -227,6 +227,14 @@ def test_a_prior_on_another_scale_gives_the_same_fit():
     for name, amp in amps.items():
         assert out.conc("raw")[name] == pytest.approx(amp, rel=0.1), name
 
+    # Vespa's Area Scale Factor moves a start, and with it the 50-150% the area may take:
+    # Glx started at a fifth of the literature's cannot reach its amplitude
+    low = vespa.fit(data, {m: {"fid": f, **({"area_scale": 0.2} if m == "Glx" else {})}
+                           for m, f in basis.items()}, opts={"baseline_method": ""})
+
+    assert low.conc("raw")["Glx"] < 0.5 * amps["Glx"]
+    assert low.conc("raw")["NAA"] == pytest.approx(amps["NAA"], rel=0.1)
+
 
 #************#
 #   proton   #

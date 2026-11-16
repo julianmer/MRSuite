@@ -70,7 +70,9 @@ def fit(data: Any, prior: Dict[str, Any], opts: Optional[Dict[str, Any]] = None)
             Its lines, for Vespa's local weighting and the noise window, are the peaks of
             its spectrum above a tenth of its maximum. Optional per-metabolite keys
             steer the initial peak search: ``peak_ppm`` (defaults to the strongest line,
-            or the spectrum's maximum) and ``search_ppm`` (default 0.1).
+            or the spectrum's maximum) and ``search_ppm`` (default 0.1); ``area_scale``
+            (default 1) multiplies the metabolite's start area, Vespa's Area Scale
+            Factor, which its user turns until the start matches the data.
             Vespa starts NAA, Cr and Cho from a peak search and every other area from
             NAA's by the literature concentrations of its metabolite table, read by
             name, then searches each area within 50-150% of its start (its manual,
@@ -164,7 +166,7 @@ def fit(data: Any, prior: Dict[str, Any], opts: Optional[Dict[str, Any]] = None)
     block.set.prior_list = names
     block.set.prior_peak_ppm = [_strongest(prior[m]) for m in names]
     block.set.prior_search_ppm = [prior[m].get("search_ppm", 0.1) for m in names]
-    block.set.prior_area_scale = [1.0] * len(names)
+    block.set.prior_area_scale = [prior[m].get("area_scale", 1.0) for m in names]
     block.set.prior_db_ppm = [False] * len(names)
     block.set.prior_fix_t2 = [1000.0] * len(names)
     block.set.prior_search_ph0 = [0.0] * len(names)

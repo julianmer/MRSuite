@@ -85,7 +85,7 @@ fetches its data on first use, and takes `--n` for a small run.
 | Script | Shows |
 |:---|:---|
 | `processing.py` | one in vivo chain across four languages (COWS sub-01), then the report |
-| `fitters.py` | one processed spectrum fitted by LCModel, FSL-MRS, spant, TARQUIN and Osprey |
+| `fitters.py` | one processed spectrum fitted by LCModel, FSL-MRS, spant, TARQUIN, Osprey, Vespa and pyAMARES |
 | `benchmark.py` | the 2016 challenge into three fitters and WAND then LCModel, scored on a radar |
 | `mrsi.py` | the 2024 MRSI challenge slice: augmentation, two fits, maps over the truth |
 | `simulate_train.py` | MRS-Sim into a QuantMLP, saved with its recipe, scored on the challenge |

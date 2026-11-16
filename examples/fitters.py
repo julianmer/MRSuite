@@ -7,12 +7,13 @@
 # Created: 2026-11-04                                                                              #
 #                                                                                                  #
 # Purpose: One spectrum, every fitter: COWS (OpenNeuro ds006812) sub-01 processed once, then       #
-#          fitted with the same basis by LCModel, FSL-MRS, spant, TARQUIN and Osprey; their ratios #
-#          to creatine side by side, in a table and a figure. The fit is the step where the        #
-#          fitters differ; everything before it is shared.                                         #
+#          fitted with the same basis by LCModel, FSL-MRS, spant, TARQUIN, Osprey, Vespa and       #
+#          pyAMARES; their ratios to creatine side by side, in a table and a figure. The fit is    #
+#          the step where the fitters differ; everything before it is shared.                      #
 #                                                                                                  #
-#          Needs Octave, R, LCModel and TARQUIN (fetched on first use); the subject's data (1 GB)  #
-#          and its TE 26 ms sLASER basis set are fetched on first use.                             #
+#          Needs Octave, R, LCModel and TARQUIN (fetched on first use), Vespa and pyAMARES (some   #
+#          7 minutes a spectrum each); the subject's data (1 GB) and its TE 26 ms sLASER basis     #
+#          set are fetched on first use.                                                           #
 #                                                                                                  #
 #          python examples/fitters.py --n 1 --out out/fitters                                      #
 #                                                                                                  #
@@ -28,7 +29,8 @@ from pathlib import Path
 import pandas as pd
 
 from mrsuite.benchmark import scoring
-from mrsuite.bridges import fid_a, fsl_mrs, lcmodel, osprey, spant, tarquin
+from mrsuite.bridges import fid_a, fsl_mrs, lcmodel, osprey, pyamares, spant, tarquin, vespa
+from mrsuite.core.basis import CENTRE
 from mrsuite.core.pipeline import Pipeline
 from mrsuite.datasets import openneuro
 
@@ -39,7 +41,7 @@ SHOWN = ["NAA", "NAAG", "Glu", "Gln", "mI", "GPC", "GSH", "Lac"]
 #   main   #
 #**********#
 def main(n: int, out: Path) -> None:
-    """The first ``n`` spectra of sub-01 through one processing and five fitters."""
+    """The first ``n`` spectra of sub-01 through one processing and seven fitters."""
     spectra, water, *_ = openneuro.load("ds006812", "sub-01")
     spectra, water = spectra[:n], water[:n]
     basis = openneuro.basis("ds006812")                         # TE 26 ms sLASER
@@ -57,17 +59,29 @@ def main(n: int, out: Path) -> None:
                           fid_a.step.op_ppmref(2.9, 3.1, 3.027),
                           fid_a.step.op_autophase(2.9, 3.1)]).run(spectra)
 
+    # Vespa and pyAMARES take the basis functions as priors, on the data's own points: the
+    # basis is as finely sampled and twice as long
+    one = processed[0]
+    functions = dict(zip(basis.names, basis.fids[:, :one.shape[3]]))
+    out.mkdir(parents=True, exist_ok=True)
+    prior = pyamares.prior(str(out / "pyamares_prior.csv"), functions, one.dwelltime,
+                           one.spectrometer_frequency[0], CENTRE)
+
     fitters = {"LCModel": lcmodel.step.fit(basis=basis, water=reference),
                "FSL-MRS": fsl_mrs.step.fit(basis=basis, water=reference),
                "spant": spant.step.fit(basis=basis),
                "TARQUIN": tarquin.step.fit(basis=basis, water=reference,
                                            opts={"rescale_lcm_basis": False}),
-               "Osprey": osprey.step.fit(basis=basis)}
+               "Osprey": osprey.step.fit(basis=basis),
+               "Vespa": vespa.step.fit({name: {"fid": fid} for name, fid in functions.items()}),
+               # a prior of this many peaks needs more evaluations than lmfit's 1000
+               "pyAMARES": pyamares.step.fit(prior, opts={"fit_kws": {"max_nfev": None,
+                                                                      "xtol": 1e-6,
+                                                                      "ftol": 1e-6}})}
     ratios = {name: scoring.ratios(Pipeline([fit]).run(processed)) for name, fit in fitters.items()}
 
     # the first spectrum's ratios per fitter, the metabolites every fitter gives
     table = pd.DataFrame({name: fits[0].conc("tCr") for name, fits in ratios.items()}).dropna()
-    out.mkdir(parents=True, exist_ok=True)
     table.to_csv(out / "ratios.csv")
     ax = table.reindex([m for m in SHOWN if m in table.index]).plot.bar(figsize=(8, 3.5),
                                                                         ylabel="ratio to tCr")

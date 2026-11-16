@@ -25,7 +25,9 @@ import pytest
 from mrsuite import collect
 from mrsuite.datasets import openneuro
 from tests.bridges.test_lcmodel import needs_lcmodel
+from tests.bridges.test_pyamares import needs_pyamares
 from tests.bridges.test_tarquin import needs_tarquin
+from tests.bridges.test_vespa import needs_vespa
 from tests.conftest import needs_fsl_mrs, needs_mrsvalidate, needs_octave
 from tests.datasets.test_challenges import needs_2016, needs_mrsi, needs_r, needs_sim
 
@@ -73,10 +75,13 @@ def test_processing_fits_one_spectrum_and_reports_it(tmp_path):
 @needs_lcmodel
 @needs_tarquin
 @needs_fsl_mrs
+@needs_vespa
+@needs_pyamares
 def test_fitters_give_one_table_across_the_fitters(tmp_path):
-    out = run("fitters", "--n", "1", "--out", str(tmp_path), timeout=1800)
+    out = run("fitters", "--n", "1", "--out", str(tmp_path), timeout=3600)
 
-    assert all(name in out for name in ("LCModel", "FSL-MRS", "spant", "TARQUIN", "Osprey"))
+    assert all(name in out for name in ("LCModel", "FSL-MRS", "spant", "TARQUIN", "Osprey", "Vespa",
+                                        "pyAMARES"))
     assert (tmp_path / "ratios.csv").exists() and (tmp_path / "ratios.svg").exists()
 
 

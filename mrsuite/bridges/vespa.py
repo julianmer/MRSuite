@@ -30,6 +30,13 @@ from mrsuite.core.method import method
 from mrsuite.core.result import FitResult
 
 
+# what basis sets call the metabolites Vespa's table has under another name
+NAMES = {"mI": "myo-inositol", "sI": "scyllo-inositol", "PE": "peamine", "Glc": "glucose-alpha",
+         "tCr": "cr"}
+# the singlets Vespa's start values hang on, by its abbreviation, and their ppm
+REFERENCES = (("naa", 2.01), ("cr", 3.03), ("cho", 3.2))
+
+
 #*************#
 #   version   #
 #*************#
@@ -64,16 +71,23 @@ def fit(data: Any, prior: Dict[str, Any], opts: Optional[Dict[str, Any]] = None)
             its spectrum above a tenth of its maximum. Optional per-metabolite keys
             steer the initial peak search: ``peak_ppm`` (defaults to the strongest line,
             or the spectrum's maximum) and ``search_ppm`` (default 0.1).
+            Vespa starts NAA, Cr and Cho from a peak search and every other area from
+            NAA's by the literature concentrations of its metabolite table, read by
+            name, then searches each area within 50-150% of its start (its manual,
+            6.4.2 and 6.4.5). So the names matter: those of ``NAMES`` enter the table
+            as Vespa's own, any other unknown one starts at half of NAA. And so does
+            the scale, a proton having an area of 1 in Vespa's line lists: the prior
+            is brought to it by its reference singlet (NAA's, else Cr's, else Cho's)
+            and the areas are returned on the prior's own scale.
         opts (Optional[dict]): Any fit-block setting by its Vespa name, applied onto the
             block's defaults, e.g. ``{"baseline_method": "", "optimize_max_iterations":
-            500}``. Two defaults deviate from Vespa's, both traps for headless runs: the
-            area bounds, relative to the initial estimate, are opened from 50-150% to
-            effectively non-negative (Vespa's own source keeps that variant; its
-            initial search misjudges J-coupled multiplets by more than 20x, and a
-            clamped area is silently wrong, which the GUI user would see and a batch
-            would not), and the Cramer-Rao noise window, at -8..-6 ppm outside a
-            typical sweep width, is placed 0.5-2 ppm in from whichever spectral edge
-            lies farther from the prior's lines and the water (the reference ppm).
+            500}``; ``{"optimize_bounds_area_min": 1e-6, "optimize_bounds_area_max":
+            1e5}`` opens the area bounds (percent of the start) for a metabolite that
+            may be absent or far from the literature. One default deviates from
+            Vespa's, a trap for headless runs: the Cramer-Rao noise window, at -8..-6
+            ppm outside a typical sweep width, is placed 0.5-2 ppm in from whichever
+            spectral edge lies farther from the prior's lines and the water (the
+            reference ppm).
         workers (int): Processes to spread a batch over (see ``mrsuite.core.parallel``).
 
     Returns:
@@ -122,6 +136,19 @@ def fit(data: Any, prior: Dict[str, Any], opts: Optional[Dict[str, Any]] = None)
     ppm = resppm + np.fft.fftfreq(fid.size, data.dwelltime) / f0
     prior = {m: _sampled(prior[m], ppm) if "fid" in prior[m] else prior[m] for m in prior}
     names = list(prior)
+
+    # Vespa reads its start values off its metabolite table by name, and takes a proton
+    # for an area of 1: the names it lacks enter the table as the ones it has, and the
+    # prior goes over at a proton's area in it, found on its reference singlet
+    table = dataset.user_prior.metinfo
+    columns = (table.abbreviations, table.spins, table.concentrations, table.t2decays)
+    for name in names:
+        if name.lower() not in table.full_names and name in NAMES:
+            row = table.full_names.index(NAMES[name])
+            table.full_names.append(name.lower())
+            for column in columns:
+                column.append(column[row])
+    proton = _proton(prior, ppm, table)
     block.set.prior.metabolites = collections.OrderedDict()
     for name in names:
         if "fid" in prior[name]:
@@ -130,7 +157,7 @@ def fit(data: Any, prior: Dict[str, Any], opts: Optional[Dict[str, Any]] = None)
         met = PriorMetabolite()
         met.dims = [name, 1, 1, 1]
         met.ppms = list(lines["ppms"])
-        met.areas = list(lines["areas"])
+        met.areas = [area / proton for area in lines["areas"]]
         met.phases = list(lines["phases"])
         block.set.prior.metabolites[name] = met
 
@@ -141,8 +168,6 @@ def fit(data: Any, prior: Dict[str, Any], opts: Optional[Dict[str, Any]] = None)
     block.set.prior_db_ppm = [False] * len(names)
     block.set.prior_fix_t2 = [1000.0] * len(names)
     block.set.prior_search_ph0 = [0.0] * len(names)
-    block.set.optimize_bounds_area_min = 1e-6
-    block.set.optimize_bounds_area_max = 1e5
 
     # the noise window 0.5-2 ppm in from the edge farther from all signal: the prior's
     # lines and the water at the reference ppm
@@ -177,7 +202,7 @@ def fit(data: Any, prior: Dict[str, Any], opts: Optional[Dict[str, Any]] = None)
     for name in names:
         if "fid" in prior[name]:
             item = BasisSetItem()
-            item.fid = np.conj(prior[name]["fid"]) * chop
+            item.fid = np.conj(prior[name]["fid"]) * chop / proton
             item.peak_ppm = prior[name]["peak_ppm"]
             item.all_ppms = list(prior[name]["ppms"])
             block.set.prior.basis_set[name] = item
@@ -188,7 +213,8 @@ def fit(data: Any, prior: Dict[str, Any], opts: Optional[Dict[str, Any]] = None)
     dataset.blocks["spectral"].set_do_fit(True, voxel)
     dataset.blocks["spectral"].chain.run([voxel], entry="all")
     dataset.blocks["fit"].chain.run([voxel], entry="full_fit", do_init=True)
-    return _result(names, block.fit_results[:, 0, 0, 0], block.cramer_rao[:, 0, 0, 0], scale)
+    return _result(names, block.fit_results[:, 0, 0, 0], block.cramer_rao[:, 0, 0, 0],
+                   scale / proton)
 
 
 #*************#
@@ -209,6 +235,28 @@ def _sampled(entry: Dict[str, Any], ppm: np.ndarray) -> Dict[str, Any]:
     lines = ppm[peaks]
     return {"ppms": list(lines), "peak_ppm": float(ppm[np.argmax(spectrum.real)]),
             **entry, "fid": fid}
+
+
+#************#
+#   proton   #
+#************#
+def _proton(prior: Dict[str, Any], ppm: np.ndarray, table: Any) -> float:
+    """The area one proton has in the prior: its reference singlet's (NAA's, else Cr's,
+    else Cho's, the peaks Vespa starts from) over the protons Vespa's table gives it; 1
+    for a prior without one. A sampled function's singlet is twice its real spectrum's
+    integral, 0.1 ppm to either side, the first point halved as for any FID."""
+    for abbreviation, at in REFERENCES:
+        for name, lines in prior.items():
+            if table.get_abbreviation(name.lower()) != abbreviation:
+                continue
+            if "fid" in lines:
+                fid = lines["fid"].copy()
+                fid[0] *= 0.5
+                area = 2.0 * np.fft.fft(fid).real[np.abs(ppm - at) < 0.1].sum() / fid.size
+            else:
+                area = sum(a for a, p in zip(lines["areas"], lines["ppms"]) if abs(p - at) < 0.1)
+            return area / table.spins[table.abbreviations.index(abbreviation)]
+    return 1.0
 
 
 #***************#

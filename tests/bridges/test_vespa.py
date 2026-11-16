@@ -199,6 +199,60 @@ def test_sampled_basis_functions_fit_as_line_lists_do():
         vespa.fit(data, {"NAA": {"fid": basis["NAA"][:1024]}})
 
 
+#***********#
+#   scale   #
+#***********#
+@needs_vespa
+def test_a_prior_on_another_scale_gives_the_same_fit():
+    """Vespa starts the areas from NAA's peak for a proton of area 1 and searches 50-150%
+    around the start, so a basis on a scale of its own (here 0.05 a proton) would be
+    fitted at a bound: the amplitudes come back on the basis' scale all the same."""
+    n, dwell, f0, shift = 2048, 1 / 2500.0, 127.7, 4.65
+    t = np.arange(n) * dwell
+
+    def line(ppm):
+        return 0.15 * np.exp((2j * np.pi * (ppm - shift) * f0 - 6.0) * t)
+
+    basis = {"NAA": line(2.008), "Cr": line(3.027), "Glx": line(2.34) + line(2.37)}
+    amps = {"NAA": 40.0, "Cr": 30.0, "Glx": 30.0}
+    fid = sum(a * basis[m] for m, a in amps.items()) * np.exp(-4.0 * t)
+    fid += 0.001 * (np.random.default_rng(0).normal(size=n)
+                    + 1j * np.random.default_rng(1).normal(size=n))
+    data = gen_nifti_mrs(fid.reshape(1, 1, 1, -1).astype(np.complex64), dwell, f0,
+                         nucleus="1H")
+
+    out = vespa.fit(data, {m: {"fid": f} for m, f in basis.items()},
+                    opts={"baseline_method": ""})
+
+    for name, amp in amps.items():
+        assert out.conc("raw")[name] == pytest.approx(amp, rel=0.1), name
+
+
+#************#
+#   proton   #
+#************#
+def test_a_proton_is_measured_on_the_reference_singlet():
+    """The prior's scale is read off NAA's singlet, 3 protons in Vespa's table, for a
+    sampled function as for a line list; else off Cr's; a prior with neither is left."""
+    class Table:
+        abbreviations, spins = ["naa", "cr"], [3.0, 3.0]
+
+        def get_abbreviation(self, name):
+            return {"naa": "naa", "tcr": "cr"}.get(name, name)
+
+    n, dwell, f0 = 2048, 1 / 2500.0, 127.7
+    t = np.arange(n) * dwell
+    ppm = 4.65 + np.fft.fftfreq(n, dwell) / f0
+    naa = 0.6 * np.exp((2j * np.pi * (2.008 - 4.65) * f0 - 6.0) * t)
+
+    assert vespa._proton({"NAA": {"fid": naa}}, ppm, Table()) == pytest.approx(0.2, rel=0.1)
+    lines = {"ppms": [2.008, 2.6], "areas": [1.5, 1.0]}
+    assert vespa._proton({"Glu": {"ppms": [2.35], "areas": [9.0]}, "NAA": lines}, ppm,
+                         Table()) == pytest.approx(0.5)
+    assert vespa._proton({"tCr": {"ppms": [3.027], "areas": [6.0]}}, ppm, Table()) == 2.0
+    assert vespa._proton({"Glu": {"ppms": [2.35], "areas": [9.0]}}, ppm, Table()) == 1.0
+
+
 #**************#
 #   singlets   #
 #**************#

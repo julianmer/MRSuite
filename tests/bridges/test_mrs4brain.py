@@ -62,12 +62,6 @@ def test_the_svs_demo_through_preprocessing_and_lcmodel(tmp_path):
 # steps set a message and a value on the progress dialog they are handed, so a struct
 # stands in for it; and they run LCModel as ./lcmodel in the configured folder only where
 # computer() says MACI64, so it is made to
-COMPUTER = """
-    function varargout = computer(varargin)
-    [varargout{1:max(nargout, 1)}] = builtin('computer', varargin{:});
-    if nargin == 0, varargout{1} = 'MACI64'; end
-    end
-"""
 NATIVE = """
     addpath(genpath(fullfile(R, 'MRS4BRAIN_toolbox'))); addpath(genpath(F), '-end'); addpath(W);
     x = load(fullfile(R, 'MRS4BRAIN_toolbox', 'Others', 'SVS_config', ...
@@ -97,7 +91,7 @@ def test_the_svs_demo_gives_the_same_in_matlab(tmp_path):
     aligning the averages where Octave has MRSuite's."""
     from lcmodel_wrapper import binaries
 
-    from tests.octave.conftest import run_matlab
+    from tests.octave.conftest import COMPUTER, run_matlab
 
     (tmp_path / "computer.m").write_text(textwrap.dedent(COMPUTER).strip() + "\n")
     os.symlink(binaries.resolve_executable(), tmp_path / "lcmodel")

@@ -17,14 +17,17 @@
 #   imports   #
 #*************#
 import json
+import os
 import pathlib
 import subprocess
 import tempfile
 import textwrap
+from functools import lru_cache
 
 import numpy as np
 import pytest
 
+from mrsuite import externals
 from mrsuite.octave import shim_path
 
 from tests.conftest import MATLAB
@@ -37,9 +40,9 @@ EMIT = "fprintf('%s\\n', jsonencode(out));"
 #*********#
 #   run   #
 #*********#
-def _run(cmd):
+def _run(cmd, timeout=900):
     """Run an engine and return the ``out`` struct it printed, decoded."""
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     assert proc.returncode == 0, \
         f"{cmd[0]} failed:\n{proc.stdout[-2000:]}\n{proc.stderr[-2000:]}"
 
@@ -83,7 +86,33 @@ def run_octave(body, datafile=None):
 #************#
 #   matlab   #
 #************#
-def run_matlab(body, datafile=None):
+# An Apple-silicon MATLAB's computer() says MACA64, which code written before it does not
+# know (MRS4Brain's LCModel call, SPM12's platform table); this computer.m, in the folder a
+# run starts from, says MACI64, the same little-endian Unix. Every other form of the call
+# is MATLAB's own
+COMPUTER = """
+    function varargout = computer(varargin)
+    [varargout{1:max(nargout, 1)}] = builtin('computer', varargin{:});
+    if nargin == 0, varargout{1} = 'MACI64'; end
+    end
+"""
+
+
+@lru_cache(maxsize=None)
+def spm12_for_matlab():
+    """SPM12 with MEX files for this MATLAB. It ships them for Intel Macs, Linux and
+    Windows; for Apple silicon's (mexmaca64) its own Makefile builds them with MATLAB's mex,
+    beside its code in the checkout, all but its EEG/MEG externals' (as for Octave)."""
+    spm, bindir = externals.path("spm12"), pathlib.Path(os.path.realpath(MATLAB)).parent
+    mexext = subprocess.run([bindir / "mexext"], capture_output=True, text=True,
+                            check=True).stdout.strip()
+    if not (spm / f"spm_bsplinc.{mexext}").exists():
+        subprocess.run(["make", f"MEXEXT={mexext}", f"MEXBIN={bindir / 'mex'}", "install"],
+                       cwd=spm / "src", capture_output=True, check=True)
+    return spm
+
+
+def run_matlab(body, datafile=None, timeout=900):
     """Run ``body`` in MATLAB, with no shims on the path.
 
     MATLAB uses its own nlinfit/statset/sscanf, which is the entire point of comparing.
@@ -91,12 +120,13 @@ def run_matlab(body, datafile=None):
     Args:
         body (str): Script text that must define a struct named ``out``.
         datafile (Optional[str]): Path bound to ``DATAFILE`` before the body runs.
+        timeout (float): Seconds MATLAB may take.
 
     Returns:
         dict: The decoded ``out`` struct.
     """
     directory, stem = _script(body, datafile)
-    return _run([MATLAB, "-batch", f"addpath('{directory}'); {stem}"])
+    return _run([MATLAB, "-batch", f"addpath('{directory}'); {stem}"], timeout=timeout)
 
 
 #******************#

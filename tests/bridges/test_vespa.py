@@ -164,7 +164,7 @@ def test_the_wavelet_baseline_on_other_than_a_power_of_2_is_refused():
     data = gen_nifti_mrs(_singlets(n, dwell, f0), dwell, f0, nucleus="1H")
 
     with pytest.raises(ValueError, match="power of 2"):
-        vespa.fit(data, SINGLETS)
+        vespa.fit(data, SINGLETS, opts={"baseline_method": "wavelet_filter_basic"})
 
 
 #*************#
@@ -221,19 +221,21 @@ def test_a_prior_on_another_scale_gives_the_same_fit():
     data = gen_nifti_mrs(fid.reshape(1, 1, 1, -1).astype(np.complex64), dwell, f0,
                          nucleus="1H")
 
-    out = vespa.fit(data, {m: {"fid": f} for m, f in basis.items()},
-                    opts={"baseline_method": ""})
+    opts = {"baseline_method": ""}
+    out = vespa.fit(data, {m: {"fid": f} for m, f in basis.items()}, opts=opts)
 
     for name, amp in amps.items():
         assert out.conc("raw")[name] == pytest.approx(amp, rel=0.1), name
 
-    # Vespa's Area Scale Factor moves a start, and with it the 50-150% the area may take:
-    # Glx started at a fifth of the literature's cannot reach its amplitude
+    # Vespa's Area Scale Factor moves a start, and with it the share of it the area may
+    # take: Glx started at a fifth of where the start was matched cannot reach its amplitude
     low = vespa.fit(data, {m: {"fid": f, **({"area_scale": 0.2} if m == "Glx" else {})}
-                           for m, f in basis.items()}, opts={"baseline_method": ""})
+                           for m, f in basis.items()}, opts=opts)
 
     assert low.conc("raw")["Glx"] < 0.5 * amps["Glx"]
-    assert low.conc("raw")["NAA"] == pytest.approx(amps["NAA"], rel=0.1)
+    # NAA's start is untouched, its fit moves a little with Glx's misfit, through the
+    # lineshape all metabolites share
+    assert low.conc("raw")["NAA"] == pytest.approx(amps["NAA"], rel=0.15)
 
 
 #************#

@@ -35,6 +35,31 @@ NAMES = {"mI": "myo-inositol", "sI": "scyllo-inositol", "PE": "peamine", "Glc": 
          "tCr": "cr"}
 # the singlets Vespa's start values hang on, by its abbreviation, and their ppm
 REFERENCES = (("naa", 2.01), ("cr", 3.03), ("cho", 3.2))
+# Vespa's authors' own fit settings for in vivo short-TE sLASER with a macromolecule basis,
+# where they differ from the fit block's defaults (vespa/interfaces/inline/philips/presets/
+# preset_philips_slaser30_cmrr_spar_metab_withMmol.xml): its manual leaves the fit to be
+# tuned per protocol and saved as such a preset, which its batch scripts then apply. All
+# but its Gaussian lineshape: the block's Voigt takes Gaussian and Lorentzian lines alike
+# (on the 2016 challenge's Lorentzian ones, 0.114 against 0.155 mean error of the ratios)
+SETTINGS = {
+    "initial_small_peak_areas": "peak_3ppm",
+    "initial_linewidth_method": "deconvolution", "initial_linewidth_range_end": 3.4,
+    "initial_linewidth_fudge": 0.5, "initial_ko_points": 38,
+    "baseline_method": "bspline_fixed_knot", "baseline_underestimate": 95,
+    "baseline_underestimate_last": 75, "baseline_underestimate_steps": 2,
+    "baseline_spline_spacing": 180, "baseline_spline_order": 2, "baseline_wavelet_scale": 64,
+    "optimize_method": "lmfit_default", "optimize_scaling_flag": True,
+    "optimize_global_iterations": 3, "optimize_weights_width_factor": 50,
+    "optimize_weights_lipid_flag": True, "optimize_weights_lipid_end": 0.5,
+    "optimize_weights_small_peak_factor": 0.6, "optimize_bounds_area_max_small": 250,
+    "optimize_bounds_area_min_small": 40, "optimize_enable_bounds_area_small": True,
+    "optimize_bounds_range_ppm": 7, "optimize_bounds_range_ppm_small": 7,
+    "optimize_enable_bounds_ppm_small": True, "optimize_bounds_range_phase0": 5,
+    "optimize_bounds_range_phase1": 100}
+# the preset's pairs whose shifts move together, by the abbreviations of Vespa's metabolite
+# table: each only where the prior has both, since Vespa looks them up and fails without
+PAIRS = {"naa_naag": ("naa", "naag"), "cr_pcr": ("cr", "pcr"), "gpc_pcho": ("gpc", "pcho"),
+         "cr2_pcr2": ("cr2", "pcr2"), "glu_gln": ("glu", "gln"), "tau_glc": ("tau", "glc")}
 
 
 #*************#
@@ -71,25 +96,25 @@ def fit(data: Any, prior: Dict[str, Any], opts: Optional[Dict[str, Any]] = None)
             its spectrum above a tenth of its maximum. Optional per-metabolite keys
             steer the initial peak search: ``peak_ppm`` (defaults to the strongest line,
             or the spectrum's maximum) and ``search_ppm`` (default 0.1); ``area_scale``
-            (default 1) multiplies the metabolite's start area, Vespa's Area Scale
-            Factor, which its user turns until the start matches the data.
+            (default 1) multiplies the metabolite's Area Scale Factor as matched.
             Vespa starts NAA, Cr and Cho from a peak search and every other area from
-            NAA's by the literature concentrations of its metabolite table, read by
-            name, then searches each area within 50-150% of its start (its manual,
-            6.4.2 and 6.4.5). So the names matter: those of ``NAMES`` enter the table
-            as Vespa's own, any other unknown one starts at half of NAA. And so does
-            the scale, a proton having an area of 1 in Vespa's line lists: the prior
-            is brought to it by its reference singlet (NAA's, else Cr's, else Cho's)
-            and the areas are returned on the prior's own scale.
-        opts (Optional[dict]): Any fit-block setting by its Vespa name, applied onto the
-            block's defaults, e.g. ``{"baseline_method": "", "optimize_max_iterations":
-            500}``; ``{"optimize_bounds_area_min": 1e-6, "optimize_bounds_area_max":
-            1e5}`` opens the area bounds (percent of the start) for a metabolite that
-            may be absent or far from the literature. One default deviates from
-            Vespa's, a trap for headless runs: the Cramer-Rao noise window, at -8..-6
-            ppm outside a typical sweep width, is placed 0.5-2 ppm in from whichever
-            spectral edge lies farther from the prior's lines and the water (the
-            reference ppm).
+            a reference peak's by the literature concentrations of its metabolite
+            table, read by name, then searches each area only within a share of its
+            start (its manual, 6.4.2 and 6.4.5); its user turns each metabolite's Area
+            Scale Factor until the start lies on the data (A.6). So that is done here
+            (``_matched``) before the fit. The names matter too: those of ``NAMES``
+            enter the table as Vespa's own. And so does the scale, a proton having an
+            area of 1 in Vespa's line lists: the prior is brought to it by its
+            reference singlet (NAA's, else Cr's, else Cho's) and the areas are returned
+            on the prior's own scale.
+        opts (Optional[dict]): Any fit-block setting by its Vespa name, applied onto
+            ``SETTINGS``, Vespa's authors' own for short-TE sLASER with macromolecules,
+            and the shift constraints of ``PAIRS`` the prior has both of, e.g.
+            ``{"baseline_method": "", "optimize_max_iterations": 500}``. One setting
+            deviates from Vespa's, a trap for headless runs: the Cramer-Rao noise window,
+            at -8..-6 ppm outside a typical sweep width, is placed 0.5-2 ppm in from
+            whichever spectral edge lies farther from the prior's lines and the water
+            (the reference ppm).
         workers (int): Processes to spread a batch over (see ``mrsuite.core.parallel``).
 
     Returns:
@@ -100,8 +125,8 @@ def fit(data: Any, prior: Dict[str, Any], opts: Optional[Dict[str, Any]] = None)
     Raises:
         ValueError: If a spectrum is not a single FID, an option is not a fit-block
             setting, a sampled basis function is not on the data's points, the noise
-            window would hold signal, or the wavelet baseline (Vespa's default) is
-            asked of a spectrum whose length is not a power of 2: Vespa's filter
+            window would hold signal, or the wavelet baseline (the fit block's default)
+            is asked of a spectrum whose length is not a power of 2: Vespa's filter
             returns the largest power of 2 below it and the fit then fails to
             broadcast, and its zero fill multiplies by powers of 2 only, so choose
             ``"bspline_fixed_knot"`` or ``""`` (none) for such data.
@@ -179,7 +204,9 @@ def fit(data: Any, prior: Dict[str, Any], opts: Optional[Dict[str, Any]] = None)
     upfield, downfield = (edges[0] + 0.5, edges[0] + 2.0), (edges[1] - 2.0, edges[1] - 0.5)
     window = upfield if lowest - upfield[1] >= downfield[0] - highest else downfield
     block.set.cramer_rao_ppm_start, block.set.cramer_rao_ppm_end = window
-    for key, value in (opts or {}).items():
+    labels = {a.replace("-", "_") for a in dataset.prior_list_unique}   # as Vespa labels them
+    pairs = {f"optimize_constrain_ppm_{key}": set(pair) <= labels for key, pair in PAIRS.items()}
+    for key, value in {**SETTINGS, **pairs, **(opts or {})}.items():
         if not hasattr(block.set, key):
             raise ValueError(f"'{key}' is not a Vespa fit-block setting")
         setattr(block.set, key, value)
@@ -211,12 +238,65 @@ def fit(data: Any, prior: Dict[str, Any], opts: Optional[Dict[str, Any]] = None)
 
     voxel = (0, 0, 0)
     dataset.blocks["spectral"].chain.run([voxel], entry="all")
-    dataset.blocks["fit"].chain.run([voxel], entry="initial_only")
+    chain = dataset.blocks["fit"].chain
+    chain.run([voxel], entry="initial_only")
+    span = (lowest, max(max(prior[m]["ppms"]) for m in names))
+    matched = _matched(dataset, names, block.set.prior_area_scale, span)
+    block.set.prior_area_scale = [s * prior[m].get("area_scale", 1.0)
+                                  for s, m in zip(matched, names)]
     dataset.blocks["spectral"].set_do_fit(True, voxel)
     dataset.blocks["spectral"].chain.run([voxel], entry="all")
-    dataset.blocks["fit"].chain.run([voxel], entry="full_fit", do_init=True)
+    chain.run([voxel], entry="full_fit", do_init=True)
     return _result(names, block.fit_results[:, 0, 0, 0], block.cramer_rao[:, 0, 0, 0],
                    scale / proton)
+
+
+#*************#
+#   matched   #
+#*************#
+def _matched(dataset: Any, names: list, scales: list, span: tuple) -> list:
+    """The Area Scale Factors that lay Vespa's start on the data, as its user turns them
+    in the GUI until the start overlay matches (its manual, A.6): each metabolite as Vespa
+    models it at its start (the area derivatives of its model: unit-area spectra at the
+    start's lineshape, shifts and phases), scaled to the spectrum by least squares, the
+    areas non-negative, beside a smooth baseline (cubic B-splines, a knot every 0.5 ppm),
+    over the prior's lines. Under initial_small_peak_areas 'naa_ratio' (the fit block's
+    default) Vespa starts every area but NAA's at NAA's times a literature ratio, so NAA's
+    factor carries over to the others and is divided out of theirs; under 'peak_3ppm'
+    (``SETTINGS``) each start stands alone. An area matched to nothing keeps a twentieth
+    of its start: Vespa searches each area within a share of its start, and none of zero."""
+    from scipy.interpolate import BSpline
+    from scipy.optimize import lsq_linear
+    from vespa.analysis.constants import FitInitialSmallPeakAreas
+
+    chain = dataset.blocks["fit"].chain
+    m = len(names)
+    start = np.asarray(chain.initial_values[:m], float)
+    _, pder = chain.fit_function(chain.initial_values, nobase=True)
+    data = np.asarray(chain.data, complex)
+    lo, hi = sorted(int(round(float(dataset.ppm2pts(p)))) for p in (span[0] - 0.2, span[1] + 0.2))
+    rows = slice(max(lo, 0), min(hi, data.size - 1) + 1)
+    shapes = np.asarray(pder[:m, :data.size])[:, rows].T
+    x = np.arange(shapes.shape[0], dtype=float)
+    knots = max(int(round((span[1] - span[0] + 0.4) / 0.5)), 1)
+    edges = np.linspace(x[0], x[-1], knots + 1)
+    t = np.concatenate([[x[0]] * 3, edges, [x[-1]] * 3])
+    spline = BSpline.design_matrix(x, t, 3).toarray()
+    columns = np.hstack([shapes, spline, 1j * spline])
+    a = np.vstack([columns.real, columns.imag])
+    b = np.concatenate([data[rows].real, data[rows].imag])
+    lower = np.r_[np.zeros(m), np.full(2 * spline.shape[1], -np.inf)]
+    areas = lsq_linear(a, b, bounds=(lower, np.inf)).x[:m]
+
+    gain = np.where(start > 0, np.maximum(areas, start / 20.0) / np.where(start > 0, start, 1), 1.0)
+    table = dataset.user_prior.metinfo
+    naa = [i for i, n in enumerate(names)
+           if table.get_abbreviation(n.lower()) in ("naa", "naa+naag")]
+    ratio = dataset.blocks["fit"].set.initial_small_peak_areas == FitInitialSmallPeakAreas.NAA_RATIO
+    if ratio and naa:
+        carried = gain[naa[0]]
+        gain = np.array([g if i in naa else g / carried for i, g in enumerate(gain)])
+    return [float(s * g) for s, g in zip(scales, gain)]
 
 
 #*************#

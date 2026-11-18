@@ -27,7 +27,7 @@ dependencies = [
     "nifti-mrs-plus>=0.2.0",   # the shared batched NIfTI-MRS wrapper; 0.2 for set_provenance
     "spec2nii",       # mrsuite.io: raw scanner data to NIfTI-MRS
     "oct2py",         # bridges to the FID-A Octave sources in externals/fid-a
-    "lcmodel-wrapper>=0.3",   # drives the LCModel binary; 0.3 for __version__
+    "lcmodel-wrapper>=0.6",   # drives the LCModel binary; 0.6 leaves the omits to LCModel
     "tarquin-wrapper>=0.1",   # drives the TARQUIN binary
     "h5py",           # reads the MRSI challenge's basis set out of its .mat files
     "torch",          # the published models: WAND and the MLPs

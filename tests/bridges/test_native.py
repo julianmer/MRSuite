@@ -103,16 +103,14 @@ def own_tarquin(given: list, basis: str, out) -> dict:
 #*****************#
 def own_lcmodel(raw: str, points: int, dwell: float, mhz: float, basis: str, folder) -> dict:
     """The LCModel binary on a .RAW, with a control file as a user writes one: the
-    concentrations of its table. Of the fit it sets what PyLCModel's own sets: the range,
-    and LCModel's simulated lipids and macromolecules left out."""
+    concentrations of its table. Of the fit it sets what PyLCModel's own sets: the range;
+    the rest, its simulated lipids and macromolecules too, is LCModel's default."""
     from lcmodel_wrapper import binaries
-    from lcmodel_wrapper.control import DEFAULT_IGNORE
 
     control = ["$LCMODL", f"nunfil={points}", f"deltat={dwell}", f"hzpppm={mhz}",
                "ppmst=4.2", "ppmend=0.5", f"filbas='{basis}'", f"filraw='{raw}'",
                f"filtab='{folder / 'own.table'}'", "ltable=7", f"filps='{folder / 'own.ps'}'",
-               f"nomit={len(DEFAULT_IGNORE)}",
-               *(f"chomit({i + 1})='{name}'" for i, name in enumerate(DEFAULT_IGNORE)), "$END"]
+               "$END"]
     subprocess.run([binaries.resolve_executable()], input="\n".join(control).encode(),
                    cwd=folder, check=True, capture_output=True)
     # 'Conc.  %SD  /Cr+PCr  Metabolite', then a row each

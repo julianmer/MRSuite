@@ -440,7 +440,10 @@ def test_every_fit_takes_a_basis_set_as_its_basis_file(fitter, spectrum):
     assert own == written
     assert list(own) == list(original) and own, "the same metabolites, from the same functions"
     if fitter != "osprey":      # Osprey's fit swings under any change of the basis' last digit
-        assert np.allclose(list(own.values()), list(original.values()), rtol=0.05)
+        # LCModel's simulated lipids and macromolecules fit to near zero, where only an
+        # absolute tolerance means anything
+        assert np.allclose(list(own.values()), list(original.values()), rtol=0.05,
+                           atol=0.01 * max(original.values()))
 
 
 #*************#

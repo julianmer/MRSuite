@@ -37,6 +37,49 @@ METABOLITES = {"Cr+PCr": 3.03, "Glu+Gln": 2.25, "GPC+PCh": 3.2, "Ins": 3.52, "La
                "Lip13a": 1.3, "Lip13b": 1.3, "Lip13a+Lip13b": 1.3, "NAA+NAAG": 2.02}
 
 
+# what the GUI's buttons call, in order (see maps): the bridge runs it under Octave, and the
+# tests run it in MATLAB as it is, to compare
+GUI = """
+        spm('defaults', 'fmri');
+        Pinfo = loadfile('{spar}', ['{spectra}' filesep]);
+        Metname = {names}; ppm = {ppm};
+        for n = 1:numel(Metname)
+            Metabolites(n).no = n; Metabolites(n).name = Metname{{n}}; Metabolites(n).ppm = ppm(n);
+        end
+        RFOV_dir = 'RL';
+        coreg_path = [Pinfo.spectrapath filesep 'nifti' filesep 'coreg_binary_mask'];
+        if ~exist(coreg_path, 'dir'), mkdir(coreg_path); end
+        Pinfo.MRI = [Pinfo.mainpath 'exam_1' filesep 'images' filesep 'T1' filesep 'nifti' ...
+                     filesep Pinfo.name '_Bet.nii.gz'];
+        Pinfo = Mask_FOV_run_Pinfo(Pinfo, [coreg_path filesep Pinfo.sparname '_FOV_mask.nii'], ...
+                                   RFOV_dir);
+        for k = 1:numel(Metabolites)
+            press = [coreg_path filesep Pinfo.sparname '_' Metabolites(k).name '_PressBox_mask.nii'];
+            Pinfo = Mask_Press_run_Pinfo(Pinfo, k, press, 0, 0, 0, RFOV_dir);
+        end
+        litoutpath = [Pinfo.spectrapath filesep 'nifti' filesep 'binary_mask_littlevoxels'];
+        if ~exist(litoutpath, 'dir'), mkdir(litoutpath); end
+        cs = struct('no', num2cell(zeros(1, numel(Metabolites))));
+        [Pinfo, AllFWHM, AllSNR, AllNumStd, AllConc] = GUI_seg([], Metabolites, Pinfo, cs, cs, ...
+            cs, 'Off', 'T1w-MRI', litoutpath, RFOV_dir, 'Pre-defined maps (Above)', '', 0);
+        Map_fcsf_Generation(Pinfo, Pinfo.frac_CSF, coreg_path, Metabolites);
+        Map_fgm_Generation(Pinfo, Pinfo.frac_GM, coreg_path, Metabolites);
+        Map_fwm_Generation(Pinfo, Pinfo.frac_WM, coreg_path, Metabolites);
+        Conc_SNR_Generation(Pinfo, AllSNR, coreg_path, Metabolites);
+        Conc_FWHM_Generation(Pinfo, AllFWHM, coreg_path, Metabolites);
+        Conc_CRLB_Generation(Pinfo, AllNumStd, coreg_path, Metabolites, 'NAA');
+        Exc_struct.value = [{fcsf} {snr} {fwhm} {crlb}];
+        Exc_struct.name = {{'fcsf', 'SNR', 'FWHM', 'CRLB'}};
+        outmat = [Pinfo.mainpath 'exam_1' filesep 'spectra' filesep 'MAT'];
+        if ~exist(outmat, 'dir'), mkdir(outmat); end
+        includedvoxels = ExclusionCriteria(Pinfo, AllFWHM, AllSNR, AllNumStd, Metname, ...
+                                           Metabolites, outmat, Exc_struct);
+        Conc_Map_Generation(Pinfo, AllConc, coreg_path, Metabolites, includedvoxels);
+        Conc_to_Ratio_Maps(Pinfo);
+        mrsuite_included = squeeze(sum(sum(sum(includedvoxels, 2), 3), 4));
+"""
+
+
 #**************************************************************************************************#
 #                                            Class Maps                                            #
 #**************************************************************************************************#
@@ -111,45 +154,8 @@ def maps(patient: str, output: str, fcsf: float = 0.3, snr: float = 8.0, fwhm: f
     build_spm12(str(externals.ensure("spm12")), runtime=toolbox._runtime)
     names = "{" + " ".join(f"'{m}'" for m in METABOLITES) + "}"
     ppm = "[" + " ".join(str(p) for p in METABOLITES.values()) + "]"
-    toolbox.run(f"""
-        spm('defaults', 'fmri');
-        Pinfo = loadfile('{spar}', ['{spectra}' filesep]);
-        Metname = {names}; ppm = {ppm};
-        for n = 1:numel(Metname)
-            Metabolites(n).no = n; Metabolites(n).name = Metname{{n}}; Metabolites(n).ppm = ppm(n);
-        end
-        RFOV_dir = 'RL';
-        coreg_path = [Pinfo.spectrapath filesep 'nifti' filesep 'coreg_binary_mask'];
-        if ~exist(coreg_path, 'dir'), mkdir(coreg_path); end
-        Pinfo.MRI = [Pinfo.mainpath 'exam_1' filesep 'images' filesep 'T1' filesep 'nifti' ...
-                     filesep Pinfo.name '_Bet.nii.gz'];
-        Pinfo = Mask_FOV_run_Pinfo(Pinfo, [coreg_path filesep Pinfo.sparname '_FOV_mask.nii'], ...
-                                   RFOV_dir);
-        for k = 1:numel(Metabolites)
-            press = [coreg_path filesep Pinfo.sparname '_' Metabolites(k).name '_PressBox_mask.nii'];
-            Pinfo = Mask_Press_run_Pinfo(Pinfo, k, press, 0, 0, 0, RFOV_dir);
-        end
-        litoutpath = [Pinfo.spectrapath filesep 'nifti' filesep 'binary_mask_littlevoxels'];
-        if ~exist(litoutpath, 'dir'), mkdir(litoutpath); end
-        cs = struct('no', num2cell(zeros(1, numel(Metabolites))));
-        [Pinfo, AllFWHM, AllSNR, AllNumStd, AllConc] = GUI_seg([], Metabolites, Pinfo, cs, cs, ...
-            cs, 'Off', 'T1w-MRI', litoutpath, RFOV_dir, 'Pre-defined maps (Above)', '', 0);
-        Map_fcsf_Generation(Pinfo, Pinfo.frac_CSF, coreg_path, Metabolites);
-        Map_fgm_Generation(Pinfo, Pinfo.frac_GM, coreg_path, Metabolites);
-        Map_fwm_Generation(Pinfo, Pinfo.frac_WM, coreg_path, Metabolites);
-        Conc_SNR_Generation(Pinfo, AllSNR, coreg_path, Metabolites);
-        Conc_FWHM_Generation(Pinfo, AllFWHM, coreg_path, Metabolites);
-        Conc_CRLB_Generation(Pinfo, AllNumStd, coreg_path, Metabolites, 'NAA');
-        Exc_struct.value = [{float(fcsf)} {float(snr)} {float(fwhm)} {float(crlb)}];
-        Exc_struct.name = {{'fcsf', 'SNR', 'FWHM', 'CRLB'}};
-        outmat = [Pinfo.mainpath 'exam_1' filesep 'spectra' filesep 'MAT'];
-        if ~exist(outmat, 'dir'), mkdir(outmat); end
-        includedvoxels = ExclusionCriteria(Pinfo, AllFWHM, AllSNR, AllNumStd, Metname, ...
-                                           Metabolites, outmat, Exc_struct);
-        Conc_Map_Generation(Pinfo, AllConc, coreg_path, Metabolites, includedvoxels);
-        Conc_to_Ratio_Maps(Pinfo);
-        mrsuite_included = squeeze(sum(sum(sum(includedvoxels, 2), 3), 4));
-    """, copy)
+    toolbox.run(GUI.format(spar=spar, spectra=spectra, names=names, ppm=ppm, fcsf=float(fcsf),
+                           snr=float(snr), fwhm=float(fwhm), crlb=float(crlb)), copy)
     included = np.ravel(toolbox.octave.pull("mrsuite_included"))
 
     stem = os.path.splitext(spar)[0] + "_"

@@ -507,3 +507,59 @@ def test_a_fit_keeps_the_curves_osprey_drew(spectrum):
     assert np.linalg.norm(data - fit) < 0.2 * np.linalg.norm(data)
     peak = np.abs(np.fft.fft(np.asarray(spectrum[:]).ravel())).max()   # the data's units
     assert 0.8 * peak < data.max() < 1.25 * peak
+
+
+#************#
+#   matlab   #
+#************#
+# Osprey's own job pipeline, as its example job runs it, on its Philips PRESS example: a job
+# file of its kind for sub-01 alone, and no T1
+JOB = """
+seqType = 'unedited'; editTarget = {{'none'}}; dataScenario = 'invivo';
+opts.SpecReg = 'RobSpecReg'; opts.SubSpecAlignment.mets = 'L2Norm';
+opts.ECC.raw = 1; opts.ECC.mm = 1;
+opts.saveLCM = 0; opts.savejMRUI = 0; opts.saveVendor = 0; opts.saveNII = 0; opts.savePDF = 0;
+opts.exportParams.flag = 0; opts.exportParams.path = '';
+opts.fit.includeMetabs = {{'default'}}; opts.fit.method = 'Osprey'; opts.fit.style = 'Separate';
+opts.fit.range = [0.5 4]; opts.fit.rangeWater = [2.0 7.4]; opts.fit.bLineKnotSpace = 0.4;
+opts.fit.fitMM = 1; opts.img.deface = 1;
+files = {{'{act}'}}; files_ref = {{'{ref}'}}; files_w = {{}}; files_mm = {{}}; files_nii = {{}};
+file_stat = ''; outputFolder = '{out}';
+"""
+PRESS = OSPREY_ROOT / "exampledata" / "sdat" / "UnEdited" / "sub-01" / "ses-01" / "mrs"
+
+
+@pytest.mark.skipif(not PRESS.is_dir(), reason="osprey not fetched")
+def test_the_fit_gives_what_ospreys_own_pipeline_gives_in_matlab(tmp_path, monkeypatch):
+    """OspreyJob, OspreyLoad, OspreyProcess and OspreyFit in MATLAB, with SPM12 on the path
+    as Osprey's toolbox check asks; then the bridge, on MATLAB too, given the spectrum and
+    the basis set that pipeline fitted, and Osprey's ppm at the centre, which it keeps in
+    its struct and not in its NIfTI-MRS header. One interpreter on both sides: Osprey's fit
+    moves with the last digit of its input (see the Octave pins)."""
+    pytest.importorskip("matlab.engine")
+    from mrsuite.bridges import osprey
+    from tests.octave.conftest import spm12_for_matlab
+
+    (tmp_path / "jobPRESS.m").write_text(JOB.format(
+        act=PRESS / "sub-01_ses-01_press" / "sub-01_PRESS_35_act.sdat",
+        ref=PRESS / "sub-01_ses-01_press-ref" / "sub-01_PRESS_35_ref.sdat",
+        out=tmp_path / "derivatives"))
+    bridge = osprey.OspreyBridge(runtime="matlab")
+    monkeypatch.setattr(osprey, "bridge", bridge)
+    session = bridge.octave
+    session.eval(f"addpath('{spm12_for_matlab()}'); cd('{tmp_path}'); "
+                 f"MRSCont = OspreyFit(OspreyProcess(OspreyLoad(OspreyJob('jobPRESS.m'))));")
+    session.eval("mrsuite_data = MRSCont.processed.metab{1}; mrsuite_basis = MRSCont.fit.basisSet; "
+                 "mrsuite_own = MRSCont.fit.results.metab.fitParams{1}.ampl; "
+                 "mrsuite_scale = MRSCont.fit.scale; "
+                 "if iscell(mrsuite_scale), mrsuite_scale = mrsuite_scale{1}; end")
+    data = session.pull("mrsuite_data")
+    bridge.centre_ppm = float(np.ravel(data["centerFreq"])[0])
+    own = np.ravel(session.pull("mrsuite_own"))
+
+    ours = osprey.fit(bridge.codec.fida2nifti(data), session.pull("mrsuite_basis"),
+                      fit_opts={"range": [0.5, 4.0]})
+
+    assert ours.raw["scale"] == pytest.approx(float(np.ravel(session.pull("mrsuite_scale"))[0]))
+    np.testing.assert_allclose(np.ravel(ours.raw["fitParams"]["ampl"]), own, rtol=1e-9,
+                               atol=1e-12)

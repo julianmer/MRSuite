@@ -382,7 +382,7 @@ _SPECVIS = ("from mrsuite.bridges import specvis",)
 _MEASURES = "['tNAA', 'tCho', 'Ins', 'Glx']"
 
 # what a toolbox's own standard pipeline passes where its function has no default of its own
-# (FID-A at 1eaa207, Osprey at 98b2e35, plain single-voxel 1H): a new block's form starts with
+# (FID-A at 1eaa207, Osprey at f8ab1e3, plain single-voxel 1H): a new block's form starts with
 # them, so it runs as the toolbox runs it, and the script says so. Zero-filling and line
 # broadening are not here: FID-A's scripts apply them only to a copy they estimate from.
 PIPELINE: Dict[Tuple[str, str], Tuple[Dict[str, Any], str]] = {
